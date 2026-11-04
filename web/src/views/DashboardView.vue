@@ -29,7 +29,7 @@
               <q-item-section avatar>
                 <q-icon name="fas fa-home" />
               </q-item-section>
-              <q-item-section>All Clients</q-item-section>
+              <q-item-section>{{ t("nav.allClients") }}</q-item-section>
             </q-item>
             <q-tree
               ref="tree"
@@ -251,19 +251,19 @@
                 align="left"
                 narrow-indicator
               >
-                <q-tab name="server" icon="fas fa-server" label="Servers" />
+                <q-tab name="server" icon="fas fa-server" :label="t('nav.servers')" />
                 <q-tab
                   name="workstation"
                   icon="computer"
-                  label="Workstations"
+                  :label="t('nav.workstations')"
                 />
-                <q-tab name="mixed" label="Mixed" />
+                <q-tab name="mixed" :label="t('dash.mixed')" />
               </q-tabs>
               <q-space />
               <q-input
                 v-model="search"
                 style="width: 450px"
-                label="Search"
+                :label="t('dash.search')"
                 dense
                 outlined
                 clearable
@@ -283,7 +283,7 @@
                   >
                     <q-menu>
                       <q-list dense>
-                        <q-item-label header>Filter Agent Table</q-item-label>
+                        <q-item-label header>{{ t("dash.filterTable") }}</q-item-label>
 
                         <q-item>
                           <q-item-section side>
@@ -291,7 +291,7 @@
                           </q-item-section>
 
                           <q-item-section>
-                            <q-item-label>Checks Failing</q-item-label>
+                            <q-item-label>{{ t("dash.checksFailing") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -301,7 +301,7 @@
                           </q-item-section>
 
                           <q-item-section>
-                            <q-item-label>Patches Pending</q-item-label>
+                            <q-item-label>{{ t("dash.patchesPending") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -311,7 +311,7 @@
                           </q-item-section>
 
                           <q-item-section>
-                            <q-item-label>Actions Pending</q-item-label>
+                            <q-item-label>{{ t("dash.actionsPending") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -321,11 +321,11 @@
                           </q-item-section>
 
                           <q-item-section>
-                            <q-item-label>Reboot Needed</q-item-label>
+                            <q-item-label>{{ t("dash.rebootNeeded") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
-                        <q-item-label header>Availability</q-item-label>
+                        <q-item-label header>{{ t("kpi.availability") }}</q-item-label>
 
                         <q-item>
                           <q-item-section side>
@@ -333,7 +333,7 @@
                           </q-item-section>
 
                           <q-item-section>
-                            <q-item-label>Show All Agents</q-item-label>
+                            <q-item-label>{{ t("dash.showAllAgents") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -346,7 +346,7 @@
                           </q-item-section>
 
                           <q-item-section>
-                            <q-item-label>Show Online Only</q-item-label>
+                            <q-item-label>{{ t("dash.showOnlineOnly") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -359,7 +359,7 @@
                           </q-item-section>
 
                           <q-item-section>
-                            <q-item-label>Show Offline Only</q-item-label>
+                            <q-item-label>{{ t("dash.showOfflineOnly") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -372,7 +372,7 @@
                           </q-item-section>
 
                           <q-item-section>
-                            <q-item-label>Show Overdue Only</q-item-label>
+                            <q-item-label>{{ t("dash.showOverdueOnly") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -385,9 +385,7 @@
                           </q-item-section>
 
                           <q-item-section>
-                            <q-item-label
-                              >Show Offline for over 30 days</q-item-label
-                            >
+                            <q-item-label>{{ t("dash.showOffline30Days") }}</q-item-label>
                           </q-item-section>
                         </q-item>
                       </q-list>
@@ -396,14 +394,14 @@
                         <div class="column">
                           <q-btn
                             v-close-popup
-                            label="Apply"
+                            :label="t('dash.apply')"
                             color="primary"
                             @click="applyFilter"
                           />
                         </div>
                         <q-space />
                         <div class="column">
-                          <q-btn label="Clear" @click="clearFilter" />
+                          <q-btn :label="t('dash.clear')" @click="clearFilter" />
                         </div>
                       </div>
                     </q-menu>
@@ -413,7 +411,7 @@
             </div>
             <AgentTable
               :agents="filteredAgents"
-              :columns="columns"
+              :columns="localizedColumns"
               :search="search"
               :visibleColumns="visibleColumns"
             />
@@ -457,6 +455,7 @@ import AlertTemplateAdd from "@/components/modals/alerts/AlertTemplateAdd.vue";
 import IntegrationsContextMenu from "@/components/ui/IntegrationsContextMenu.vue";
 
 import { removeClient, removeSite } from "@/api/clients";
+import { t } from "@/i18n";
 
 export default {
   name: "DashboardView",
@@ -649,6 +648,7 @@ export default {
     },
   },
   methods: {
+    t,
     getTree() {
       this.$store.dispatch("loadTree");
     },
@@ -904,6 +904,20 @@ export default {
         this.filterChecksFailing ||
         this.filterRebootNeeded ||
         this.filterAvailability !== "all"
+      );
+    },
+    localizedColumns() {
+      const labelMap = {
+        client_name: this.t("dash.colClient"),
+        site_name: this.t("dash.colSite"),
+        hostname: this.t("dash.colHostname"),
+        description: this.t("dash.colDescription"),
+        user: this.t("dash.colUser"),
+        last_seen: this.t("dash.colLastSeen"),
+        boot_time: this.t("dash.colBootTime"),
+      };
+      return this.columns.map((col) =>
+        labelMap[col.name] ? { ...col, label: labelMap[col.name] } : col,
       );
     },
   },

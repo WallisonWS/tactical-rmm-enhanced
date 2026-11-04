@@ -5,14 +5,14 @@
       <q-item-section side>
         <q-icon size="xs" name="fas fa-edit" />
       </q-item-section>
-      <q-item-section>Edit {{ agent.hostname }}</q-item-section>
+      <q-item-section>{{ t("menu.edit") }} {{ agent.hostname }}</q-item-section>
     </q-item>
     <!-- agent pending actions -->
     <q-item clickable v-close-popup @click="showPendingActionsModal(agent)">
       <q-item-section side>
         <q-icon size="xs" name="far fa-clock" />
       </q-item-section>
-      <q-item-section>Pending Agent Actions</q-item-section>
+      <q-item-section>{{ t("menu.pendingActions") }}</q-item-section>
     </q-item>
     <!-- take control -->
     <q-item
@@ -25,7 +25,7 @@
         <q-icon size="xs" name="fas fa-desktop" />
       </q-item-section>
 
-      <q-item-section>Take Control</q-item-section>
+      <q-item-section>{{ t("menu.takeControl") }}</q-item-section>
     </q-item>
 
     <!-- vnc -->
@@ -46,7 +46,7 @@
       <q-item-section side>
         <q-icon size="xs" name="open_in_new" />
       </q-item-section>
-      <q-item-section>Run URL Action</q-item-section>
+      <q-item-section>{{ t("menu.runUrlAction") }}</q-item-section>
       <q-item-section side>
         <q-icon name="keyboard_arrow_right" />
       </q-item-section>
@@ -72,21 +72,21 @@
       <q-item-section side>
         <q-icon size="xs" name="fas fa-terminal" />
       </q-item-section>
-      <q-item-section>Send Command</q-item-section>
+      <q-item-section>{{ t("menu.sendCommand") }}</q-item-section>
     </q-item>
 
     <q-item clickable v-ripple v-close-popup @click="showRunScript(agent)">
       <q-item-section side>
         <q-icon size="xs" name="fas fa-terminal" />
       </q-item-section>
-      <q-item-section>Run Script</q-item-section>
+      <q-item-section>{{ t("menu.runScript") }}</q-item-section>
     </q-item>
 
     <q-item clickable v-ripple :disable="favoriteScripts.length === 0">
       <q-item-section side>
         <q-icon size="xs" name="star" />
       </q-item-section>
-      <q-item-section>Run Favorited Script</q-item-section>
+      <q-item-section>{{ t("menu.runFavScript") }}</q-item-section>
       <q-item-section side>
         <q-icon name="keyboard_arrow_right" />
       </q-item-section>
@@ -114,7 +114,7 @@
       <q-item-section side>
         <q-icon size="xs" name="terminal" />
       </q-item-section>
-      <q-item-section>Remote Background</q-item-section>
+      <q-item-section>{{ t("menu.remoteBg") }}</q-item-section>
     </q-item>
 
     <!-- maintenance mode -->
@@ -125,8 +125,8 @@
       <q-item-section>
         {{
           agent.maintenance_mode
-            ? "Disable Maintenance Mode"
-            : "Enable Maintenance Mode"
+            ? t("menu.disableMaint")
+            : t("menu.enableMaint")
         }}
       </q-item-section>
     </q-item>
@@ -136,7 +136,7 @@
       <q-item-section side>
         <q-icon size="xs" name="system_update" />
       </q-item-section>
-      <q-item-section>Patch Management</q-item-section>
+      <q-item-section>{{ t("menu.patchMgmt") }}</q-item-section>
       <q-item-section side>
         <q-icon name="keyboard_arrow_right" />
       </q-item-section>
@@ -144,10 +144,10 @@
       <q-menu auto-close anchor="top right" self="top left">
         <q-list dense style="min-width: 100px">
           <q-item clickable v-ripple @click="runPatchStatusScan(agent)">
-            <q-item-section>Run Patch Status Scan</q-item-section>
+            <q-item-section>{{ t("menu.scanPatches") }}</q-item-section>
           </q-item>
           <q-item clickable v-ripple @click="installPatches(agent)">
-            <q-item-section>Install Patches Now</q-item-section>
+            <q-item-section>{{ t("menu.installPatches") }}</q-item-section>
           </q-item>
         </q-list>
       </q-menu>
@@ -157,7 +157,7 @@
       <q-item-section side>
         <q-icon size="xs" name="fas fa-check-double" />
       </q-item-section>
-      <q-item-section>Run Checks</q-item-section>
+      <q-item-section>{{ t("menu.runChecks") }}</q-item-section>
     </q-item>
 
     <!-- Autonomous Self-Heal & Winget Quick Menu -->
@@ -165,7 +165,7 @@
       <q-item-section side>
         <q-icon size="xs" name="auto_fix_high" />
       </q-item-section>
-      <q-item-section>Self-Heal &amp; Winget</q-item-section>
+      <q-item-section>{{ t("menu.enhancedTools") }}</q-item-section>
       <q-item-section side>
         <q-icon name="keyboard_arrow_right" />
       </q-item-section>
@@ -211,14 +211,14 @@
       <q-item-section side>
         <q-icon size="xs" name="offline_bolt" />
       </q-item-section>
-      <q-item-section>Wake-Up (WoL)</q-item-section>
+      <q-item-section>{{ t("menu.wakeUp") }}</q-item-section>
     </q-item>
 
     <q-item clickable>
       <q-item-section side>
         <q-icon size="xs" name="power_settings_new" />
       </q-item-section>
-      <q-item-section>Reboot</q-item-section>
+      <q-item-section>{{ t("menu.reboot") }}</q-item-section>
       <q-item-section side>
         <q-icon name="keyboard_arrow_right" />
       </q-item-section>
@@ -227,11 +227,11 @@
         <q-list dense style="min-width: 100px">
           <!-- reboot now -->
           <q-item clickable v-ripple @click="rebootNow(agent)">
-            <q-item-section>Now</q-item-section>
+            <q-item-section>{{ t("menu.rebootNow") }}</q-item-section>
           </q-item>
           <!-- reboot later -->
           <q-item clickable v-ripple @click="showRebootLaterModal(agent)">
-            <q-item-section>Later</q-item-section>
+            <q-item-section>{{ t("menu.rebootLater") }}</q-item-section>
           </q-item>
         </q-list>
       </q-menu>
@@ -241,14 +241,14 @@
       <q-item-section side>
         <q-icon size="xs" name="power" />
       </q-item-section>
-      <q-item-section>Shutdown</q-item-section>
+      <q-item-section>{{ t("menu.shutdown") }}</q-item-section>
     </q-item>
 
     <q-item clickable v-close-popup @click="showPolicyAdd(agent)">
       <q-item-section side>
         <q-icon size="xs" name="policy" />
       </q-item-section>
-      <q-item-section>Assign Automation Policy</q-item-section>
+      <q-item-section>{{ t("menu.assignPolicy") }}</q-item-section>
     </q-item>
 
     <q-item
@@ -262,7 +262,7 @@
       <q-item-section side>
         <q-icon size="xs" name="analytics" />
       </q-item-section>
-      <q-item-section>Reporting</q-item-section>
+      <q-item-section>{{ t("filebar.reporting") }}</q-item-section>
       <q-item-section side>
         <q-icon name="keyboard_arrow_right" />
       </q-item-section>
@@ -273,14 +273,14 @@
       <q-item-section side>
         <q-icon size="xs" name="fas fa-first-aid" />
       </q-item-section>
-      <q-item-section>Agent Recovery</q-item-section>
+      <q-item-section>{{ t("menu.agentRecovery") }}</q-item-section>
     </q-item>
 
     <q-item clickable v-close-popup @click="pingAgent(agent)">
       <q-item-section side>
         <q-icon size="xs" name="delete" />
       </q-item-section>
-      <q-item-section>Remove Agent</q-item-section>
+      <q-item-section>{{ t("menu.removeAgent") }}</q-item-section>
     </q-item>
 
     <q-separator />
@@ -295,6 +295,7 @@
 import { ref, inject, onMounted } from "vue";
 import { useStore } from "vuex";
 import { useQuasar } from "quasar";
+import { t } from "@/i18n";
 import { fetchURLActions, runURLAction } from "@/api/core";
 import {
   editAgent,
@@ -727,6 +728,7 @@ export default {
       quickDownloadRDP,
       quickAdminAction,
       quickSendUserNotice,
+      t,
     };
   },
 };
