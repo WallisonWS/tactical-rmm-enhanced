@@ -48,6 +48,16 @@ urlpatterns = [
         views_enhanced.AgentAIDiagnosticsView.as_view(),
         name="agent_ai_diagnostics",
     ),
+    path(
+        "<agent:agent_id>/ha-link/",
+        views_enhanced.AgentHALinkWatchdogView.as_view(),
+        name="agent_ha_link_watchdog",
+    ),
+    path(
+        "<agent:agent_id>/rdp/",
+        views_enhanced.AgentRDPManagerView.as_view(),
+        name="agent_rdp_manager",
+    ),
     # agent views
     path("", views.GetAgents.as_view()),
     path("<agent:agent_id>/", views.GetUpdateDeleteAgent.as_view()),

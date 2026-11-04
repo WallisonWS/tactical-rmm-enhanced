@@ -57,7 +57,7 @@
           @click="$router.push({ name: 'Dashboard' })"
           icon="dashboard"
         >
-          <q-tooltip>Back to Dashboard</q-tooltip>
+          <q-tooltip>{{ t("nav.backToDashboard") }}</q-tooltip>
         </q-btn>
         <q-toolbar-title>
           Tactical RMM<span class="text-overline q-ml-sm"
@@ -84,6 +84,8 @@
             >SSL certificate expires in {{ daysUntilCertExpires }} days</q-chip
           >
         </q-toolbar-title>
+        <!-- Language Switcher Icon (Português / English / Español) -->
+        <LanguageSwitcher />
         <!-- temp dark mode toggle -->
         <q-toggle
           v-model="darkMode"
@@ -105,19 +107,19 @@
         <q-chip class="cursor-pointer">
           <q-avatar size="md" icon="devices" color="primary" />
           <q-tooltip :delay="600" anchor="top middle" self="top middle"
-            >Agent Count</q-tooltip
+            >{{ t("nav.agentCount") }}</q-tooltip
           >
           {{ serverCount + workstationCount }}
           <q-menu>
             <q-list dense>
-              <q-item-label header>Servers</q-item-label>
+              <q-item-label header>{{ t("nav.servers") }}</q-item-label>
               <q-item>
                 <q-item-section avatar>
                   <q-icon name="dns" size="sm" color="primary" />
                 </q-item-section>
 
                 <q-item-section no-wrap>
-                  <q-item-label>Total: {{ serverCount }}</q-item-label>
+                  <q-item-label>{{ t("nav.total") }}: {{ serverCount }}</q-item-label>
                 </q-item-section>
               </q-item>
               <q-item>
@@ -130,17 +132,17 @@
                 </q-item-section>
 
                 <q-item-section no-wrap>
-                  <q-item-label>Offline: {{ serverOfflineCount }}</q-item-label>
+                  <q-item-label>{{ t("nav.offline") }}: {{ serverOfflineCount }}</q-item-label>
                 </q-item-section>
               </q-item>
-              <q-item-label header>Workstations</q-item-label>
+              <q-item-label header>{{ t("nav.workstations") }}</q-item-label>
               <q-item>
                 <q-item-section avatar>
                   <q-icon name="computer" size="sm" color="primary" />
                 </q-item-section>
 
                 <q-item-section no-wrap>
-                  <q-item-label>Total: {{ workstationCount }}</q-item-label>
+                  <q-item-label>{{ t("nav.total") }}: {{ workstationCount }}</q-item-label>
                 </q-item-section>
               </q-item>
               <q-item>
@@ -154,7 +156,7 @@
 
                 <q-item-section no-wrap>
                   <q-item-label
-                    >Offline: {{ workstationOfflineCount }}</q-item-label
+                    >{{ t("nav.offline") }}: {{ workstationOfflineCount }}</q-item-label
                   >
                 </q-item-section>
               </q-item>
@@ -173,11 +175,11 @@
               v-close-popup
             >
               <q-item-section>
-                <q-item-label>Preferences</q-item-label>
+                <q-item-label>{{ t("nav.preferences") }}</q-item-label>
               </q-item-section>
             </q-item>
             <q-item clickable>
-              <q-item-section>Account</q-item-section>
+              <q-item-section>{{ t("nav.account") }}</q-item-section>
               <q-item-section side>
                 <q-icon name="keyboard_arrow_right" />
               </q-item-section>
@@ -191,12 +193,12 @@
                     v-close-popup
                   >
                     <q-item-section>
-                      <q-item-label>Reset Password</q-item-label>
+                      <q-item-label>{{ t("nav.resetPassword") }}</q-item-label>
                     </q-item-section>
                   </q-item>
                   <q-item clickable v-ripple @click="reset2FA" v-close-popup>
                     <q-item-section>
-                      <q-item-label>Reset 2FA</q-item-label>
+                      <q-item-label>{{ t("nav.reset2fa") }}</q-item-label>
                     </q-item-section>
                   </q-item>
                 </q-list>
@@ -204,7 +206,7 @@
             </q-item>
             <q-item to="/expired" exact>
               <q-item-section>
-                <q-item-label>Logout</q-item-label>
+                <q-item-label>{{ t("nav.logout") }}</q-item-label>
               </q-item-section>
             </q-item>
           </q-list>
@@ -226,6 +228,7 @@ import { useAuthStore } from "@/stores/auth";
 import { storeToRefs } from "pinia";
 import { resetTwoFactor } from "@/api/accounts";
 import { notifyError, notifySuccess } from "@/utils/notify";
+import { useI18n } from "@/i18n";
 import axios from "axios";
 
 // webtermn
@@ -233,9 +236,11 @@ import { checkWebTermPerms, openWebTerminal } from "@/api/core";
 
 // ui imports
 import AlertsIcon from "@/components/AlertsIcon.vue";
+import LanguageSwitcher from "@/components/LanguageSwitcher.vue";
 import UserPreferences from "@/components/modals/coresettings/UserPreferences.vue";
 import ResetPass from "@/components/accounts/ResetPass.vue";
 
+const { t } = useI18n();
 const store = useStore();
 const $q = useQuasar();
 

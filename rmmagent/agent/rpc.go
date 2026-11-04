@@ -1471,6 +1471,47 @@ func (a *Agent) RunRPC() {
 				_ = ret.Encode(smart)
 				msg.Respond(resp)
 			}()
+
+		case "ha_link_health":
+			go func() {
+				defer a.recoverFilesRPC("ha_link_health", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				health := a.CheckLinkAndMeshHealth()
+				_ = ret.Encode(health)
+				msg.Respond(resp)
+			}()
+
+		case "ha_mesh_repair":
+			go func() {
+				defer a.recoverFilesRPC("ha_mesh_repair", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				repair := a.RepairMeshAndLink()
+				_ = ret.Encode(repair)
+				msg.Respond(resp)
+			}()
+
+		case "rdp_status":
+			go func() {
+				defer a.recoverFilesRPC("rdp_status", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				rdp := a.GetRDPStatusAndSessions()
+				_ = ret.Encode(rdp)
+				msg.Respond(resp)
+			}()
+
+		case "rdp_manage":
+			go func(p *NatsMsg) {
+				defer a.recoverFilesRPC("rdp_manage", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				enforceNLA := p.Data["enforce_nla"] != "false"
+				res := a.ManageCorporateRDP(p.Data["action"], enforceNLA, p.Data["session_id"])
+				_ = ret.Encode(res)
+				msg.Respond(resp)
+			}(payload)
 		}
 	})
 

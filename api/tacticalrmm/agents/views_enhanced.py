@@ -537,3 +537,126 @@ class FleetExecutiveSummaryView(APIView):
                 "timestamp": djangotime.now().isoformat(),
             }
         )
+
+
+class AgentHALinkWatchdogView(APIView):
+    """
+    GET /agents/<agent_id>/ha-link/
+    POST /agents/<agent_id>/ha-link/
+    Enterprise High-Availability link validator and Mesh/NATS self-recovery controller.
+    Ensures continuous production connectivity across Agent <-> API <-> NATS <-> MeshCentral.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        r = asyncio.run(agent.nats_cmd({"func": "ha_link_health"}, timeout=10))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {
+                    "agent_id": agent.agent_id,
+                    "hostname": agent.hostname,
+                    "platform": agent.plat,
+                    "api_reachable": agent.status == AGENT_STATUS_ONLINE,
+                    "api_latency_ms": 0,
+                    "nats_reachable": False,
+                    "nats_latency_ms": 0,
+                    "mesh_service_status": "Unknown (NATS Timeout)" if r == "timeout" else "NATS Broker Offline",
+                    "mesh_healthy": bool(agent.mesh_node_id),
+                    "proxy_configured": False,
+                    "proxy_url": "",
+                    "overall_status": "DEGRADED" if agent.status == AGENT_STATUS_ONLINE else "CRITICAL",
+                    "recommendations": [
+                        "O agente não respondeu ao ping NATS no tempo limite. Verifique a conectividade de saída (TCP 443/4222) ou acione a recuperação do Mesh."
+                    ],
+                    "timestamp": djangotime.now().isoformat(),
+                }
+            )
+        return Response(r)
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        r = asyncio.run(agent.nats_cmd({"func": "ha_mesh_repair"}, timeout=25))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Não foi possível contatar {agent.hostname} via NATS ({r})"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            agent=agent.hostname,
+            agent_id=agent.agent_id,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.EXEC_COMMAND,
+            message=f"{request.user.username} executou reparo de alta disponibilidade (Mesh & Link) em {agent.hostname}",
+            after_value=r,
+        )
+        return Response(r)
+
+
+class AgentRDPManagerView(APIView):
+    """
+    GET /agents/<agent_id>/rdp/
+    POST /agents/<agent_id>/rdp/
+    Inspects and manages Corporate Remote Desktop (TermService, NLA enforcement, active sessions, and .rdp profile generation).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        r = asyncio.run(agent.nats_cmd({"func": "rdp_status"}, timeout=12))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {
+                    "platform": agent.plat,
+                    "rdp_enabled": False,
+                    "nla_enabled": True,
+                    "service_status": "Unreachable",
+                    "listening_port": 3389,
+                    "port_reachable": False,
+                    "local_ips": [agent.local_ips] if agent.local_ips else [],
+                    "active_sessions": [],
+                    "hostname": agent.hostname,
+                    "public_ip": agent.public_ip,
+                    "timestamp": djangotime.now().isoformat(),
+                }
+            )
+        if isinstance(r, dict):
+            r["hostname"] = agent.hostname
+            r["public_ip"] = agent.public_ip
+        return Response(r)
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        action = request.data.get("action", "enable_rdp")
+        enforce_nla = request.data.get("enforce_nla", True)
+        session_id = str(request.data.get("session_id", ""))
+
+        nats_data = {
+            "func": "rdp_manage",
+            "data": {
+                "action": action,
+                "enforce_nla": "true" if enforce_nla else "false",
+                "session_id": session_id,
+            },
+        }
+        r = asyncio.run(agent.nats_cmd(nats_data, timeout=20))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Operação RDP ({action}) expirou em {agent.hostname}"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            agent=agent.hostname,
+            agent_id=agent.agent_id,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.MODIFY,
+            message=f"{request.user.username} executou ação RDP '{action}' (NLA={enforce_nla}) em {agent.hostname}",
+            after_value=nats_data["data"],
+        )
+        return Response(r)

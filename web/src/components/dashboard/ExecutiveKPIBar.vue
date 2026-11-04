@@ -18,9 +18,9 @@
               {{ summary.fleet_health_score }}%
             </q-circular-progress>
             <div>
-              <div class="text-caption text-grey">Fleet Health Score</div>
+              <div class="text-caption text-grey">{{ t("kpi.fleetHealth") }}</div>
               <div class="text-subtitle2 text-weight-bold">
-                {{ summary.online_agents }} / {{ summary.total_agents }} Online
+                {{ summary.online_agents }} / {{ summary.total_agents }} {{ t("kpi.onlineAgents") }}
               </div>
             </div>
           </q-card-section>
@@ -32,14 +32,14 @@
         <q-card flat bordered class="full-height">
           <q-card-section class="q-pa-sm">
             <div class="row items-center justify-between">
-              <span class="text-caption text-grey">Availability</span>
+              <span class="text-caption text-grey">{{ t("kpi.availability") }}</span>
               <q-icon name="fas fa-signal" color="positive" size="xs" />
             </div>
             <div class="text-h6 text-weight-bold">
               {{ summary.availability_percent }}%
             </div>
             <div class="text-caption">
-              <span class="text-warning">{{ summary.offline_agents }} offline</span>
+              <span class="text-warning">{{ summary.offline_agents }} {{ t("nav.offline") }}</span>
               &bull;
               <span class="text-negative">{{ summary.overdue_agents }} overdue</span>
             </div>
@@ -52,14 +52,14 @@
         <q-card flat bordered class="full-height">
           <q-card-section class="q-pa-sm">
             <div class="row items-center justify-between">
-              <span class="text-caption text-grey">Patch Compliance</span>
+              <span class="text-caption text-grey">{{ t("kpi.patchCompliance") }}</span>
               <q-icon name="system_update" color="primary" size="xs" />
             </div>
             <div class="text-h6 text-weight-bold">
               {{ summary.patch_compliance_percent }}%
             </div>
             <div class="text-caption text-grey">
-              {{ summary.agents_with_pending_patches }} hosts pending updates
+              {{ summary.agents_with_pending_patches }} {{ t("kpi.pendingAgents") }}
             </div>
           </q-card-section>
         </q-card>
@@ -70,23 +70,23 @@
         <q-card flat bordered class="full-height">
           <q-card-section class="q-pa-sm">
             <div class="row items-center justify-between">
-              <span class="text-caption text-grey">Alerts &amp; Checks</span>
+              <span class="text-caption text-grey">{{ t("kpi.activeAlerts") }}</span>
               <q-icon name="notifications_active" color="warning" size="xs" />
             </div>
             <div class="row items-center q-gutter-x-sm q-mt-xs">
               <q-badge color="negative" class="q-pa-xs">
-                {{ summary.active_alerts.error }} Critical
+                {{ summary.active_alerts.error }} {{ t("kpi.critical") }}
               </q-badge>
               <q-badge color="warning" text-color="black" class="q-pa-xs">
-                {{ summary.active_alerts.warning }} Warning
+                {{ summary.active_alerts.warning }} {{ t("kpi.warnings") }}
               </q-badge>
               <q-badge color="deep-orange" class="q-pa-xs">
-                {{ summary.failing_checks_count }} Failing Checks
+                {{ summary.failing_checks_count }} {{ t("kpi.failingChecks") }}
               </q-badge>
             </div>
             <div class="text-caption text-grey q-mt-xs">
-              {{ summary.reboot_needed_agents }} reboot required &bull;
-              {{ summary.maintenance_agents }} in maintenance
+              {{ summary.reboot_needed_agents }} {{ t("kpi.pendingReboots") }} &bull;
+              {{ summary.maintenance_agents }} {{ t("kpi.inMaintenance") }}
             </div>
           </q-card-section>
         </q-card>
@@ -106,7 +106,7 @@
                 unelevated
                 color="primary"
                 icon="refresh"
-                label="Sync KPIs"
+                :label="t('kpi.refreshKpis')"
                 no-caps
                 size="sm"
                 :loading="loading"
@@ -123,7 +123,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { fetchFleetExecutiveSummary, type FleetExecutiveSummary } from "@/api/enhanced";
+import { useI18n } from "@/i18n";
 
+const { t } = useI18n();
 const loading = ref(false);
 const summary = ref<FleetExecutiveSummary>({
   total_agents: 0,

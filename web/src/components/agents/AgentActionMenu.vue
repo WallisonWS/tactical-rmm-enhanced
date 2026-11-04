@@ -183,6 +183,16 @@
           <q-item clickable v-ripple @click="quickWingetUpgrade(agent)">
             <q-item-section>Winget Upgrade All Software</q-item-section>
           </q-item>
+          <q-separator />
+          <q-item clickable v-ripple @click="quickRepairHALink(agent)">
+            <q-item-section>Reparar Link &amp; Mesh (HA)</q-item-section>
+          </q-item>
+          <q-item clickable v-ripple @click="quickEnableRDP(agent)">
+            <q-item-section>Habilitar RDP Seguro (NLA)</q-item-section>
+          </q-item>
+          <q-item clickable v-ripple @click="quickDownloadRDP(agent)">
+            <q-item-section>Baixar Conexão .RDP (1-Clique)</q-item-section>
+          </q-item>
         </q-list>
       </q-menu>
     </q-item>
@@ -290,7 +300,13 @@ import {
 import { runAgentUpdateScan, runAgentUpdateInstall } from "@/api/winupdates";
 import { runAgentChecks } from "@/api/checks";
 import { fetchScripts } from "@/api/scripts";
-import { triggerAgentSelfHeal, runAgentWingetOperation } from "@/api/enhanced";
+import {
+  triggerAgentSelfHeal,
+  runAgentWingetOperation,
+  repairAgentHALink,
+  manageAgentRDP,
+  downloadNativeRDPFile,
+} from "@/api/enhanced";
 import { notifySuccess, notifyError } from "@/utils/notify";
 
 // ui imports
@@ -612,6 +628,30 @@ export default {
       }
     }
 
+    async function quickRepairHALink(agent) {
+      try {
+        await repairAgentHALink(agent.agent_id);
+        notifySuccess(`Link HA & Serviço Mesh ressincronizados em ${agent.hostname}`);
+      } catch (e) {
+        notifyError(e?.response?.data?.error || "Falha ao reparar Link/Mesh");
+      }
+    }
+
+    async function quickEnableRDP(agent) {
+      try {
+        await manageAgentRDP(agent.agent_id, "enable_rdp", true);
+        notifySuccess(`RDP Seguro (NLA) habilitado em ${agent.hostname}`);
+      } catch (e) {
+        notifyError(e?.response?.data?.error || "Falha ao habilitar RDP");
+      }
+    }
+
+    function quickDownloadRDP(agent) {
+      const targetIp = agent.local_ips || agent.hostname || agent.public_ip || "127.0.0.1";
+      downloadNativeRDPFile(agent.hostname || targetIp, targetIp, 3389);
+      notifySuccess(`Arquivo ${agent.hostname || targetIp}.rdp baixado!`);
+    }
+
     return {
       // reactive data
       urlActions,
@@ -641,6 +681,9 @@ export default {
       launchWebVNC,
       quickSelfHeal,
       quickWingetUpgrade,
+      quickRepairHALink,
+      quickEnableRDP,
+      quickDownloadRDP,
     };
   },
 };

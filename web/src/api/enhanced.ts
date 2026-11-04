@@ -235,3 +235,104 @@ export async function runAgentAIDiagnostics(agentId: string) {
   const { data } = await axios.post(`/agents/${agentId}/ai-diagnostics/`);
   return data;
 }
+
+export interface HALinkHealthReport {
+  agent_id: string;
+  hostname: string;
+  platform: string;
+  api_reachable: boolean;
+  api_latency_ms: number;
+  nats_reachable: boolean;
+  nats_latency_ms: number;
+  mesh_service_status: string;
+  mesh_healthy: boolean;
+  proxy_configured: boolean;
+  proxy_url: string;
+  overall_status: "HEALTHY" | "DEGRADED" | "CRITICAL";
+  recommendations: string[];
+  timestamp: string;
+}
+
+export interface RDPSessionInfo {
+  session_name: string;
+  username: string;
+  id: string;
+  state: string;
+}
+
+export interface CorporateRDPStatus {
+  hostname?: string;
+  public_ip?: string;
+  platform: string;
+  rdp_enabled: boolean;
+  nla_enabled: boolean;
+  service_status: string;
+  listening_port: number;
+  port_reachable: boolean;
+  local_ips: string[];
+  active_sessions: RDPSessionInfo[];
+  timestamp: string;
+}
+
+export async function fetchAgentHALinkHealth(agentId: string): Promise<HALinkHealthReport> {
+  const { data } = await axios.get(`/agents/${agentId}/ha-link/`);
+  return data;
+}
+
+export async function repairAgentHALink(agentId: string) {
+  const { data } = await axios.post(`/agents/${agentId}/ha-link/`);
+  return data;
+}
+
+export async function fetchAgentRDPStatus(agentId: string): Promise<CorporateRDPStatus> {
+  const { data } = await axios.get(`/agents/${agentId}/rdp/`);
+  return data;
+}
+
+export async function manageAgentRDP(
+  agentId: string,
+  action: "enable_rdp" | "disable_rdp" | "restart_rdp" | "logoff_session",
+  enforceNLA = true,
+  sessionId = "",
+) {
+  const { data } = await axios.post(`/agents/${agentId}/rdp/`, {
+    action,
+    enforce_nla: enforceNLA,
+    session_id: sessionId,
+  });
+  return data;
+}
+
+export function downloadNativeRDPFile(hostname: string, hostAddress: string, port = 3389) {
+  const rdpContent = [
+    `full address:s:${hostAddress}:${port}`,
+    "prompt for credentials:i:1",
+    "administrative session:i:1",
+    "screen mode id:i:2",
+    "use multimon:i:0",
+    "desktopwidth:i:1920",
+    "desktopheight:i:1080",
+    "session bpp:i:32",
+    "compression:i:1",
+    "keyboardhook:i:2",
+    "audiocapturemode:i:0",
+    "videoplaybackmode:i:1",
+    "connection type:i:7",
+    "networkautodetect:i:1",
+    "bandwidthautodetect:i:1",
+    "enableworkspacereconnect:i:1",
+    "enablecredsspsupport:i:1",
+    "authentication level:i:2",
+    "autoreconnection enabled:i:1",
+  ].join("\r\n");
+
+  const blob = new Blob([rdpContent], { type: "application/x-rdp;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${hostname || hostAddress}.rdp`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}

@@ -20,98 +20,105 @@
           name="summary"
           icon="fas fa-info-circle"
           size="xs"
-          label="Summary"
+          :label="t('tabs.summary')"
         />
         <q-tab
           v-if="activeTabs.includes('checks')"
           content-class="min-width"
           name="checks"
           icon="fas fa-check-double"
-          label="Checks"
+          :label="t('tabs.checks')"
         />
         <q-tab
           v-if="activeTabs.includes('tasks')"
           content-class="min-width"
           name="tasks"
           icon="fas fa-tasks"
-          label="Tasks"
+          :label="t('tabs.tasks')"
         />
         <q-tab
           v-if="activeTabs.includes('patches')"
           content-class="min-width"
           name="patches"
           icon="system_update"
-          label="Patches"
+          :label="t('tabs.patches')"
         />
         <q-tab
           v-if="activeTabs.includes('software')"
           content-class="min-width"
           name="software"
           icon="fab fa-windows"
-          label="Software"
+          :label="t('tabs.software')"
         />
         <q-tab
           v-if="activeTabs.includes('history')"
           content-class="min-width"
           name="history"
           icon="history"
-          label="History"
+          :label="t('tabs.history')"
         />
         <q-tab
           v-if="activeTabs.includes('notes')"
           content-class="min-width"
           name="notes"
           icon="far fa-sticky-note"
-          label="Notes"
+          :label="t('tabs.notes')"
         />
         <q-tab
           v-if="activeTabs.includes('assets')"
           content-class="min-width"
           name="assets"
           icon="fas fa-barcode"
-          label="Assets"
+          :label="t('tabs.assets')"
         />
         <q-tab
           v-if="activeTabs.includes('debug')"
           content-class="min-width"
           name="debug"
           icon="bug_report"
-          label="Debug"
+          :label="t('tabs.debug')"
         />
         <q-tab
           v-if="activeTabs.includes('audit')"
           content-class="min-width"
           name="audit"
           icon="travel_explore"
-          label="Audit"
+          :label="t('tabs.audit')"
         />
         <q-tab
           v-if="activeTabs.includes('telemetry')"
           content-class="min-width"
           name="telemetry"
           icon="speed"
-          label="Live Telemetry"
+          :label="t('tabs.telemetry')"
         />
         <q-tab
           v-if="activeTabs.includes('security')"
           content-class="min-width"
           name="security"
           icon="security"
-          label="Security & EDR"
+          :label="t('tabs.security')"
         />
         <q-tab
           v-if="activeTabs.includes('network')"
           content-class="min-width"
           name="network"
           icon="lan"
-          label="Network & Ports"
+          :label="t('tabs.network')"
         />
         <q-tab
           v-if="activeTabs.includes('selfheal')"
           content-class="min-width"
           name="selfheal"
           icon="auto_fix_high"
-          label="Self-Heal & AI"
+          :label="t('tabs.selfheal')"
+        />
+        <q-tab
+          v-if="activeTabs.includes('rdpha')"
+          content-class="min-width"
+          name="rdpha"
+          icon="desktop_windows"
+          :label="t('tabs.rdpHa')"
         />
       </q-tabs>
       <q-separator />
@@ -216,6 +223,13 @@
         >
           <SelfHealWingetTab />
         </q-tab-panel>
+        <q-tab-panel
+          v-if="activeTabs.includes('rdpha')"
+          name="rdpha"
+          class="q-pa-none"
+        >
+          <RDPHAConnectivityTab />
+        </q-tab-panel>
       </q-tab-panels>
     </q-page-container>
   </q-layout>
@@ -224,6 +238,7 @@
 <script>
 // composition imports
 import { ref } from "vue";
+import { t } from "@/i18n";
 
 // ui imports
 import SummaryTab from "@/components/agents/SummaryTab.vue";
@@ -240,6 +255,7 @@ import TelemetryTab from "@/components/agents/TelemetryTab.vue";
 import SecurityEDRTab from "@/components/agents/SecurityEDRTab.vue";
 import NetworkToolsTab from "@/components/agents/NetworkToolsTab.vue";
 import SelfHealWingetTab from "@/components/agents/SelfHealWingetTab.vue";
+import RDPHAConnectivityTab from "@/components/agents/RDPHAConnectivityTab.vue";
 
 export default {
   name: "SubTableTabs",
@@ -258,6 +274,7 @@ export default {
     SecurityEDRTab,
     NetworkToolsTab,
     SelfHealWingetTab,
+    RDPHAConnectivityTab,
   },
   props: {
     activeTabs: {
@@ -268,6 +285,7 @@ export default {
         "security",
         "network",
         "selfheal",
+        "rdpha",
         "checks",
         "tasks",
         "patches",
@@ -283,6 +301,7 @@ export default {
   setup(props) {
     return {
       subtab: ref(props.activeTabs[0]),
+      t,
     };
   },
 };

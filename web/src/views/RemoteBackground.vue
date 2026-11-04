@@ -35,10 +35,13 @@
           <span class="q-ml-sm font">Registry</span>
         </div>
       </q-tab>
-      <q-tab name="telemetry" icon="speed" label="Live Telemetry" />
-      <q-tab name="security" icon="security" label="Security & EDR" />
-      <q-tab name="network" icon="lan" label="Network & Ports" />
-      <q-tab name="selfheal" icon="auto_fix_high" label="Self-Heal & AI" />
+      <q-tab name="telemetry" icon="speed" :label="t('tabs.telemetry')" />
+      <q-tab name="security" icon="security" :label="t('tabs.security')" />
+      <q-tab name="network" icon="lan" :label="t('tabs.network')" />
+      <q-tab name="selfheal" icon="auto_fix_high" :label="t('tabs.selfheal')" />
+      <q-tab name="rdpha" icon="desktop_windows" :label="t('tabs.rdpHa')" />
+      <q-space />
+      <LanguageSwitcher />
     </q-tabs>
     <q-separator />
     <q-tab-panels v-show="tab !== 'filebrowser'" v-model="tab">
@@ -100,6 +103,9 @@
       </q-tab-panel>
       <q-tab-panel name="selfheal" class="q-pa-none">
         <SelfHealWingetTab />
+      </q-tab-panel>
+      <q-tab-panel name="rdpha" class="q-pa-none">
+        <RDPHAConnectivityTab :agent-id="String(agent_id)" />
       </q-tab-panel>
     </q-tab-panels>
     <FileBrowserManager
@@ -176,6 +182,9 @@ import TelemetryTab from "@/components/agents/TelemetryTab.vue";
 import SecurityEDRTab from "@/components/agents/SecurityEDRTab.vue";
 import NetworkToolsTab from "@/components/agents/NetworkToolsTab.vue";
 import SelfHealWingetTab from "@/components/agents/SelfHealWingetTab.vue";
+import RDPHAConnectivityTab from "@/components/agents/RDPHAConnectivityTab.vue";
+import LanguageSwitcher from "@/components/LanguageSwitcher.vue";
+import { t } from "@/i18n";
 
 const FileBrowserManager = defineAsyncComponent(
   () => import("@/components/agents/remotebg/FileBrowserManager.vue"),
@@ -194,6 +203,8 @@ export default {
     SecurityEDRTab,
     NetworkToolsTab,
     SelfHealWingetTab,
+    RDPHAConnectivityTab,
+    LanguageSwitcher,
   },
   setup() {
     // setup quasar
@@ -359,6 +370,7 @@ export default {
       fileBrowserDefaultsLoaded,
       fileBrowserMaxUploadFileSizeBytes,
       retryFileBrowserDefaults,
+      t,
     };
   },
 };
