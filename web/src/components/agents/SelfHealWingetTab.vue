@@ -1,5 +1,5 @@
 <template>
-  <div v-if="!selectedAgent" class="q-pa-sm">No agent selected</div>
+  <div v-if="!selectedAgent" class="q-pa-sm">{{ t("common.noAgentSelected") }}</div>
   <div v-else class="q-pa-sm">
     <div class="row q-col-gutter-md">
       <!-- Autonomous Self-Healing & System Optimization -->
@@ -7,14 +7,14 @@
         <q-card flat bordered>
           <q-card-section>
             <div class="text-subtitle2 text-weight-bold q-mb-sm">
-              1-Click Self-Healing &amp; System Repair
+              {{ t("heal.title") }}
             </div>
             <div class="column q-gutter-xs">
               <q-btn
                 unelevated
                 color="primary"
                 icon="auto_fix_high"
-                label="Run Full Autonomous Self-Heal"
+                :label="t('heal.runFull')"
                 no-caps
                 :loading="healing"
                 @click="execSelfHeal('self_heal', 'full')"
@@ -23,7 +23,7 @@
                 outline
                 color="secondary"
                 icon="cleaning_services"
-                label="Deep Disk Cleanup (Temp &amp; Update Cache)"
+                :label="t('heal.deepDisk')"
                 no-caps
                 :loading="healing"
                 @click="execSelfHeal('disk_cleanup', 'disk')"
@@ -32,7 +32,7 @@
                 outline
                 color="positive"
                 icon="miscellaneous_services"
-                label="Auto-Restart Stopped Automatic Services"
+                :label="t('heal.restartServices')"
                 no-caps
                 :loading="healing"
                 @click="execSelfHeal('self_heal', 'services')"
@@ -41,7 +41,7 @@
                 outline
                 color="warning"
                 icon="build_circle"
-                label="Repair Windows Update (wuauserv/bits)"
+                :label="t('heal.repairWinUpdate')"
                 no-caps
                 :loading="healing"
                 @click="execSelfHeal('self_heal', 'winupdate')"
@@ -50,7 +50,7 @@
                 outline
                 color="info"
                 icon="memory"
-                label="Optimize &amp; Trim Memory Working Set"
+                :label="t('heal.trimMemory')"
                 no-caps
                 :loading="healing"
                 @click="execSelfHeal('trim_memory', 'memory')"
@@ -72,13 +72,13 @@
         <q-card flat bordered>
           <q-card-section>
             <div class="row items-center justify-between q-mb-sm">
-              <span class="text-subtitle2 text-weight-bold">Winget Package Manager</span>
+              <span class="text-subtitle2 text-weight-bold">{{ t("heal.wingetTitle") }}</span>
               <div class="row q-gutter-xs">
                 <q-btn
                   dense
                   flat
                   icon="refresh"
-                  label="Scan Updates"
+                  :label="t('heal.scanUpdates')"
                   no-caps
                   :loading="loadingWinget"
                   @click="loadWinget"
@@ -88,7 +88,7 @@
                   unelevated
                   color="positive"
                   icon="system_update_alt"
-                  label="Upgrade All"
+                  :label="t('heal.upgradeAll')"
                   no-caps
                   :loading="loadingWinget"
                   @click="upgradePackage('all')"
@@ -110,7 +110,7 @@
                   dense
                   unelevated
                   color="primary"
-                  label="Install Silent"
+                  :label="t('heal.installSilent')"
                   no-caps
                   class="full-width full-height"
                   :loading="loadingWinget"
@@ -139,7 +139,7 @@
               </q-item>
               <q-item v-if="!upgradablePkgs.length">
                 <q-item-section class="text-caption text-grey">
-                  Click "Scan Updates" to list outdated third-party software via Winget/APT.
+                  {{ t("heal.scanUpdates") }} (Winget / APT / Brew)
                 </q-item-section>
               </q-item>
             </q-list>
@@ -152,13 +152,13 @@
         <q-card flat bordered>
           <q-card-section>
             <div class="row items-center justify-between q-mb-sm">
-              <span class="text-subtitle2 text-weight-bold">AI Root-Cause Assistant</span>
+              <span class="text-subtitle2 text-weight-bold">{{ t("heal.aiTitle") }}</span>
               <q-btn
                 dense
                 unelevated
                 color="deep-purple"
                 icon="psychology"
-                label="Analyze Endpoint"
+                :label="t('heal.analyzeEndpoint')"
                 no-caps
                 :loading="loadingAI"
                 @click="execAIDiagnostics"
@@ -217,7 +217,9 @@ import {
   runAgentAIDiagnostics,
 } from "@/api/enhanced";
 import { notifySuccess, notifyError } from "@/utils/notify";
+import { useI18n } from "@/i18n";
 
+const { t } = useI18n();
 const store = useStore();
 const selectedAgent = computed(() => store.state.selectedRow);
 

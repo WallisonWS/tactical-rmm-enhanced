@@ -1,12 +1,12 @@
 <template>
-  <div v-if="!selectedAgent" class="q-pa-sm">No agent selected</div>
+  <div v-if="!selectedAgent" class="q-pa-sm">{{ t("common.noAgentSelected") }}</div>
   <div v-else class="q-pa-sm">
     <q-bar dense style="background-color: transparent">
       <q-btn
         dense
         flat
         icon="lan"
-        label="Active Connections"
+        :label="t('net.activeConns')"
         no-caps
         :loading="loadingConns"
         @click="loadConnections"
@@ -15,7 +15,7 @@
         v-model="diagTarget"
         dense
         outlined
-        label="Target Host / IP"
+        :label="t('net.targetHost')"
         style="width: 180px"
         class="q-ml-sm"
       />
@@ -24,7 +24,7 @@
         unelevated
         color="primary"
         icon="network_check"
-        label="Run NetDiag"
+        :label="t('net.runDiag')"
         no-caps
         class="q-ml-xs"
         :loading="loadingDiag"
@@ -35,7 +35,7 @@
         unelevated
         color="secondary"
         icon="radar"
-        label="Port Scan"
+        :label="t('net.portScan')"
         no-caps
         class="q-ml-xs"
         :loading="loadingScan"
@@ -47,7 +47,7 @@
         dense
         outlined
         clearable
-        placeholder="Filter sockets / PID / process..."
+        :placeholder="t('net.filterPlaceholder')"
         style="width: 240px"
       />
     </q-bar>
@@ -60,7 +60,7 @@
           dense
           flat
           bordered
-          title="Active TCP/UDP Sockets &amp; Listening Ports"
+          :title="t('net.tableTitle')"
           :rows="connections"
           :columns="columns"
           :filter="filterText"
@@ -134,7 +134,9 @@ import {
   type PortScanResult,
 } from "@/api/enhanced";
 import { notifyError } from "@/utils/notify";
+import { useI18n } from "@/i18n";
 
+const { t } = useI18n();
 const store = useStore();
 const selectedAgent = computed(() => store.state.selectedRow);
 

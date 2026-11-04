@@ -1,12 +1,12 @@
 <template>
-  <div v-if="!selectedAgent" class="q-pa-sm">No agent selected</div>
+  <div v-if="!selectedAgent" class="q-pa-sm">{{ t("common.noAgentSelected") }}</div>
   <div v-else class="q-pa-sm">
     <q-bar dense style="background-color: transparent">
       <q-btn
         dense
         flat
         icon="security"
-        label="Run Security &amp; EDR Audit"
+        :label="t('sec.runAudit')"
         no-caps
         :loading="loading"
         @click="runAudit"
@@ -15,7 +15,7 @@
         dense
         flat
         icon="list_alt"
-        label="Inspect Autoruns"
+        :label="t('sec.inspectAutoruns')"
         no-caps
         :loading="loadingExtra"
         @click="loadStartups"
@@ -24,7 +24,7 @@
         dense
         flat
         icon="group"
-        label="Audit Local Users"
+        :label="t('sec.auditUsers')"
         no-caps
         :loading="loadingExtra"
         @click="loadUsers"
@@ -35,7 +35,7 @@
         :color="audit.security_score >= 80 ? 'positive' : audit.security_score >= 55 ? 'warning' : 'negative'"
         class="q-pa-xs text-weight-bold"
       >
-        Security Score: {{ audit.security_score }} / 100
+        {{ t("sec.score") }}: {{ audit.security_score }} / 100
       </q-badge>
     </q-bar>
     <q-separator class="q-my-xs" />
@@ -46,7 +46,7 @@
         <q-card flat bordered>
           <q-card-section>
             <div class="text-subtitle2 text-weight-bold q-mb-sm">
-              Endpoint Protection &amp; Hardening
+              {{ t("sec.postureTitle") }}
             </div>
             <q-list dense separator>
               <q-item>
@@ -107,14 +107,14 @@
         <q-card flat bordered>
           <q-card-section>
             <div class="text-subtitle2 text-weight-bold q-mb-sm">
-              Host Firewall Quick Control
+              {{ t("sec.fwTitle") }}
             </div>
             <div class="row q-gutter-xs q-mb-md">
               <q-btn
                 dense
                 unelevated
                 color="positive"
-                label="Enable All Profiles"
+                :label="t('sec.enableAllFw')"
                 no-caps
                 size="sm"
                 @click="applyFirewallAction('enable_all')"
@@ -123,7 +123,7 @@
                 dense
                 outline
                 color="negative"
-                label="Disable All Profiles"
+                :label="t('sec.disableAllFw')"
                 no-caps
                 size="sm"
                 @click="applyFirewallAction('disable_all')"
@@ -148,7 +148,7 @@
                   dense
                   unelevated
                   color="negative"
-                  label="Block Port"
+                  :label="t('sec.blockPort')"
                   no-caps
                   class="full-width"
                   @click="applyFirewallAction('block_port')"
@@ -158,7 +158,7 @@
 
             <q-separator class="q-my-sm" />
             <div class="text-caption text-weight-bold q-mb-xs">
-              Security Recommendations
+              {{ t("sec.recommendations") }}
             </div>
             <q-list dense>
               <q-item v-for="(rec, i) in audit.recommendations" :key="i">
@@ -237,7 +237,9 @@ import {
   type SecurityAuditReport,
 } from "@/api/enhanced";
 import { notifySuccess, notifyError } from "@/utils/notify";
+import { useI18n } from "@/i18n";
 
+const { t } = useI18n();
 const store = useStore();
 const selectedAgent = computed(() => store.state.selectedRow);
 const loading = ref(false);

@@ -1,12 +1,12 @@
 <template>
-  <div v-if="!selectedAgent" class="q-pa-sm">No agent selected</div>
+  <div v-if="!selectedAgent" class="q-pa-sm">{{ t("common.noAgentSelected") }}</div>
   <div v-else class="q-pa-sm">
     <q-bar dense style="background-color: transparent">
       <q-btn
         dense
         flat
         icon="refresh"
-        label="Refresh Live Telemetry"
+        :label="t('tel.refresh')"
         no-caps
         :loading="loading"
         @click="loadTelemetry"
@@ -16,7 +16,7 @@
         Cached Fallback Mode
       </q-badge>
       <span v-if="telemetry?.timestamp" class="text-caption text-grey q-ml-sm">
-        Updated: {{ telemetry.timestamp }}
+        {{ telemetry.timestamp }}
       </span>
     </q-bar>
     <q-separator class="q-my-xs" />
@@ -27,7 +27,7 @@
         <q-card flat bordered>
           <q-card-section>
             <div class="text-subtitle2 text-weight-bold q-mb-sm">
-              Real-Time Processor &amp; Memory
+              {{ t("tel.cpuRamTitle") }}
             </div>
             <div class="row items-center justify-around q-my-sm">
               <div class="text-center">
@@ -66,7 +66,7 @@
             </div>
 
             <div v-if="telemetry.cpu_per_core?.length" class="q-mt-md">
-              <div class="text-caption text-grey q-mb-xs">Per-Core Utilization</div>
+              <div class="text-caption text-grey q-mb-xs">{{ t("tel.perCore") }}</div>
               <div
                 v-for="(pct, idx) in telemetry.cpu_per_core"
                 :key="idx"
@@ -93,7 +93,7 @@
         <q-card flat bordered>
           <q-card-section>
             <div class="text-subtitle2 text-weight-bold q-mb-sm">
-              Storage Volumes &amp; S.M.A.R.T. Health
+              {{ t("tel.storageSmart") }}
             </div>
             <div
               v-for="d in telemetry.disk_metrics || []"
@@ -115,7 +115,7 @@
 
             <q-separator class="q-my-sm" />
             <div class="text-caption text-weight-bold q-mb-xs">
-              Physical Disk S.M.A.R.T. Status
+              {{ t("tel.smartStatus") }}
             </div>
             <q-list dense bordered separator v-if="telemetry.smart_health?.length">
               <q-item v-for="(s, i) in telemetry.smart_health" :key="i">
@@ -134,7 +134,7 @@
               </q-item>
             </q-list>
             <div v-else class="text-caption text-grey">
-              No S.M.A.R.T. physical disk alerts reported.
+              S.M.A.R.T. OK
             </div>
           </q-card-section>
         </q-card>
@@ -145,14 +145,14 @@
         <q-card flat bordered>
           <q-card-section>
             <div class="text-subtitle2 text-weight-bold q-mb-sm">
-              Network Throughput &amp; Host Runtime
+              {{ t("tel.netRuntime") }}
             </div>
             <q-list dense separator>
               <q-item>
                 <q-item-section avatar>
                   <q-icon name="cloud_upload" color="primary" />
                 </q-item-section>
-                <q-item-section>Total Bytes Sent (TX)</q-item-section>
+                <q-item-section>{{ t("tel.bytesSent") }}</q-item-section>
                 <q-item-section side>
                   {{ formatBytes(telemetry.net_bytes_sent || 0) }}
                 </q-item-section>
@@ -161,7 +161,7 @@
                 <q-item-section avatar>
                   <q-icon name="cloud_download" color="secondary" />
                 </q-item-section>
-                <q-item-section>Total Bytes Received (RX)</q-item-section>
+                <q-item-section>{{ t("tel.bytesRecv") }}</q-item-section>
                 <q-item-section side>
                   {{ formatBytes(telemetry.net_bytes_recv || 0) }}
                 </q-item-section>
@@ -170,7 +170,7 @@
                 <q-item-section avatar>
                   <q-icon name="apps" color="info" />
                 </q-item-section>
-                <q-item-section>Active Processes</q-item-section>
+                <q-item-section>{{ t("tel.activeProcesses") }}</q-item-section>
                 <q-item-section side>
                   {{ telemetry.process_count || 0 }}
                 </q-item-section>
@@ -179,7 +179,7 @@
                 <q-item-section avatar>
                   <q-icon name="schedule" color="positive" />
                 </q-item-section>
-                <q-item-section>System Uptime</q-item-section>
+                <q-item-section>{{ t("tel.systemUptime") }}</q-item-section>
                 <q-item-section side>
                   {{ formatUptime(telemetry.uptime_seconds || 0) }}
                 </q-item-section>
@@ -196,7 +196,9 @@
 import { ref, computed, watch, onMounted } from "vue";
 import { useStore } from "vuex";
 import { fetchAgentLiveTelemetry, type LiveTelemetrySnapshot } from "@/api/enhanced";
+import { useI18n } from "@/i18n";
 
+const { t } = useI18n();
 const store = useStore();
 const selectedAgent = computed(() => store.state.selectedRow);
 const loading = ref(false);
