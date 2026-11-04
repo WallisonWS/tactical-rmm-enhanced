@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"os/exec"
 	"runtime"
 	"strings"
 	"time"
@@ -24,7 +25,23 @@ type WingetOperationResult struct {
 	Timestamp  string          `json:"timestamp"`
 }
 
-// ListUpgradablePackages lists packages that have available updates using Winget (Windows), apt/dnf (Linux), or brew (macOS).
+func detectLinuxPackageManager() string {
+	if _, err := exec.LookPath("apt-get"); err == nil {
+		return "apt"
+	}
+	if _, err := exec.LookPath("dnf"); err == nil {
+		return "dnf"
+	}
+	if _, err := exec.LookPath("yum"); err == nil {
+		return "yum"
+	}
+	if _, err := exec.LookPath("brew"); err == nil {
+		return "brew"
+	}
+	return "apt"
+}
+
+// ListUpgradablePackages lists packages that have available updates using Winget (Windows), APT (Ubuntu/Debian), DNF (Fedora/RHEL), or Brew (macOS).
 func (a *Agent) ListUpgradablePackages() WingetOperationResult {
 	res := WingetOperationResult{
 		Operation:  "list_upgradable",
@@ -45,7 +62,52 @@ func (a *Agent) ListUpgradablePackages() WingetOperationResult {
 		return res
 	}
 
-	// Linux fallback
+	pkgMgr := detectLinuxPackageManager()
+	if pkgMgr == "dnf" || pkgMgr == "yum" {
+		// Fedora / RHEL / Rocky / AlmaLinux: dnf check-update returns exit code 100 when updates are available
+		out, _ := CMD(pkgMgr, []string{"check-update", "-q"}, 45, false)
+		res.Success = true
+		res.Output = out[0]
+		lines := strings.Split(out[0], "\n")
+		for _, rLine := range lines {
+			line := strings.TrimSpace(rLine)
+			if line == "" || strings.HasPrefix(line, "Last metadata") || strings.HasPrefix(line, "Obsoleting") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) >= 3 {
+				pkgName := strings.Split(fields[0], ".")[0]
+				res.Upgradable = append(res.Upgradable, WingetPackage{
+					Name:             pkgName,
+					ID:               fields[0],
+					AvailableVersion: fields[1],
+					Source:           pkgMgr + " (" + fields[2] + ")",
+				})
+			}
+		}
+		return res
+	}
+
+	if pkgMgr == "brew" {
+		out, err := CMD("brew", []string{"outdated", "--verbose"}, 45, false)
+		if err == nil {
+			res.Success = true
+			res.Output = out[0]
+			for _, line := range strings.Split(out[0], "\n") {
+				fields := strings.Fields(strings.TrimSpace(line))
+				if len(fields) >= 1 && fields[0] != "" {
+					res.Upgradable = append(res.Upgradable, WingetPackage{
+						Name:   fields[0],
+						ID:     fields[0],
+						Source: "brew",
+					})
+				}
+			}
+		}
+		return res
+	}
+
+	// Ubuntu / Debian APT
 	out, err := CMD("apt", []string{"list", "--upgradable"}, 30, false)
 	if err == nil {
 		res.Success = true
@@ -110,7 +172,7 @@ func parseWingetUpgradeTable(raw string) []WingetPackage {
 	return pkgs
 }
 
-// InstallWithWinget installs a specific package silently via Winget (Windows) or native package manager.
+// InstallWithWinget installs a specific package silently via Winget (Windows), APT (Ubuntu/Debian), DNF (Fedora/RHEL), or Brew (macOS).
 func (a *Agent) InstallWithWinget(packageID string) WingetOperationResult {
 	res := WingetOperationResult{
 		Operation: "install",
@@ -138,13 +200,27 @@ func (a *Agent) InstallWithWinget(packageID string) WingetOperationResult {
 		return res
 	}
 
+	pkgMgr := detectLinuxPackageManager()
+	if pkgMgr == "dnf" || pkgMgr == "yum" {
+		out, err := CMD(pkgMgr, []string{"install", "-y", packageID}, 300, false)
+		res.Success = err == nil
+		res.Output = strings.TrimSpace(out[0] + "\n" + out[1])
+		return res
+	}
+	if pkgMgr == "brew" {
+		out, err := CMD("brew", []string{"install", packageID}, 300, false)
+		res.Success = err == nil
+		res.Output = strings.TrimSpace(out[0] + "\n" + out[1])
+		return res
+	}
+
 	out, err := CMD("apt-get", []string{"install", "-y", packageID}, 300, false)
 	res.Success = err == nil
 	res.Output = strings.TrimSpace(out[0] + "\n" + out[1])
 	return res
 }
 
-// UpgradeAllPackages upgrades either a specific package or all outdated packages silently.
+// UpgradeAllPackages upgrades either a specific package or all outdated packages silently across Windows (winget), Ubuntu/Debian (apt), and Fedora (dnf).
 func (a *Agent) UpgradeAllPackages(packageID string) WingetOperationResult {
 	res := WingetOperationResult{
 		Operation: "upgrade",
@@ -171,7 +247,33 @@ func (a *Agent) UpgradeAllPackages(packageID string) WingetOperationResult {
 		return res
 	}
 
-	out, err := CMD("apt-get", []string{"upgrade", "-y"}, 600, false)
+	pkgMgr := detectLinuxPackageManager()
+	if pkgMgr == "dnf" || pkgMgr == "yum" {
+		args := []string{"upgrade", "-y"}
+		if strings.TrimSpace(packageID) != "" && packageID != "all" {
+			args = append(args, packageID)
+		}
+		out, err := CMD(pkgMgr, args, 600, false)
+		res.Success = err == nil
+		res.Output = strings.TrimSpace(out[0] + "\n" + out[1])
+		return res
+	}
+	if pkgMgr == "brew" {
+		args := []string{"upgrade"}
+		if strings.TrimSpace(packageID) != "" && packageID != "all" {
+			args = append(args, packageID)
+		}
+		out, err := CMD("brew", args, 600, false)
+		res.Success = err == nil
+		res.Output = strings.TrimSpace(out[0] + "\n" + out[1])
+		return res
+	}
+
+	args := []string{"upgrade", "-y"}
+	if strings.TrimSpace(packageID) != "" && packageID != "all" {
+		args = []string{"install", "--only-upgrade", "-y", packageID}
+	}
+	out, err := CMD("apt-get", args, 600, false)
 	res.Success = err == nil
 	res.Output = strings.TrimSpace(out[0] + "\n" + out[1])
 	return res

@@ -41,7 +41,14 @@ def get_agent_url(*, goarch: str, plat: str, token: str = "") -> str:
         }
         return settings.AGENTS_URL + urllib.parse.urlencode(params)
 
-    return f"https://github.com/amidaware/rmmagent/releases/download/v{ver}/tacticalagent-v{ver}-{plat}-{goarch}.exe"
+    if plat == AgentPlat.WINDOWS:
+        return f"https://github.com/amidaware/rmmagent/releases/download/v{ver}/tacticalagent-v{ver}-{plat}-{goarch}.exe"
+
+    # For Linux (Ubuntu / Debian / Fedora) & macOS without commercial code-signing token,
+    # point to the RMM frontend's locally hosted agent binaries (/agents/) with automatic source compile fallback in agent_linux.sh
+    cors_origins = getattr(settings, "CORS_ORIGIN_WHITELIST", [])
+    base_web = cors_origins[0] if cors_origins else f"https://{settings.ALLOWED_HOSTS[0]}"
+    return f"{base_web.rstrip('/')}/agents/tacticalagent-v{ver}-{plat}-{goarch}"
 
 
 def generate_linux_install(
@@ -52,6 +59,7 @@ def generate_linux_install(
     token: str,
     api: str,
     download_url: str,
+    distro: str = "universal",
 ) -> FileResponse:
     match arch:
         case "amd64":
@@ -67,13 +75,16 @@ def generate_linux_install(
 
     core = get_core_settings()
 
-    uri = get_mesh_ws_url()
-    mesh_id = asyncio.run(get_mesh_device_id(uri, core.mesh_device_group))
-    mesh_dl = (
-        f"{core.mesh_site}/meshagents?id={mesh_id}&installflags=2&meshinstall={arch_id}"
-    )
+    try:
+        uri = get_mesh_ws_url()
+        mesh_id = asyncio.run(get_mesh_device_id(uri, core.mesh_device_group))
+        mesh_dl = (
+            f"{core.mesh_site}/meshagents?id={mesh_id}&installflags=2&meshinstall={arch_id}"
+        )
+    except Exception:
+        mesh_dl = ""
 
-    text = Path(settings.LINUX_AGENT_SCRIPT).read_text()
+    text = Path(settings.LINUX_AGENT_SCRIPT).read_text(encoding="utf-8")
 
     replace = {
         "agentDLChange": download_url,
@@ -83,15 +94,16 @@ def generate_linux_install(
         "agentTypeChange": agent_type,
         "tokenChange": token,
         "apiURLChange": api,
+        "distroChange": distro,
     }
 
     for i, j in replace.items():
         text = text.replace(i, j)
 
-    text += "\n"
+    text = text.replace("\r\n", "\n") + "\n"
     with StringIO(text) as fp:
         return FileResponse(
-            fp.read(), as_attachment=True, filename="linux_agent_install.sh"
+            fp.read(), as_attachment=True, filename=f"linux_{distro}_agent_install.sh"
         )
 
 

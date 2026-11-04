@@ -218,14 +218,24 @@ func (a *Agent) GetFirewallStatus() []FirewallProfile {
 			}
 		}
 	} else {
-		out, err := CMD("ufw", []string{"status"}, 10, false)
-		enabled := err == nil && strings.Contains(strings.ToLower(out[0]), "active")
-		profiles = append(profiles, FirewallProfile{Name: "UFW/IPTables", Enabled: enabled})
+		// Check Fedora/RHEL firewalld first, then Ubuntu/Debian UFW
+		fwOut, fwErr := CMD("firewall-cmd", []string{"--state"}, 10, false)
+		if fwErr == nil && strings.Contains(strings.ToLower(fwOut[0]), "running") {
+			profiles = append(profiles, FirewallProfile{Name: "Firewalld (Fedora/RHEL)", Enabled: true})
+		} else {
+			out, err := CMD("ufw", []string{"status"}, 10, false)
+			if err == nil && strings.TrimSpace(out[0]) != "" {
+				enabled := strings.Contains(strings.ToLower(out[0]), "active")
+				profiles = append(profiles, FirewallProfile{Name: "UFW (Ubuntu/Debian)", Enabled: enabled})
+			} else {
+				profiles = append(profiles, FirewallProfile{Name: "Linux Host Firewall (UFW/Firewalld)", Enabled: false})
+			}
+		}
 	}
 	return profiles
 }
 
-// ManageFirewallRule adds, deletes, or toggles a firewall rule or profile on the endpoint.
+// ManageFirewallRule adds, deletes, or toggles a firewall rule or profile on the endpoint (Windows Defender Firewall, Ubuntu/Debian UFW, Fedora/RHEL Firewalld).
 func (a *Agent) ManageFirewallRule(action, ruleName, direction, protocol, port, remoteIP string) (map[string]interface{}, error) {
 	action = strings.ToLower(strings.TrimSpace(action))
 	if runtime.GOOS == "windows" {
@@ -273,6 +283,48 @@ func (a *Agent) ManageFirewallRule(action, ruleName, direction, protocol, port, 
 			return nil, fmt.Errorf("unsupported firewall action: %s", action)
 		}
 	}
+
+	// Linux Firewall Management: Fedora/RHEL (firewall-cmd) or Ubuntu/Debian (ufw)
+	proto := strings.ToLower(strings.TrimSpace(protocol))
+	if proto == "" {
+		proto = "tcp"
+	}
+	fwState, fwErr := CMD("firewall-cmd", []string{"--state"}, 5, false)
+	if fwErr == nil || strings.Contains(strings.ToLower(fwState[0]), "running") {
+		switch action {
+		case "enable_all":
+			_, err := CMD("systemctl", []string{"enable", "--now", "firewalld"}, 15, false)
+			return map[string]interface{}{"status": "ok", "engine": "firewalld", "action": action}, err
+		case "disable_all":
+			_, err := CMD("systemctl", []string{"stop", "firewalld"}, 15, false)
+			return map[string]interface{}{"status": "ok", "engine": "firewalld", "action": action}, err
+		case "allow_port":
+			_, err := CMD("firewall-cmd", []string{"--permanent", fmt.Sprintf("--add-port=%s/%s", port, proto)}, 15, false)
+			_, _ = CMD("firewall-cmd", []string{"--reload"}, 10, false)
+			return map[string]interface{}{"status": "ok", "engine": "firewalld", "allowed": fmt.Sprintf("%s/%s", port, proto)}, err
+		case "block_port", "delete_rule":
+			_, err := CMD("firewall-cmd", []string{"--permanent", fmt.Sprintf("--remove-port=%s/%s", port, proto)}, 15, false)
+			_, _ = CMD("firewall-cmd", []string{"--reload"}, 10, false)
+			return map[string]interface{}{"status": "ok", "engine": "firewalld", "blocked": fmt.Sprintf("%s/%s", port, proto)}, err
+		}
+	}
+
+	// Ubuntu / Debian UFW fallback
+	switch action {
+	case "enable_all":
+		_, err := CMD("ufw", []string{"--force", "enable"}, 15, false)
+		return map[string]interface{}{"status": "ok", "engine": "ufw", "action": action}, err
+	case "disable_all":
+		_, err := CMD("ufw", []string{"disable"}, 15, false)
+		return map[string]interface{}{"status": "ok", "engine": "ufw", "action": action}, err
+	case "allow_port":
+		_, err := CMD("ufw", []string{"allow", fmt.Sprintf("%s/%s", port, proto)}, 15, false)
+		return map[string]interface{}{"status": "ok", "engine": "ufw", "allowed": fmt.Sprintf("%s/%s", port, proto)}, err
+	case "block_port":
+		_, err := CMD("ufw", []string{"deny", fmt.Sprintf("%s/%s", port, proto)}, 15, false)
+		return map[string]interface{}{"status": "ok", "engine": "ufw", "blocked": fmt.Sprintf("%s/%s", port, proto)}, err
+	}
+
 	return map[string]interface{}{"status": "ok", "action": action, "platform": runtime.GOOS}, nil
 }
 

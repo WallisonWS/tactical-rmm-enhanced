@@ -2,7 +2,7 @@
   <q-card style="min-width: 70vw">
     <q-card-section class="row">
       <q-card-actions align="left">
-        <div class="text-h6">Installation Instructions</div>
+        <div class="text-h6">Installation Instructions ({{ info.plat ? info.plat.toUpperCase() : "" }})</div>
       </q-card-actions>
       <q-space />
       <q-card-actions align="right">
@@ -12,10 +12,14 @@
     <q-card-section>
       <p v-if="info.plat === 'windows'" class="text-subtitle1">
         Download the installer then run the following command from an elevated
-        command prompt on the device you want to add.
+        command prompt (Administrator) on the Windows device you want to add:
+      </p>
+      <p v-else-if="info.plat === 'linux'" class="text-subtitle1">
+        Execute the following command as root (sudo) on your
+        <strong>Ubuntu, Debian, or Fedora</strong> machine:
       </p>
       <p v-else-if="info.plat === 'darwin'" class="text-subtitle1">
-        Run the following command from a terminal
+        Run the following command from a terminal:
       </p>
       <p>
         <q-field outlined :color="$q.dark.isActive ? 'white' : 'black'">
@@ -24,12 +28,12 @@
         <q-btn
           size="md"
           flat
-          round
+          dense
           icon="content_copy"
           label="Copy to clipboard"
           @click="copyValueToClip(info.data.cmd)"
-        >
-        </q-btn>
+          class="q-mt-xs"
+        />
       </p>
       <q-expansion-item
         switch-toggle-side
@@ -75,20 +79,18 @@
         </div>
       </q-expansion-item>
       <br />
-      <p v-if="info.plat === 'windows'">
+      <p v-if="info.plat === 'windows' || info.plat === 'linux'">
         Note: The auth token above is valid for
-        {{ info.expires }} hours.<br />The installer executable itself is
-        generic and can be reused for future installations.<br />If the token
-        expires, simply generate a new installation command rather than
-        downloading the installer again.
+        {{ info.expires }} hours.
       </p>
       <q-btn
-        v-if="info.plat === 'windows'"
+        v-if="info.plat === 'windows' || info.plat === 'linux'"
         type="a"
         :href="info.data.url"
         color="primary"
-        label="Download Agent"
-      ></q-btn>
+        icon="download"
+        label="Download Agent Binary"
+      />
     </q-card-section>
   </q-card>
 </template>

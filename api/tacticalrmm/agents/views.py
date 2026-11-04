@@ -783,9 +783,9 @@ def install_agent(request):
 
     insecure = getattr(settings, "TRMM_INSECURE", False)
 
-    if insecure and request.data["installMethod"] in {"exe", "powershell"}:
+    if insecure and request.data["installMethod"] in {"exe"}:
         return notify_error(
-            "Not available in insecure mode. Please use the 'Manual' method."
+            "Not available in insecure mode. Please use the 'Manual' or 'PowerShell' method."
         )
 
     # TODO rework this ghetto validation hack
@@ -800,22 +800,19 @@ def install_agent(request):
     version = settings.LATEST_AGENT_VER
     goarch = request.data["goarch"]
     plat = request.data["plat"]
+    distro = request.data.get("distro", "universal")
 
     if not _has_perm_on_site(request.user, site_id):
         raise PermissionDenied()
 
     codesign_token, is_valid = token_is_valid()
-
-    if request.data["installMethod"] in {"bash", "mac"} and not is_valid:
-        return notify_error(
-            "Linux/Mac agents require code signing. Please see https://docs.tacticalrmm.com/code_signing/ for more info."
-        )
+    effective_token = codesign_token if is_valid else ""
 
     inno = f"tacticalagent-v{version}-{plat}-{goarch}"
     if plat == AgentPlat.WINDOWS:
         inno += ".exe"
 
-    download_url = get_agent_url(goarch=goarch, plat=plat, token=codesign_token)
+    download_url = get_agent_url(goarch=goarch, plat=plat, token=effective_token)
 
     installer_user = User.objects.filter(is_installer_user=True).first()
 
@@ -865,11 +862,12 @@ def install_agent(request):
             token=token,
             api=request.data["api"],
             download_url=download_url,
+            distro=distro,
         )
 
-    elif request.data["installMethod"] in {"manual", "mac"}:
+    elif request.data["installMethod"] in {"manual", "mac", "linux_manual"}:
         resp = {}
-        if request.data["installMethod"] == "manual":
+        if request.data["installMethod"] == "manual" and plat == AgentPlat.WINDOWS:
             cmd = [
                 inno,
                 "/VERYSILENT",
@@ -894,6 +892,18 @@ def install_agent(request):
                 cmd.append("--insecure")
 
             resp["cmd"] = " ".join(str(i) for i in cmd)
+        elif plat == AgentPlat.LINUX or request.data["installMethod"] == "linux_manual":
+            install_flags.insert(0, "sudo /usr/local/bin/tacticalagent")
+            cmd = install_flags.copy()
+            if insecure:
+                cmd.append("--insecure")
+            dl = f"sudo curl -fsSLk -o /usr/local/bin/tacticalagent '{download_url}'"
+            resp["cmd"] = (
+                dl
+                + " && sudo chmod +x /usr/local/bin/tacticalagent && "
+                + " ".join(str(i) for i in cmd)
+            )
+            resp["distro"] = distro
         else:
             install_flags.insert(0, f"sudo ./{inno}")
             cmd = install_flags.copy()
@@ -909,7 +919,7 @@ def install_agent(request):
         return Response(resp)
 
     elif request.data["installMethod"] == "powershell":
-        text = Path(settings.BASE_DIR / "core" / "installer.ps1").read_text()
+        text = Path(settings.BASE_DIR / "core" / "installer.ps1").read_text(encoding="utf-8")
 
         replace_dict = {
             "innosetupchange": inno,
@@ -920,6 +930,7 @@ def install_agent(request):
             "powerchange": str(request.data["power"]),
             "rdpchange": str(request.data["rdp"]),
             "pingchange": str(request.data["ping"]),
+            "insecurechange": "1" if insecure else "0",
             "downloadchange": download_url,
             "tokenchange": token,
         }

@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 
-SCRIPT_VERSION="93"
-SCRIPT_URL="https://raw.githubusercontent.com/amidaware/tacticalrmm/master/install.sh"
-
-sudo apt update
-sudo apt install -y curl wget jq lsb-release ca-certificates openssl
+SCRIPT_VERSION="200-enhanced"
+SCRIPT_URL="https://raw.githubusercontent.com/WallisonWS/tactical-rmm-enhanced/main/install.sh"
+ENHANCED_REPO_URL="https://github.com/WallisonWS/tactical-rmm-enhanced.git"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -14,33 +12,71 @@ NC='\033[0m'
 
 SCRIPTS_DIR='/opt/trmm-community-scripts'
 PYTHON_VER='3.12.13'
+GO_VER='1.23.4'
 SETTINGS_FILE='/rmm/api/tacticalrmm/tacticalrmm/settings.py'
 local_settings='/rmm/api/tacticalrmm/tacticalrmm/local_settings.py'
+SCRIPT_SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-TMP_FILE=$(mktemp -p "" "rmminstall_XXXXXXXXXX")
-curl -s -L "${SCRIPT_URL}" >${TMP_FILE}
-NEW_VER=$(grep "^SCRIPT_VERSION" "$TMP_FILE" | awk -F'[="]' '{print $3}')
-
-if [ "${SCRIPT_VERSION}" -ne "${NEW_VER}" ]; then
-  printf >&2 "${YELLOW}Old install script detected, downloading and replacing with the latest version...${NC}\n"
-  wget -q "${SCRIPT_URL}" -O install.sh
-  printf >&2 "${YELLOW}Script updated! Please re-run ./install.sh${NC}\n"
-  rm -f $TMP_FILE
+# Detect OS Family & Package Manager (Debian, Ubuntu, Fedora / RHEL)
+if [ ! -f /etc/os-release ]; then
+  echo -ne "${RED}ERROR: /etc/os-release not found. Unsupported operating system.${NC}\n"
   exit 1
 fi
 
-rm -f $TMP_FILE
+. /etc/os-release
+osname=$(echo "${ID}" | tr '[A-Z]' '[a-z]')
+oslike=$(echo "${ID_LIKE}" | tr '[A-Z]' '[a-z]')
+fullrelno="${VERSION_ID}"
+relno=$(echo "${VERSION_ID}" | cut -d. -f1)
+codename="${VERSION_CODENAME}"
 
-export DEBIAN_FRONTEND=noninteractive
+PKG_MGR=""
+OS_FAMILY=""
+WEB_USER="www-data"
+WEB_GROUP="www-data"
+REDIS_SVC="redis-server.service"
+
+if [[ "$osname" == "debian" ]] || [[ "$oslike" == *"debian"* && "$osname" != "ubuntu" ]]; then
+  PKG_MGR="apt"
+  OS_FAMILY="debian"
+  osname="debian"
+elif [[ "$osname" == "ubuntu" ]] || [[ "$oslike" == *"ubuntu"* ]]; then
+  PKG_MGR="apt"
+  OS_FAMILY="ubuntu"
+  osname="ubuntu"
+elif [[ "$osname" == "fedora" ]] || [[ "$osname" == "rhel" ]] || [[ "$osname" == "rocky" ]] || [[ "$osname" == "almalinux" ]] || [[ "$oslike" == *"fedora"* ]] || [[ "$oslike" == *"rhel"* ]]; then
+  PKG_MGR="dnf"
+  OS_FAMILY="fedora"
+  WEB_USER="nginx"
+  WEB_GROUP="nginx"
+  REDIS_SVC="redis.service"
+else
+  echo -ne "${RED}ERROR: Unsupported distribution (${ID}). Supported OS: Ubuntu (20.04/22.04/24.04/26.04+), Debian (11/12/13+), Fedora (38/39/40/41/42+) & RHEL/Rocky/AlmaLinux.${NC}\n"
+  exit 1
+fi
+
+printf >&2 "${GREEN}Detected OS: ${PRETTY_NAME} [Family: ${OS_FAMILY} | Package Manager: ${PKG_MGR}]${NC}\n"
+
+if [[ "$PKG_MGR" == "apt" ]]; then
+  export DEBIAN_FRONTEND=noninteractive
+  sudo apt update
+  sudo apt install -y curl wget jq lsb-release ca-certificates openssl gnupg tar git
+  if [ -z "$codename" ] && command -v lsb_release >/dev/null 2>&1; then
+    codename=$(lsb_release -sc)
+  fi
+elif [[ "$PKG_MGR" == "dnf" ]]; then
+  sudo dnf install -y curl wget jq ca-certificates openssl gnupg2 tar git policycoreutils
+  sudo groupadd -f www-data
+fi
 
 virt_type=$(systemd-detect-virt)
-if [[ "$virt_type" == "lxc" ]]; then
-  echo -ne "${RED}LXC is not supported, use a VM instead.${NC}\n"
+if [[ "$virt_type" == "lxc" ]] && [[ $* != *--allow-lxc* ]]; then
+  echo -ne "${RED}LXC is not supported by default, use a VM or pass --allow-lxc.${NC}\n"
   exit 1
 fi
 
-if [ -d /rmm/api/tacticalrmm ]; then
-  echo -ne "${RED}ERROR: Existing trmm installation found. The install script must be run on a clean server.${NC}\n"
+if [ -d /rmm/api/tacticalrmm ] && [[ $* != *--force* ]]; then
+  echo -ne "${RED}ERROR: Existing trmm installation found. The install script must be run on a clean server (or pass --force).${NC}\n"
   exit 1
 fi
 
@@ -51,59 +87,60 @@ if [[ "$arch" != "x86_64" ]] && [[ "$arch" != "aarch64" ]]; then
 fi
 
 memTotal=$(grep -i memtotal /proc/meminfo | awk '{print $2}')
-if [[ $memTotal -lt 3627528 ]]; then
-  echo -ne "${RED}ERROR: A minimum of 4GB of RAM is required.${NC}\n"
+if [[ $memTotal -lt 3627528 ]] && [[ $* != *--skip-ram-check* ]]; then
+  echo -ne "${RED}ERROR: A minimum of 4GB of RAM is required (pass --skip-ram-check for test VMs).${NC}\n"
   exit 1
 fi
-
-osname=$(lsb_release -si)
-osname=${osname^}
-osname=$(echo "$osname" | tr '[A-Z]' '[a-z]')
-fullrel=$(lsb_release -sd)
-codename=$(lsb_release -sc)
-relno=$(lsb_release -sr | cut -d. -f1)
-fullrelno=$(lsb_release -sr)
 
 not_supported() {
-  echo -ne "${RED}ERROR: Only Debian 13 and Ubuntu 26.04 are supported.${NC}\n"
+  echo -ne "${RED}ERROR: Supported Linux distributions are Debian (11/12/13+), Ubuntu (20.04/22.04/24.04/26.04+), and Fedora (38/39/40/41/42+).${NC}\n"
 }
 
-if [[ "$osname" == "debian" ]]; then
-  [[ "$relno" -eq 13 ]] || {
+if [[ "$OS_FAMILY" == "debian" ]]; then
+  if [[ "$relno" -lt 11 ]]; then
     not_supported
     exit 1
-  }
-elif [[ "$osname" == "ubuntu" ]]; then
-  [[ "$fullrelno" == "26.04" ]] || {
+  fi
+elif [[ "$OS_FAMILY" == "ubuntu" ]]; then
+  if [[ "$relno" -lt 20 ]]; then
     not_supported
     exit 1
-  }
-else
-  not_supported
-  exit 1
+  fi
+elif [[ "$OS_FAMILY" == "fedora" ]]; then
+  if [[ "$osname" == "fedora" && "$relno" -lt 36 ]]; then
+    not_supported
+    exit 1
+  fi
 fi
 
-if dpkg -l | grep -qi turnkey; then
-  echo -ne "${RED}Turnkey linux is not supported. Please use the official debian/ubuntu ISO.${NC}\n"
+if [[ "$PKG_MGR" == "apt" ]] && dpkg -l | grep -qi turnkey; then
+  echo -ne "${RED}Turnkey linux is not supported. Please use the official Debian/Ubuntu/Fedora ISO.${NC}\n"
   exit 1
 fi
 
 if ps aux | grep -v grep | grep -qi webmin; then
-  echo -ne "${RED}Webmin running, should not be installed. Please use the official debian/ubuntu ISO.${NC}\n"
+  echo -ne "${RED}Webmin running, should not be installed. Please use the official Debian/Ubuntu/Fedora ISO.${NC}\n"
   exit 1
 fi
 
-if [ $EUID -eq 0 ]; then
-  echo -ne "${RED}Do NOT run this script as root. Exiting.${NC}\n"
+if [ $EUID -eq 0 ] && [[ $* != *--allow-root* ]]; then
+  echo -ne "${RED}Do NOT run this script as root. Run as a standard sudo user (or pass --allow-root). Exiting.${NC}\n"
   exit 1
 fi
 
-if [[ "$LANG" != *".UTF-8" ]]; then
-  printf >&2 "\n${RED}System locale must be ${GREEN}<some language>.UTF-8${RED} not ${YELLOW}${LANG}${NC}\n"
-  printf >&2 "${RED}Run the following command and change the default locale to your language of choice${NC}\n\n"
-  printf >&2 "${GREEN}sudo dpkg-reconfigure locales${NC}\n\n"
-  printf >&2 "${RED}You will need to log out and back in for changes to take effect, then re-run this script.${NC}\n\n"
-  exit 1
+if [[ "$LANG" != *".UTF-8"* ]] && [[ "$LANG" != *".utf8"* ]]; then
+  printf >&2 "\n${YELLOW}Configuring UTF-8 system locale automatically...${NC}\n"
+  if [[ "$PKG_MGR" == "apt" ]]; then
+    sudo apt install -y locales
+    sudo sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen 2>/dev/null || true
+    sudo locale-gen en_US.UTF-8 || true
+    sudo localectl set-locale LANG=en_US.UTF-8 || true
+  elif [[ "$PKG_MGR" == "dnf" ]]; then
+    sudo dnf install -y glibc-langpack-en glibc-langpack-pt || true
+    sudo localectl set-locale LANG=en_US.UTF-8 || true
+  fi
+  export LANG=en_US.UTF-8
+  export LC_ALL=en_US.UTF-8
 fi
 
 if [ "$arch" = "x86_64" ]; then
@@ -254,7 +291,11 @@ elif [[ "$byocert" = true ]]; then
   CERT_PUB_KEY=$fullchain_path
   sudo chown ${USER}:${USER} $CERT_PRIV_KEY $CERT_PUB_KEY
 else
-  sudo apt install -y certbot
+  if [[ "$PKG_MGR" == "apt" ]]; then
+    sudo apt install -y certbot
+  elif [[ "$PKG_MGR" == "dnf" ]]; then
+    sudo dnf install -y certbot
+  fi
   print_green 'Getting wildcard cert'
 
   sudo certbot certonly --manual -d *.${rootdomain} --agree-tos --preferred-challenges dns -m ${letsemail} --no-eff-email
@@ -266,26 +307,38 @@ else
   sudo chown ${USER}:${USER} -R /etc/letsencrypt
 fi
 
-print_green 'Installing Nginx'
+print_green "Installing Nginx (${OS_FAMILY})"
 
-sudo mkdir -p /etc/apt/keyrings
+if [[ "$PKG_MGR" == "apt" ]]; then
+  sudo mkdir -p /etc/apt/keyrings
+  fetch_key https://nginx.org/keys/nginx_signing.key /etc/apt/keyrings/nginx.asc
 
-fetch_key https://nginx.org/keys/nginx_signing.key /etc/apt/keyrings/nginx.asc
-
-nginxrepo="$(
-  cat <<EOF
+  nginxrepo="$(
+    cat <<EOF
 Types: deb
 URIs: https://nginx.org/packages/${osname}
 Suites: ${codename}
 Components: nginx
 Signed-By: /etc/apt/keyrings/nginx.asc
 EOF
-)"
-echo "${nginxrepo}" | sudo tee /etc/apt/sources.list.d/nginx.sources >/dev/null
-printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n' | sudo tee /etc/apt/preferences.d/99nginx >/dev/null
+  )"
+  echo "${nginxrepo}" | sudo tee /etc/apt/sources.list.d/nginx.sources >/dev/null
+  printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n' | sudo tee /etc/apt/preferences.d/99nginx >/dev/null
 
-sudo apt update
-sudo apt install -y nginx
+  if ! sudo apt update || ! sudo apt install -y nginx; then
+    print_yellow "Official nginx.org repo not available for ${codename}, falling back to distribution nginx package..."
+    sudo rm -f /etc/apt/sources.list.d/nginx.sources /etc/apt/preferences.d/99nginx
+    sudo apt update
+    sudo apt install -y nginx
+  fi
+  NGINX_MODULES_INCLUDE="include /etc/nginx/modules-enabled/*.conf;"
+elif [[ "$PKG_MGR" == "dnf" ]]; then
+  sudo dnf install -y nginx
+  sudo usermod -aG www-data nginx 2>/dev/null || true
+  sudo usermod -aG nginx ${USER} 2>/dev/null || true
+  NGINX_MODULES_INCLUDE="include /usr/share/nginx/modules/*.conf;"
+fi
+
 sudo systemctl stop nginx
 
 nginxdefaultconf='/etc/nginx/nginx.conf'
@@ -293,10 +346,10 @@ nginxdefaultconf='/etc/nginx/nginx.conf'
 nginxconf="$(
   cat <<EOF
 worker_rlimit_nofile 1000000;
-user www-data;
+user ${WEB_USER};
 worker_processes auto;
 pid /run/nginx.pid;
-include /etc/nginx/modules-enabled/*.conf;
+${NGINX_MODULES_INCLUDE}
 
 events {
         worker_connections 4096;
@@ -328,47 +381,75 @@ done
 print_green 'Installing NodeJS'
 
 NODE_MAJOR=24
-fetch_key https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key /etc/apt/keyrings/nodesource.asc
+if [[ "$PKG_MGR" == "apt" ]]; then
+  fetch_key https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key /etc/apt/keyrings/nodesource.asc
 
-noderepo="$(
-  cat <<EOF
+  noderepo="$(
+    cat <<EOF
 Types: deb
 URIs: https://deb.nodesource.com/node_${NODE_MAJOR}.x
 Suites: nodistro
 Components: main
 Signed-By: /etc/apt/keyrings/nodesource.asc
 EOF
-)"
-echo "${noderepo}" | sudo tee /etc/apt/sources.list.d/nodesource.sources >/dev/null
+  )"
+  echo "${noderepo}" | sudo tee /etc/apt/sources.list.d/nodesource.sources >/dev/null
 
-sudo apt update
-sudo apt install -y gcc g++ make
-sudo apt install -y nodejs
-sudo npm install -g npm
+  sudo apt update
+  sudo apt install -y gcc g++ make
+  sudo apt install -y nodejs
+  sudo npm install -g npm
+elif [[ "$PKG_MGR" == "dnf" ]]; then
+  sudo dnf install -y gcc gcc-c++ make
+  sudo dnf install -y https://rpm.nodesource.com/pub_${NODE_MAJOR}.x/nodistro/repo/nodesource-release-nodistro-1.noarch.rpm || true
+  sudo dnf install -y nodejs npm
+  sudo npm install -g npm || true
+fi
 
 print_green "Installing Python ${PYTHON_VER}"
 
-sudo apt install -y build-essential zlib1g-dev libncurses-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev libbz2-dev
-numprocs=$(nproc)
-cd ~
-wget https://www.python.org/ftp/python/${PYTHON_VER}/Python-${PYTHON_VER}.tgz
-tar -xf Python-${PYTHON_VER}.tgz
-cd Python-${PYTHON_VER}
-./configure --enable-optimizations
-make -j $numprocs
-sudo make altinstall
-cd ~
-sudo rm -rf Python-${PYTHON_VER} Python-${PYTHON_VER}.tgz
+if [[ "$PKG_MGR" == "apt" ]]; then
+  sudo apt install -y build-essential zlib1g-dev libncurses-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev libbz2-dev
+elif [[ "$PKG_MGR" == "dnf" ]]; then
+  sudo dnf install -y gcc gcc-c++ make zlib-devel ncurses-devel gdbm-devel nss-devel openssl-devel readline-devel libffi-devel sqlite-devel bzip2-devel xz-devel libpq-devel python3-devel
+fi
+
+if command -v python3.12 >/dev/null 2>&1; then
+  print_green "Found system Python 3.12 ($(python3.12 --version))"
+  if [[ "$PKG_MGR" == "apt" ]]; then
+    sudo apt install -y python3.12-venv python3.12-dev || true
+  elif [[ "$PKG_MGR" == "dnf" ]]; then
+    sudo dnf install -y python3.12 python3.12-devel || true
+  fi
+else
+  numprocs=$(nproc)
+  cd ~
+  wget https://www.python.org/ftp/python/${PYTHON_VER}/Python-${PYTHON_VER}.tgz
+  tar -xf Python-${PYTHON_VER}.tgz
+  cd Python-${PYTHON_VER}
+  ./configure --enable-optimizations
+  make -j $numprocs
+  sudo make altinstall
+  cd ~
+  sudo rm -rf Python-${PYTHON_VER} Python-${PYTHON_VER}.tgz
+fi
 
 print_green 'Installing redis and git'
-sudo apt install -y redis git
+if [[ "$PKG_MGR" == "apt" ]]; then
+  sudo apt install -y redis git
+  sudo systemctl enable --now redis-server.service || sudo systemctl enable --now redis.service || true
+elif [[ "$PKG_MGR" == "dnf" ]]; then
+  sudo dnf install -y redis git
+  sudo systemctl enable --now redis.service
+fi
 
-print_green 'Installing postgresql'
+print_green "Installing PostgreSQL (${OS_FAMILY})"
 
-fetch_key https://www.postgresql.org/media/keys/ACCC4CF8.asc /etc/apt/keyrings/postgresql.asc
+if [[ "$PKG_MGR" == "apt" ]]; then
+  fetch_key https://www.postgresql.org/media/keys/ACCC4CF8.asc /etc/apt/keyrings/postgresql.asc
 
-pgrepo="$(
-  cat <<EOF
+  pgrepo="$(
+    cat <<EOF
 Types: deb
 URIs: https://apt.postgresql.org/pub/repos/apt
 Suites: ${codename}-pgdg
@@ -376,15 +457,30 @@ Components: main
 Architectures: ${pgarch}
 Signed-By: /etc/apt/keyrings/postgresql.asc
 EOF
-)"
-echo "${pgrepo}" | sudo tee /etc/apt/sources.list.d/pgdg.sources >/dev/null
+  )"
+  echo "${pgrepo}" | sudo tee /etc/apt/sources.list.d/pgdg.sources >/dev/null
 
-sudo apt update
-sudo apt install -y postgresql-18
-sleep 2
-sudo systemctl enable --now postgresql
+  sudo apt update
+  if ! sudo apt install -y postgresql-18; then
+    print_yellow "postgresql-18 not found in PGDG for ${codename}, installing latest available PostgreSQL..."
+    sudo apt install -y postgresql-17 || sudo apt install -y postgresql-16 || sudo apt install -y postgresql
+  fi
+  sleep 2
+  sudo systemctl enable --now postgresql
+elif [[ "$PKG_MGR" == "dnf" ]]; then
+  sudo dnf install -y postgresql-server postgresql-contrib
+  if [ ! -f /var/lib/pgsql/data/PG_VERSION ]; then
+    sudo postgresql-setup --initdb
+  fi
+  # Ensure local TCP password authentication (md5/scram-sha-256) is allowed on Fedora/RHEL
+  if [ -f /var/lib/pgsql/data/pg_hba.conf ]; then
+    sudo sed -i 's/^\(host\s\+all\s\+all\s\+127\.0\.0\.1\/32\s\+\)ident/\1scram-sha-256/g' /var/lib/pgsql/data/pg_hba.conf
+    sudo sed -i 's/^\(host\s\+all\s\+all\s\+::1\/128\s\+\)ident/\1scram-sha-256/g' /var/lib/pgsql/data/pg_hba.conf
+  fi
+  sudo systemctl enable --now postgresql
+fi
 
-until pg_isready >/dev/null; do
+until pg_isready >/dev/null 2>&1; do
   echo -ne "${GREEN}Waiting for PostgreSQL to be ready${NC}\n"
   sleep 3
 done
@@ -411,17 +507,22 @@ sudo -iu postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE meshcentral TO ${MES
 sudo -iu postgres psql -c "ALTER DATABASE meshcentral OWNER TO ${MESHPGUSER}"
 sudo -iu postgres psql -c "GRANT USAGE, CREATE ON SCHEMA PUBLIC TO ${MESHPGUSER}"
 
-print_green 'Cloning repos'
+print_green 'Cloning Tactical RMM Enhanced repository'
 
-sudo mkdir /rmm
+sudo mkdir -p /rmm
 sudo chown ${USER}:${USER} /rmm
 sudo mkdir -p /var/log/celery
 sudo chown ${USER}:${USER} /var/log/celery
-git clone https://github.com/amidaware/tacticalrmm.git /rmm/
+
+if [ -d "${SCRIPT_SOURCE_DIR}/api/tacticalrmm" ] && [ -d "${SCRIPT_SOURCE_DIR}/web" ]; then
+  print_green "Copying Tactical RMM Enhanced from local checkout (${SCRIPT_SOURCE_DIR})..."
+  cp -a "${SCRIPT_SOURCE_DIR}/." /rmm/
+else
+  git clone "${ENHANCED_REPO_URL}" /rmm/
+fi
 cd /rmm
 git config user.email "admin@example.com"
 git config user.name "Bob"
-git checkout master
 
 sudo mkdir -p ${SCRIPTS_DIR}
 sudo chown ${USER}:${USER} ${SCRIPTS_DIR}
@@ -576,21 +677,17 @@ sudo chmod +x /usr/local/bin/nats-api
 print_green 'Installing the backend'
 
 # for weasyprint
-if [[ "$osname" == "debian" ]]; then
-  count=$(dpkg -l | grep -E "libpango-1.0-0|libpangoft2-1.0-0" | wc -l)
-  if ! [ "$count" -eq 2 ]; then
-    sudo apt install -y libpango-1.0-0 libpangoft2-1.0-0
+if [[ "$PKG_MGR" == "apt" ]]; then
+  if [[ "$osname" == "debian" ]]; then
+    sudo apt install -y libpango-1.0-0 libpangoft2-1.0-0 || true
+  elif [[ "$osname" == "ubuntu" ]]; then
+    sudo apt install -y libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0 || true
   fi
-elif [[ "$osname" == "ubuntu" ]]; then
-  count=$(dpkg -l | grep -E "libpango-1.0-0|libharfbuzz0b|libpangoft2-1.0-0" | wc -l)
-  if ! [ "$count" -eq 3 ]; then
-    sudo apt install -y libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0
+  if ! dpkg -l | grep -q "^ii  libharfbuzz-subset0" && apt-cache show libharfbuzz-subset0 >/dev/null 2>&1; then
+    sudo apt install -y libharfbuzz-subset0
   fi
-fi
-
-# lets weasyprint subset fonts with harfbuzz instead of fonttools (not packaged on older distros)
-if ! dpkg -l | grep -q "^ii  libharfbuzz-subset0" && apt-cache show libharfbuzz-subset0 >/dev/null 2>&1; then
-  sudo apt install -y libharfbuzz-subset0
+elif [[ "$PKG_MGR" == "dnf" ]]; then
+  sudo dnf install -y pango harfbuzz cairo gobject-introspection gd || true
 fi
 
 SETUPTOOLS_VER=$(grep "^SETUPTOOLS_VER" "$SETTINGS_FILE" | awk -F'[= "]' '{print $5}')
@@ -639,7 +736,7 @@ After=network.target postgresql.service
 
 [Service]
 User=${USER}
-Group=www-data
+Group=${WEB_GROUP}
 WorkingDirectory=/rmm/api/tacticalrmm
 Environment="PATH=/rmm/api/env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=/rmm/api/env/bin/uwsgi --ini app.ini
@@ -660,7 +757,7 @@ After=network.target
 
 [Service]
 User=${USER}
-Group=www-data
+Group=${WEB_GROUP}
 WorkingDirectory=/rmm/api/tacticalrmm
 Environment="PATH=/rmm/api/env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=/rmm/api/env/bin/uvicorn --uds /rmm/daphne.sock --forwarded-allow-ips='*' tacticalrmm.asgi:application
@@ -853,17 +950,17 @@ EOF
 )"
 echo "${nginxmesh}" | sudo tee /etc/nginx/sites-available/meshcentral.conf >/dev/null
 
-sudo ln -s /etc/nginx/sites-available/rmm.conf /etc/nginx/sites-enabled/rmm.conf
-sudo ln -s /etc/nginx/sites-available/meshcentral.conf /etc/nginx/sites-enabled/meshcentral.conf
+sudo ln -sf /etc/nginx/sites-available/rmm.conf /etc/nginx/sites-enabled/rmm.conf
+sudo ln -sf /etc/nginx/sites-available/meshcentral.conf /etc/nginx/sites-enabled/meshcentral.conf
 
-sudo mkdir /etc/conf.d
+sudo mkdir -p /etc/conf.d
 
 celeryservice="$(
   cat <<EOF
 [Unit]
 Description=Celery Service V3
-After=network.target redis-server.service postgresql.service
-BindsTo=redis-server.service
+After=network.target ${REDIS_SVC} postgresql.service
+BindsTo=${REDIS_SVC}
 
 [Service]
 Type=forking
@@ -879,7 +976,7 @@ RestartSec=15s
 TimeoutStopSec=30
 
 [Install]
-WantedBy=multi-user.target redis-server.service
+WantedBy=multi-user.target ${REDIS_SVC}
 EOF
 )"
 echo "${celeryservice}" | sudo tee /etc/systemd/system/celery.service >/dev/null
@@ -910,8 +1007,8 @@ celerybeatservice="$(
   cat <<EOF
 [Unit]
 Description=Celery Beat Service V5
-After=network.target redis-server.service postgresql.service
-BindsTo=redis-server.service
+After=network.target ${REDIS_SVC} postgresql.service
+BindsTo=${REDIS_SVC}
 
 [Service]
 Type=simple
@@ -927,7 +1024,7 @@ RestartSec=10s
 TimeoutStopSec=30
 
 [Install]
-WantedBy=multi-user.target redis-server.service
+WantedBy=multi-user.target ${REDIS_SVC}
 EOF
 )"
 echo "${celerybeatservice}" | sudo tee /etc/systemd/system/celerybeat.service >/dev/null
@@ -966,15 +1063,60 @@ if [ -d ~/.config ]; then
   sudo chown -R $USER:$USER ~/.config
 fi
 
-print_green 'Installing the frontend'
+print_green 'Building & Installing Tactical RMM Enhanced Frontend (PT-BR / EN-US / ES-ES)'
 
-webtar="trmm-web-v${WEB_VERSION}.tar.gz"
-wget -q ${WEBTAR_URL} -O /tmp/${webtar}
-sudo mkdir -p /var/www/rmm
-sudo tar -xzf /tmp/${webtar} -C /var/www/rmm
+sudo mkdir -p /var/www/rmm/dist
+if [ -d /rmm/web ] && [ -f /rmm/web/package.json ]; then
+  cd /rmm/web
+  npm install --legacy-peer-deps || npm install
+  npm run build
+  sudo cp -a /rmm/web/dist/. /var/www/rmm/dist/
+else
+  webtar="trmm-web-v${WEB_VERSION}.tar.gz"
+  wget -q ${WEBTAR_URL} -O /tmp/${webtar}
+  sudo tar -xzf /tmp/${webtar} -C /var/www/rmm
+  rm -f /tmp/${webtar}
+fi
 echo "window._env_ = {PROD_URL: \"https://${rmmdomain}\"}" | sudo tee /var/www/rmm/dist/env-config.js >/dev/null
-sudo chown www-data:www-data -R /var/www/rmm/dist
-rm -f /tmp/${webtar}
+
+# Compile Enhanced Go Agents (Windows & Linux) so endpoints can download directly from this RMM server
+if [ -d /rmm/rmmagent ]; then
+  print_green 'Compiling Enhanced Go Agents for Windows (amd64/386) and Linux (amd64/arm64)'
+  if ! command -v go >/dev/null 2>&1; then
+    go_tmp=$(mktemp -d -t go-XXXXXXXXXX)
+    wget -q "https://go.dev/dl/go${GO_VER}.linux-${natsarch}.tar.gz" -P "${go_tmp}" && \
+      sudo rm -rf /usr/local/go && \
+      sudo tar -C /usr/local -xzf "${go_tmp}/go${GO_VER}.linux-${natsarch}.tar.gz"
+    rm -rf "${go_tmp}"
+    export PATH="/usr/local/go/bin:${PATH}"
+  fi
+  if command -v go >/dev/null 2>&1; then
+    sudo mkdir -p /var/www/rmm/dist/agents
+    sudo chown -R ${USER}:${USER} /var/www/rmm/dist/agents
+    cd /rmm/rmmagent
+    AGENT_VER=$(grep "^LATEST_AGENT_VER" "$SETTINGS_FILE" | awk -F'[= "]' '{print $5}')
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-linux-amd64" . || true
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-linux-arm64" . || true
+    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-windows-amd64.exe" . || true
+    CGO_ENABLED=0 GOOS=windows GOARCH=386 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-windows-386.exe" . || true
+  fi
+fi
+
+sudo chown ${WEB_USER}:${WEB_GROUP} -R /var/www/rmm/dist
+
+# Configure Fedora / RHEL Firewalld & SELinux permissions if active
+if [[ "$OS_FAMILY" == "fedora" ]]; then
+  if systemctl is-active --quiet firewalld; then
+    print_green 'Configuring Firewalld for HTTP/HTTPS on Fedora/RHEL'
+    sudo firewall-cmd --permanent --add-service=http >/dev/null 2>&1 || true
+    sudo firewall-cmd --permanent --add-service=https >/dev/null 2>&1 || true
+    sudo firewall-cmd --reload >/dev/null 2>&1 || true
+  fi
+  if command -v setsebool >/dev/null 2>&1; then
+    sudo setsebool -P httpd_can_network_connect 1 >/dev/null 2>&1 || true
+  fi
+  sudo chmod o+x /rmm /rmm/api /rmm/api/tacticalrmm 2>/dev/null || true
+fi
 
 nginxfrontend="$(
   cat <<EOF
@@ -1016,7 +1158,7 @@ EOF
 )"
 echo "${nginxfrontend}" | sudo tee /etc/nginx/sites-available/frontend.conf >/dev/null
 
-sudo ln -s /etc/nginx/sites-available/frontend.conf /etc/nginx/sites-enabled/frontend.conf
+sudo ln -sf /etc/nginx/sites-available/frontend.conf /etc/nginx/sites-enabled/frontend.conf
 
 print_green 'Enabling Services'
 

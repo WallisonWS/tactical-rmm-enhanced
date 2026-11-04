@@ -1,8 +1,8 @@
 <template>
-  <q-card style="min-width: 35vw">
-    <q-card-section class="row">
+  <q-card style="min-width: 42vw">
+    <q-card-section class="row items-center">
       <q-card-actions align="left">
-        <div class="text-h6">Add an agent</div>
+        <div class="text-h6">{{ t("installAgent.title") }}</div>
       </q-card-actions>
       <q-space />
       <q-card-actions align="right">
@@ -16,7 +16,7 @@
             outlined
             dense
             options-dense
-            label="Client"
+            :label="t('installAgent.client')"
             v-model="client"
             :options="client_options"
             @update:model-value="site = sites[0]"
@@ -27,26 +27,27 @@
             dense
             options-dense
             outlined
-            label="Site"
+            :label="t('installAgent.site')"
             v-model="site"
             :options="sites"
           />
         </q-card-section>
         <q-card-section>
+          <div class="text-subtitle2 q-mb-xs">{{ t("installAgent.osLabel") }}</div>
           <div class="q-gutter-sm">
             <q-radio
               v-model="agentOS"
               val="windows"
-              label="Windows"
+              label="Windows (10 / 11 / Server)"
               @update:model-value="
-                installMethod = 'manual';
+                installMethod = 'powershell';
                 goarch = GOARCH_AMD64;
               "
             />
             <q-radio
               v-model="agentOS"
               val="linux"
-              label="Linux"
+              label="Linux (Ubuntu / Debian / Fedora)"
               @update:model-value="
                 installMethod = 'bash';
                 goarch = GOARCH_AMD64;
@@ -63,18 +64,46 @@
             />
           </div>
         </q-card-section>
+
+        <q-card-section v-show="agentOS === 'linux'">
+          <div class="text-subtitle2 q-mb-xs">{{ t("installAgent.linuxDistroLabel") }}</div>
+          <div class="column q-gutter-xs">
+            <q-radio
+              v-model="linuxDistro"
+              val="universal"
+              :label="t('installAgent.distroUniversal')"
+            />
+            <q-radio
+              v-model="linuxDistro"
+              val="ubuntu"
+              :label="t('installAgent.distroUbuntu')"
+            />
+            <q-radio
+              v-model="linuxDistro"
+              val="debian"
+              :label="t('installAgent.distroDebian')"
+            />
+            <q-radio
+              v-model="linuxDistro"
+              val="fedora"
+              :label="t('installAgent.distroFedora')"
+            />
+          </div>
+        </q-card-section>
+
         <q-card-section>
+          <div class="text-subtitle2 q-mb-xs">{{ t("installAgent.agentType") }}</div>
           <div class="q-gutter-sm">
             <q-radio
               v-model="agenttype"
               val="server"
-              label="Server"
+              :label="t('installAgent.server')"
               @update:model-value="power = false"
             />
             <q-radio
               v-model="agenttype"
               val="workstation"
-              label="Workstation"
+              :label="t('installAgent.workstation')"
             />
           </div>
         </q-card-section>
@@ -85,16 +114,16 @@
               dense
               type="number"
               filled
-              label="Token expiration (hours)"
-              style="max-width: 200px"
+              :label="t('installAgent.tokenExpire')"
+              style="max-width: 220px"
               stack-label
             />
           </div>
         </q-card-section>
         <q-card-section v-show="agentOS === 'windows'">
           <div class="q-gutter-sm">
-            <q-checkbox v-model="rdp" dense label="Enable RDP" />
-            <q-checkbox v-model="ping" dense label="Enable Ping">
+            <q-checkbox v-model="rdp" dense :label="t('installAgent.enableRdp')" />
+            <q-checkbox v-model="ping" dense :label="t('installAgent.enablePing')">
               <q-tooltip>
                 Enable ICMP echo requests in the local firewall
               </q-tooltip>
@@ -103,17 +132,17 @@
               v-model="power"
               dense
               v-show="agenttype === 'workstation'"
-              label="Disable sleep/hibernate"
+              :label="t('installAgent.disableSleep')"
             />
           </div>
         </q-card-section>
         <q-card-section>
-          Arch
+          <div class="text-subtitle2 q-mb-xs">{{ t("installAgent.arch") }}</div>
           <div class="q-gutter-sm">
             <q-radio
               v-model="goarch"
               :val="GOARCH_AMD64"
-              label="64 bit"
+              label="64 bit (x86_64 / amd64)"
               v-show="agentOS === 'windows' || agentOS === 'linux'"
             />
             <q-radio
@@ -125,13 +154,13 @@
             <q-radio
               v-model="goarch"
               :val="GOARCH_i386"
-              label="32 bit"
+              label="32 bit (i386)"
               v-show="agentOS !== 'darwin'"
             />
             <q-radio
               v-model="goarch"
               :val="GOARCH_ARM64"
-              label="ARM 64 bit"
+              label="ARM 64 bit (aarch64)"
               v-show="agentOS === 'linux'"
             />
             <q-radio
@@ -149,19 +178,19 @@
           </div>
         </q-card-section>
         <q-card-section>
-          Installation Method
+          <div class="text-subtitle2 q-mb-xs">{{ t("installAgent.method") }}</div>
           <div class="q-gutter-sm">
-            <q-radio
-              v-model="installMethod"
-              val="manual"
-              v-show="agentOS === 'windows'"
-              label="Standard EXE"
-            />
             <q-radio
               v-model="installMethod"
               val="powershell"
               v-show="agentOS === 'windows'"
-              label="Powershell"
+              label="PowerShell (.ps1)"
+            />
+            <q-radio
+              v-model="installMethod"
+              val="manual"
+              v-show="agentOS === 'windows'"
+              label="Standard EXE / Manual"
             />
             <q-radio
               v-model="installMethod"
@@ -169,10 +198,22 @@
               v-show="agentOS === 'windows'"
               label="Generated EXE"
             />
+            <q-radio
+              v-model="installMethod"
+              val="bash"
+              v-show="agentOS === 'linux'"
+              :label="t('installAgent.linuxScript')"
+            />
+            <q-radio
+              v-model="installMethod"
+              val="linux_manual"
+              v-show="agentOS === 'linux'"
+              :label="t('installAgent.linuxManual')"
+            />
           </div>
         </q-card-section>
         <q-card-actions align="left">
-          <q-btn :label="installButtonText" color="primary" type="submit" />
+          <q-btn :label="installButtonText" color="primary" icon="download" type="submit" />
         </q-card-actions>
       </q-form>
     </q-card-section>
@@ -186,6 +227,7 @@
 import mixins from "@/mixins/mixins";
 import AgentDownload from "@/components/modals/agents/AgentDownload.vue";
 import { getBaseUrl } from "@/boot/axios";
+import { t } from "@/i18n";
 import {
   GOARCH_AMD64,
   GOARCH_i386,
@@ -216,12 +258,14 @@ export default {
       ping: false,
       showAgentDownload: false,
       info: {},
-      installMethod: "manual",
+      installMethod: "powershell",
       goarch: GOARCH_AMD64,
       agentOS: "windows",
+      linuxDistro: "universal",
     };
   },
   methods: {
+    t,
     getClients() {
       this.$q.loading.show();
       this.$axios
@@ -273,15 +317,21 @@ export default {
         api,
         fileName,
         plat: this.agentOS,
+        distro: this.linuxDistro,
       };
 
-      if (this.installMethod === "manual" || this.installMethod === "mac") {
+      if (
+        this.installMethod === "manual" ||
+        this.installMethod === "mac" ||
+        this.installMethod === "linux_manual"
+      ) {
         this.$axios.post("/agents/installer/", data).then((r) => {
           this.info = {
             expires: this.expires,
             data: r.data,
             goarch: this.goarch,
             plat: this.agentOS,
+            distro: this.linuxDistro,
           };
           this.showAgentDownload = true;
         });
@@ -296,7 +346,6 @@ export default {
             message: `
               This installation method may trigger Antivirus (AV), Windows SmartScreen, or Untrusted Publisher warnings.<br><br>
               We strongly recommend using the Standard EXE or PowerShell installer instead.<br><br>
-              This method may also expose your environment to the risk of unauthorized or unexpected agents appearing. Please read <a target="_blank" rel="noopener noreferrer" href="https://docs.tacticalrmm.com/faq/#help-ive-been-hacked-and-there-are-weird-agents-appearing-in-my-tactical-rmm">this guidance</a> before continuing.<br><br>
               Proceed only if you understand and accept these risks.
               `,
             color: "negative",
@@ -337,7 +386,9 @@ export default {
       ) {
         this.$q.loading.show();
         let ext = this.installMethod === "powershell" ? "ps1" : "sh";
-        const scriptName = `rmm-${clientStripped}-${siteStripped}-${this.agenttype}.${ext}`;
+        let distroTag =
+          this.installMethod === "bash" ? `-${this.linuxDistro}` : "";
+        const scriptName = `rmm-${clientStripped}-${siteStripped}-${this.agenttype}${distroTag}.${ext}`;
         this.$axios
           .post("/agents/installer/", data, { responseType: "blob" })
           .then(({ data }) => {
@@ -366,26 +417,19 @@ export default {
       return !!this.client ? this.formatSiteOptions(this.client.sites) : [];
     },
     installButtonText() {
-      let text;
       switch (this.installMethod) {
         case "exe":
-          text = "Generate and download exe";
-          break;
+          return this.t("installAgent.btnExe");
         case "powershell":
-          text = "Download powershell script";
-          break;
+          return this.t("installAgent.btnPs1");
         case "manual":
-          text = "Show installation instructions";
-          break;
-        case "bash":
-          text = "Download linux install script";
-          break;
+        case "linux_manual":
         case "mac":
-          text = "Show installation instructions";
-          break;
+          return this.t("installAgent.btnManual");
+        case "bash":
+          return this.t("installAgent.btnBash");
       }
-
-      return text;
+      return this.t("installAgent.btnManual");
     },
   },
   mounted() {

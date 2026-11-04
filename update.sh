@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-SCRIPT_VERSION="161"
-SCRIPT_URL='https://raw.githubusercontent.com/amidaware/tacticalrmm/master/update.sh'
-LATEST_SETTINGS_URL='https://raw.githubusercontent.com/amidaware/tacticalrmm/master/api/tacticalrmm/tacticalrmm/settings.py'
+SCRIPT_VERSION="200-enhanced"
+SCRIPT_URL='https://raw.githubusercontent.com/WallisonWS/tactical-rmm-enhanced/main/update.sh'
+LATEST_SETTINGS_URL='https://raw.githubusercontent.com/WallisonWS/tactical-rmm-enhanced/main/api/tacticalrmm/tacticalrmm/settings.py'
 YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -14,31 +14,51 @@ PYTHON_VER='3.12.13'
 SETTINGS_FILE='/rmm/api/tacticalrmm/tacticalrmm/settings.py'
 local_settings='/rmm/api/tacticalrmm/tacticalrmm/local_settings.py'
 
-TMP_FILE=$(mktemp -p "" "rmmupdate_XXXXXXXXXX")
-curl -s -L "${SCRIPT_URL}" >${TMP_FILE}
-NEW_VER=$(grep "^SCRIPT_VERSION" "$TMP_FILE" | awk -F'[="]' '{print $3}')
+# Detect OS Family & Package Manager (Debian, Ubuntu, Fedora / RHEL)
+. /etc/os-release
+osname=$(echo "${ID}" | tr '[A-Z]' '[a-z]')
+oslike=$(echo "${ID_LIKE}" | tr '[A-Z]' '[a-z]')
+relno=$(echo "${VERSION_ID}" | cut -d. -f1)
+fullrelno="${VERSION_ID}"
+codename="${VERSION_CODENAME}"
 
-if [ "${SCRIPT_VERSION}" -ne "${NEW_VER}" ]; then
-  printf >&2 "${YELLOW}Old update script detected, downloading and replacing with the latest version...${NC}\n"
-  wget -q "${SCRIPT_URL}" -O "${THIS_SCRIPT}"
-  exec ${THIS_SCRIPT}
+PKG_MGR="apt"
+OS_FAMILY="debian"
+WEB_USER="www-data"
+WEB_GROUP="www-data"
+REDIS_SVC="${REDIS_SVC}"
+
+if [[ "$osname" == "fedora" ]] || [[ "$osname" == "rhel" ]] || [[ "$osname" == "rocky" ]] || [[ "$osname" == "almalinux" ]] || [[ "$oslike" == *"fedora"* ]] || [[ "$oslike" == *"rhel"* ]]; then
+  PKG_MGR="dnf"
+  OS_FAMILY="fedora"
+  WEB_USER="nginx"
+  WEB_GROUP="nginx"
+  REDIS_SVC="redis.service"
+elif [[ "$osname" == "ubuntu" ]] || [[ "$oslike" == *"ubuntu"* ]]; then
+  PKG_MGR="apt"
+  OS_FAMILY="ubuntu"
+  osname="ubuntu"
 fi
 
-rm -f $TMP_FILE
-
-export DEBIAN_FRONTEND=noninteractive
+if [[ "$PKG_MGR" == "apt" ]]; then
+  export DEBIAN_FRONTEND=noninteractive
+fi
 
 force=false
 if [[ $* == *--force* ]]; then
   force=true
 fi
 
-if [ $EUID -eq 0 ]; then
+if [ $EUID -eq 0 ] && [[ $* != *--allow-root* ]]; then
   echo -ne "\033[0;31mDo NOT run this script as root. Exiting.\e[0m\n"
   exit 1
 fi
 
-sudo apt update
+if [[ "$PKG_MGR" == "apt" ]]; then
+  sudo apt update
+elif [[ "$PKG_MGR" == "dnf" ]]; then
+  sudo dnf makecache
+fi
 
 strip="User="
 ORIGUSER=$(grep ${strip} /etc/systemd/system/rmm.service | sed -e "s/^${strip}//")
@@ -92,7 +112,7 @@ ExecStart=/usr/local/bin/nats-server -c /rmm/api/tacticalrmm/nats-rmm.conf
 ExecReload=/usr/bin/kill -s HUP \$MAINPID
 ExecStop=/usr/bin/kill -s SIGINT \$MAINPID
 User=${USER}
-Group=www-data
+Group=${WEB_GROUP}
 Restart=always
 RestartSec=5s
 LimitNOFILE=1000000
@@ -122,8 +142,8 @@ if ! grep -q V3 /etc/systemd/system/celery.service; then
     cat <<EOF
 [Unit]
 Description=Celery Service V3
-After=network.target redis-server.service postgresql.service
-BindsTo=redis-server.service
+After=network.target ${REDIS_SVC} postgresql.service
+BindsTo=${REDIS_SVC}
 
 [Service]
 Type=forking
@@ -139,7 +159,7 @@ RestartSec=15s
 TimeoutStopSec=30
 
 [Install]
-WantedBy=multi-user.target redis-server.service
+WantedBy=multi-user.target ${REDIS_SVC}
 EOF
   )"
   echo "${celeryservice}" | sudo tee /etc/systemd/system/celery.service >/dev/null
@@ -154,8 +174,8 @@ if ! grep -q V5 /etc/systemd/system/celerybeat.service; then
     cat <<EOF
 [Unit]
 Description=Celery Beat Service V5
-After=network.target redis-server.service postgresql.service
-BindsTo=redis-server.service
+After=network.target ${REDIS_SVC} postgresql.service
+BindsTo=${REDIS_SVC}
 
 [Service]
 Type=simple
@@ -171,7 +191,7 @@ RestartSec=10s
 TimeoutStopSec=30
 
 [Install]
-WantedBy=multi-user.target redis-server.service
+WantedBy=multi-user.target ${REDIS_SVC}
 EOF
   )"
   echo "${celerybeatservice}" | sudo tee /etc/systemd/system/celerybeat.service >/dev/null
@@ -191,7 +211,7 @@ After=network.target
 
 [Service]
 User=${USER}
-Group=www-data
+Group=${WEB_GROUP}
 WorkingDirectory=/rmm/api/tacticalrmm
 Environment="PATH=/rmm/api/env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=/rmm/api/env/bin/uvicorn --uds /rmm/daphne.sock --forwarded-allow-ips='*' tacticalrmm.asgi:application
@@ -208,9 +228,7 @@ EOF
   sudo systemctl daemon-reload
 fi
 
-osname=$(lsb_release -si)
-osname=${osname^}
-osname=$(echo "$osname" | tr '[A-Z]' '[a-z]')
+# osname already detected from /etc/os-release
 
 if [[ "$osname" == "debian" && "$(lsb_release -sr | cut -d. -f1)" -eq 11 ]]; then
   printf >&2 "${YELLOW}WARNING: Debian 11 is end-of-life. Please plan a backup/restore to Debian 13 or Ubuntu 26.04.${NC}\n"
@@ -303,7 +321,7 @@ if ! [[ $CHECK_NGINX_SITESENABLED ]]; then
   nginxconf="$(
     cat <<EOF
 worker_rlimit_nofile 1000000;
-user www-data;
+user ${WEB_USER};
 worker_processes auto;
 pid /run/nginx.pid;
 include /etc/nginx/modules-enabled/*.conf;
@@ -343,7 +361,7 @@ fi
 HAS_PY312=$(python3.12 --version | grep ${PYTHON_VER})
 if ! [[ $HAS_PY312 ]]; then
   printf >&2 "${GREEN}Updating to ${PYTHON_VER}${NC}\n"
-  sudo apt install -y build-essential zlib1g-dev libncurses-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev libbz2-dev
+  if [[ "$PKG_MGR" == "apt" ]]; then sudo apt install -y build-essential zlib1g-dev libncurses-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev libbz2-dev; else sudo dnf install -y gcc gcc-c++ make zlib-devel ncurses-devel gdbm-devel nss-devel openssl-devel readline-devel libffi-devel sqlite-devel bzip2-devel xz-devel libpq-devel python3-devel; fi
   numprocs=$(nproc)
   cd ~
   wget https://www.python.org/ftp/python/${PYTHON_VER}/Python-${PYTHON_VER}.tgz
@@ -483,7 +501,7 @@ apply_jq_filter='
 
 if ! command -v jq >/dev/null; then
   echo "installing jq"
-  sudo apt-get install -y jq >/dev/null
+  if [[ "$PKG_MGR" == "apt" ]]; then sudo apt-get install -y jq >/dev/null; else sudo dnf install -y jq >/dev/null; fi
 fi
 
 if command -v jq >/dev/null; then
@@ -535,14 +553,12 @@ EOF
   sudo systemctl start meshcentral
 fi
 
-# update from main repo
+# update from Tactical RMM Enhanced repo
 cd /rmm
 git config user.email "admin@example.com"
 git config user.name "Bob"
 git fetch
-git checkout master
-git reset --hard FETCH_HEAD
-git clean -df
+git checkout main 2>/dev/null || git checkout master
 git pull
 
 # update from community-scripts repo
@@ -682,21 +698,35 @@ if ! [[ $CHECK_HOSTS ]]; then
   fi
 fi
 
-if [ -d /rmm/web ]; then
-  rm -rf /rmm/web
+sudo mkdir -p /var/www/rmm/dist
+if [ -d /rmm/web ] && [ -f /rmm/web/package.json ]; then
+  printf >&2 "${GREEN}Building Tactical RMM Enhanced Frontend (PT-BR / EN-US / ES-ES)...${NC}\n"
+  cd /rmm/web
+  npm install --legacy-peer-deps || npm install
+  npm run build
+  sudo cp -a /rmm/web/dist/. /var/www/rmm/dist/
+else
+  webtar="trmm-web-v${WEB_VERSION}.tar.gz"
+  wget -q ${WEBTAR_URL} -O /tmp/${webtar}
+  sudo rm -rf /var/www/rmm/dist
+  sudo tar -xzf /tmp/${webtar} -C /var/www/rmm
+  rm -f /tmp/${webtar}
 fi
 
-if [ ! -d /var/www/rmm ]; then
-  sudo mkdir -p /var/www/rmm
+if [ -d /rmm/rmmagent ] && command -v go >/dev/null 2>&1; then
+  printf >&2 "${GREEN}Rebuilding Enhanced Go Agents (Windows & Linux)...${NC}\n"
+  sudo mkdir -p /var/www/rmm/dist/agents
+  sudo chown -R ${USER}:${USER} /var/www/rmm/dist/agents
+  cd /rmm/rmmagent
+  AGENT_VER=$(grep "^LATEST_AGENT_VER" "$SETTINGS_FILE" | awk -F'[= "]' '{print $5}')
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-linux-amd64" . || true
+  CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-linux-arm64" . || true
+  CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-windows-amd64.exe" . || true
+  CGO_ENABLED=0 GOOS=windows GOARCH=386 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-windows-386.exe" . || true
 fi
 
-webtar="trmm-web-v${WEB_VERSION}.tar.gz"
-wget -q ${WEBTAR_URL} -O /tmp/${webtar}
-sudo rm -rf /var/www/rmm/dist
-sudo tar -xzf /tmp/${webtar} -C /var/www/rmm
 echo "window._env_ = {PROD_URL: \"https://${API}\"}" | sudo tee /var/www/rmm/dist/env-config.js >/dev/null
-sudo chown www-data:www-data -R /var/www/rmm/dist
-rm -f /tmp/${webtar}
+sudo chown ${WEB_USER}:${WEB_GROUP} -R /var/www/rmm/dist
 
 for i in nats nats-api rmm daphne celery celerybeat nginx; do
   printf >&2 "${GREEN}Starting ${i} service${NC}\n"
