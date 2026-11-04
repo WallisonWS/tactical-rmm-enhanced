@@ -1,0 +1,385 @@
+import uuid
+
+from django.core.cache import cache
+from rest_framework import serializers
+
+from tacticalrmm.constants import (
+    AGENT_CHECKS_CACHE_PREFIX,
+    AGENT_STATUS_ONLINE,
+    ALL_TIMEZONES,
+    FILE_BROWSER_MAX_UPLOAD_FILE_SIZE_BYTES,
+    FileBrowserModeChoices,
+    TerminalModeChoices,
+)
+from winupdate.serializers import WinUpdatePolicySerializer
+
+from .models import Agent, AgentCustomField, AgentHistory, Note
+
+
+class AgentCustomFieldSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AgentCustomField
+        fields = (
+            "id",
+            "field",
+            "agent",
+            "value",
+            "string_value",
+            "bool_value",
+            "multiple_value",
+        )
+        extra_kwargs = {
+            "string_value": {"write_only": True},
+            "bool_value": {"write_only": True},
+            "multiple_value": {"write_only": True},
+        }
+
+
+class AgentSerializer(serializers.ModelSerializer):
+    winupdatepolicy = WinUpdatePolicySerializer(many=True, read_only=True)
+    status = serializers.ReadOnlyField()
+    cpu_model = serializers.ReadOnlyField()
+    local_ips = serializers.ReadOnlyField()
+    make_model = serializers.ReadOnlyField()
+    physical_disks = serializers.ReadOnlyField()
+    graphics = serializers.ReadOnlyField()
+    checks = serializers.ReadOnlyField()
+    timezone = serializers.ReadOnlyField()
+    all_timezones = serializers.SerializerMethodField()
+    client = serializers.ReadOnlyField(source="client.name")
+    site_name = serializers.ReadOnlyField(source="site.name")
+    custom_fields = AgentCustomFieldSerializer(many=True, read_only=True)
+    patches_last_installed = serializers.ReadOnlyField()
+    last_seen = serializers.ReadOnlyField()
+    applied_policies = serializers.SerializerMethodField()
+    effective_patch_policy = serializers.SerializerMethodField()
+    alert_template = serializers.SerializerMethodField()
+    effective_default_shell = serializers.SerializerMethodField()
+
+    def get_effective_default_shell(self, obj):
+        return obj.effective_default_shell
+
+    def get_alert_template(self, obj):
+        from alerts.serializers import AlertTemplateSerializer
+
+        return (
+            AlertTemplateSerializer(obj.alert_template).data
+            if obj.alert_template
+            else None
+        )
+
+    def get_effective_patch_policy(self, obj):
+        return WinUpdatePolicySerializer(obj.get_patch_policy()).data
+
+    def get_applied_policies(self, obj):
+        from automation.serializers import PolicySerializer
+
+        policies = obj.get_agent_policies()
+
+        # need to serialize model objects manually
+        for key, policy in policies.items():
+            if policy:
+                policies[key] = PolicySerializer(policy).data
+
+        return policies
+
+    def get_all_timezones(self, obj):
+        return ALL_TIMEZONES
+
+    class Meta:
+        model = Agent
+        exclude = ["id"]
+
+
+class AgentTableSerializer(serializers.ModelSerializer):
+    status = serializers.ReadOnlyField()
+    checks = serializers.SerializerMethodField()
+    client_name = serializers.ReadOnlyField(source="site.client.name")
+    site_name = serializers.ReadOnlyField(source="site.name")
+    logged_username = serializers.SerializerMethodField()
+    italic = serializers.SerializerMethodField()
+    policy = serializers.ReadOnlyField(source="policy.id")
+    alert_template = serializers.SerializerMethodField()
+    pending_actions_count = serializers.SerializerMethodField()
+    has_patches_pending = serializers.SerializerMethodField()
+    cpu_model = serializers.ReadOnlyField()
+    graphics = serializers.ReadOnlyField()
+    local_ips = serializers.ReadOnlyField()
+    make_model = serializers.ReadOnlyField()
+    physical_disks = serializers.ReadOnlyField()
+    serial_number = serializers.ReadOnlyField()
+    custom_fields = AgentCustomFieldSerializer(many=True, read_only=True)
+
+    def get_has_patches_pending(self, obj) -> bool:
+        return getattr(obj, "has_patches_pending", False)
+
+    def get_checks(self, obj) -> dict:
+        data = cache.get(f"{AGENT_CHECKS_CACHE_PREFIX}{obj.pk}")
+        if data is None:
+            return {
+                "total": 0,
+                "passing": 0,
+                "failing": 0,
+                "warning": 0,
+                "info": 0,
+                "has_failing_checks": False,
+            }
+        return data
+
+    def get_pending_actions_count(self, obj) -> int:
+        return getattr(obj, "_pending_actions_count", 0)
+
+    def get_alert_template(self, obj):
+        if not obj.alert_template:
+            return None
+
+        return {
+            "name": obj.alert_template.name,
+            "always_email": obj.alert_template.agent_always_email,
+            "always_text": obj.alert_template.agent_always_text,
+            "always_alert": obj.alert_template.agent_always_alert,
+        }
+
+    def get_logged_username(self, obj) -> str:
+        if obj.logged_in_username == "None" and obj.status == AGENT_STATUS_ONLINE:
+            return obj.last_logged_in_user
+        elif obj.logged_in_username != "None":
+            return obj.logged_in_username
+
+        return "-"
+
+    def get_italic(self, obj) -> bool:
+        return obj.logged_in_username == "None" and obj.status == AGENT_STATUS_ONLINE
+
+    class Meta:
+        model = Agent
+        fields = [
+            "agent_id",
+            "alert_template",
+            "hostname",
+            "site_name",
+            "client_name",
+            "monitoring_type",
+            "description",
+            "needs_reboot",
+            "pending_actions_count",
+            "status",
+            "overdue_text_alert",
+            "overdue_email_alert",
+            "overdue_dashboard_alert",
+            "last_seen",
+            "boot_time",
+            "checks",
+            "maintenance_mode",
+            "logged_username",
+            "italic",
+            "policy",
+            "block_policy_inheritance",
+            "plat",
+            "goarch",
+            "has_patches_pending",
+            "version",
+            "operating_system",
+            "public_ip",
+            "cpu_model",
+            "graphics",
+            "local_ips",
+            "make_model",
+            "physical_disks",
+            "custom_fields",
+            "serial_number",
+        ]
+
+
+class AgentHostnameSerializer(serializers.ModelSerializer):
+    client = serializers.ReadOnlyField(source="client.name")
+    site = serializers.ReadOnlyField(source="site.name")
+
+    class Meta:
+        model = Agent
+        fields = (
+            "id",
+            "hostname",
+            "agent_id",
+            "client",
+            "site",
+        )
+
+
+class AgentNoteSerializer(serializers.ModelSerializer):
+    username = serializers.ReadOnlyField(source="user.username")
+    agent_id = serializers.ReadOnlyField(source="agent.agent_id")
+
+    class Meta:
+        model = Note
+        fields = ("pk", "entry_time", "agent", "user", "note", "username", "agent_id")
+        extra_kwargs = {"agent": {"write_only": True}, "user": {"write_only": True}}
+
+
+class AgentHistorySerializer(serializers.ModelSerializer):
+    script_name = serializers.ReadOnlyField(source="script.name")
+
+    class Meta:
+        model = AgentHistory
+        fields = "__all__"
+
+
+class AgentAuditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Agent
+        exclude = ["disks", "services", "wmi_detail"]
+
+
+class AgentTerminalDefaultsSerializer(serializers.ModelSerializer):
+    effective_default_shell = serializers.SerializerMethodField()
+    resolved_default_shell = serializers.SerializerMethodField()
+    terminal_mode = serializers.SerializerMethodField()
+    supports_new_terminal = serializers.SerializerMethodField()
+
+    def get_effective_default_shell(self, obj):
+        return obj.effective_default_shell
+
+    def get_resolved_default_shell(self, obj):
+        return obj.resolved_default_shell
+
+    def get_terminal_mode(self, obj):
+        settings = self.context.get("core_settings")
+        return settings.terminal_mode if settings else TerminalModeChoices.NEW
+
+    def get_supports_new_terminal(self, obj):
+        return self.context.get("supports_new_terminal", True)
+
+    class Meta:
+        model = Agent
+        fields = (
+            "agent_id",
+            "hostname",
+            "plat",
+            "default_shell",
+            "resolved_default_shell",
+            "effective_default_shell",
+            "terminal_mode",
+            "supports_new_terminal",
+        )
+
+
+class AgentFileBrowserDefaultsSerializer(serializers.ModelSerializer):
+    file_browser_mode = serializers.SerializerMethodField()
+    supports_new_file_browser = serializers.SerializerMethodField()
+    max_upload_file_size_bytes = serializers.SerializerMethodField()
+
+    def get_file_browser_mode(self, obj):
+        settings = self.context.get("core_settings")
+        return settings.file_browser_mode if settings else FileBrowserModeChoices.NEW
+
+    def get_supports_new_file_browser(self, obj):
+        return self.context.get("supports_new_file_browser", True)
+
+    def get_max_upload_file_size_bytes(self, obj):
+        return FILE_BROWSER_MAX_UPLOAD_FILE_SIZE_BYTES
+
+    class Meta:
+        model = Agent
+        fields = (
+            "agent_id",
+            "hostname",
+            "plat",
+            "file_browser_mode",
+            "supports_new_file_browser",
+            "max_upload_file_size_bytes",
+        )
+
+
+class OptionalUUIDField(serializers.UUIDField):
+    """Blank stays omitted so transfer init can start a fresh session."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("required", False)
+        kwargs.setdefault("allow_null", True)
+        kwargs.setdefault(
+            "error_messages",
+            {"invalid": "session_id must be a valid UUID"},
+        )
+        super().__init__(**kwargs)
+
+    def to_internal_value(self, data):
+        if data in (None, ""):
+            return None
+        try:
+            value = str(data).strip()
+        except (AttributeError, TypeError):
+            self.fail("invalid")
+        if not value:
+            return None
+        try:
+            return uuid.UUID(value)
+        except (ValueError, AttributeError, TypeError):
+            self.fail("invalid")
+
+
+class InitFileUploadSerializer(serializers.Serializer):
+    session_id = OptionalUUIDField()
+    filename = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, max_length=255
+    )
+    destination_path = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, max_length=4096
+    )
+    total_size = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        min_value=1,
+        max_value=2**63 - 1,
+        error_messages={
+            "invalid": "total_size must be a positive integer",
+            "min_value": "total_size must be a positive integer",
+            "max_value": "total_size must be a positive integer",
+        },
+    )
+    chunk_size = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        error_messages={"invalid": "chunk_size must be a positive integer"},
+    )
+    conflict_policy = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+
+
+class InitFileDownloadSerializer(serializers.Serializer):
+    session_id = OptionalUUIDField()
+    source_path = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, max_length=4096
+    )
+    chunk_size = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        error_messages={"invalid": "chunk_size must be a positive integer"},
+    )
+    resume_offset = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        min_value=0,
+        error_messages={
+            "invalid": "resume_offset must be a non-negative integer",
+            "min_value": "resume_offset must be a non-negative integer",
+        },
+    )
+
+
+class InitFileDownloadArchiveSerializer(serializers.Serializer):
+    paths = serializers.ListField(
+        child=serializers.CharField(allow_blank=True, max_length=4096),
+        required=False,
+        allow_empty=True,
+        allow_null=True,
+        error_messages={"not_a_list": "paths must be a non-empty array"},
+    )
+    filename = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, max_length=255
+    )
+    chunk_size = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        error_messages={"invalid": "chunk_size must be a positive integer"},
+    )

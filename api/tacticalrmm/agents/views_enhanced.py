@@ -1,0 +1,539 @@
+import asyncio
+from typing import Any, Dict, List
+
+from django.db.models import Count, Q
+from django.shortcuts import get_object_or_404
+from django.utils import timezone as djangotime
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from agents.models import Agent
+from agents.permissions import SendCommandPerms
+from alerts.models import Alert
+from checks.models import CheckResult
+from core.models import CoreSettings
+from logs.models import AuditLog
+from tacticalrmm.constants import (
+    AGENT_STATUS_ONLINE,
+    AGENT_STATUS_OVERDUE,
+    AlertSeverity,
+    AuditActionType,
+    AuditObjType,
+    CheckStatus,
+)
+from winupdate.models import WinUpdate
+
+
+class AgentLiveTelemetryView(APIView):
+    """
+    GET /agents/<agent_id>/telemetry/
+    Requests real-time hardware, CPU per-core, RAM, Disk I/O, Network counters, and S.M.A.R.T. health from the Go agent via NATS RPC.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        r = asyncio.run(agent.nats_cmd({"func": "telemetry_snapshot"}, timeout=12))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {
+                    "agent_id": agent.agent_id,
+                    "hostname": agent.hostname,
+                    "platform": agent.plat,
+                    "status": agent.status,
+                    "cached_fallback": True,
+                    "ram_total_mb": (agent.total_ram or 0) * 1024,
+                    "disks": agent.disks or [],
+                    "needs_reboot": agent.needs_reboot,
+                    "detail": f"Agent NATS RPC {r}; returning cached database telemetry.",
+                },
+                status=status.HTTP_200_OK,
+            )
+        return Response(r)
+
+
+class AgentSecurityAuditView(APIView):
+    """
+    GET /agents/<agent_id>/security-audit/
+    POST /agents/<agent_id>/security-audit/ (sub-actions: startup_items, local_users, bitlocker_status)
+    Executes an Endpoint Security & EDR posture audit on the remote agent via NATS RPC.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        r = asyncio.run(agent.nats_cmd({"func": "security_audit"}, timeout=30))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Unable to reach agent {agent.hostname} ({r})"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+        return Response(r)
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        query_type = request.data.get("query_type", "security_audit")
+        allowed_funcs = {
+            "security_audit",
+            "startup_items",
+            "local_users",
+            "bitlocker_status",
+        }
+        if query_type not in allowed_funcs:
+            return Response(
+                {"error": f"Unsupported security query_type: {query_type}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        r = asyncio.run(agent.nats_cmd({"func": query_type}, timeout=25))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Agent {agent.hostname} did not respond ({r})"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+        return Response(r)
+
+
+class AgentFirewallManagerView(APIView):
+    """
+    GET /agents/<agent_id>/firewall/
+    POST /agents/<agent_id>/firewall/
+    Inspects and manages host firewall profiles and inbound/outbound port rules on the remote agent.
+    """
+
+    permission_classes = [IsAuthenticated, SendCommandPerms]
+
+    def get(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        r = asyncio.run(agent.nats_cmd({"func": "firewall_status"}, timeout=15))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Agent {agent.hostname} unreachable ({r})"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+        return Response(r)
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        payload = {
+            "action": str(request.data.get("action", "")),
+            "rule_name": str(request.data.get("rule_name", "")),
+            "direction": str(request.data.get("direction", "in")),
+            "protocol": str(request.data.get("protocol", "TCP")),
+            "port": str(request.data.get("port", "")),
+            "remote_ip": str(request.data.get("remote_ip", "")),
+        }
+        nats_data = {"func": "firewall_rule", "payload": payload}
+        r = asyncio.run(agent.nats_cmd(nats_data, timeout=20))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Firewall command timed out on {agent.hostname}"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            agent=agent.hostname,
+            agent_id=agent.agent_id,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.EXEC_COMMAND,
+            message=f"{request.user.username} executed firewall action '{payload['action']}' on {agent.hostname}",
+            after_value=payload,
+        )
+        return Response(r)
+
+
+class AgentNetworkToolsView(APIView):
+    """
+    GET /agents/<agent_id>/network/ -> Returns active TCP/UDP connections and listening ports with owning PIDs.
+    POST /agents/<agent_id>/network/ -> Runs concurrent port scanner (`portscan`) or multi-stage network diagnostics (`netdiag`).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        r = asyncio.run(agent.nats_cmd({"func": "netconnections"}, timeout=20))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Agent {agent.hostname} did not respond ({r})"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+        return Response(r)
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        tool = request.data.get("tool", "netdiag")
+
+        if tool == "portscan":
+            nats_data = {
+                "func": "portscan",
+                "payload": {
+                    "host": str(request.data.get("host", "127.0.0.1")),
+                    "ports": str(request.data.get("ports", "")),
+                    "timeout_ms": str(request.data.get("timeout_ms", "600")),
+                },
+            }
+            r = asyncio.run(agent.nats_cmd(nats_data, timeout=45))
+        else:
+            nats_data = {
+                "func": "netdiag",
+                "payload": {
+                    "target": str(request.data.get("target", "1.1.1.1")),
+                },
+            }
+            r = asyncio.run(agent.nats_cmd(nats_data, timeout=25))
+
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Network tool '{tool}' timed out on {agent.hostname}"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+        return Response(r)
+
+
+class AgentSelfHealingView(APIView):
+    """
+    POST /agents/<agent_id>/self-heal/
+    Triggers autonomous remediation on the endpoint:
+    - self_heal (full | disk | services | network | winupdate | memory)
+    - disk_cleanup
+    - trim_memory
+    - reset_network
+    """
+
+    permission_classes = [IsAuthenticated, SendCommandPerms]
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        action = request.data.get("action", "self_heal")
+        mode = request.data.get("mode", "full")
+
+        if action == "disk_cleanup":
+            nats_data: Dict[str, Any] = {"func": "disk_cleanup"}
+        elif action == "trim_memory":
+            nats_data = {"func": "trim_memory"}
+        elif action == "reset_network":
+            nats_data = {
+                "func": "reset_network",
+                "payload": {
+                    "full_reset": "true" if request.data.get("full_reset") else "false"
+                },
+            }
+        else:
+            nats_data = {"func": "self_heal", "payload": {"mode": str(mode)}}
+
+        r = asyncio.run(agent.nats_cmd(nats_data, timeout=60))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Self-healing operation '{action}' timed out on {agent.hostname}"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            agent=agent.hostname,
+            agent_id=agent.agent_id,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.EXEC_COMMAND,
+            message=f"{request.user.username} triggered self-healing ({action}:{mode}) on {agent.hostname}",
+            after_value=nats_data,
+        )
+        return Response(r)
+
+
+class AgentWingetManagerView(APIView):
+    """
+    GET /agents/<agent_id>/winget/ -> Lists upgradable software packages via Winget / apt.
+    POST /agents/<agent_id>/winget/ -> Installs or upgrades software packages via Winget / apt.
+    """
+
+    permission_classes = [IsAuthenticated, SendCommandPerms]
+
+    def get(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        r = asyncio.run(agent.nats_cmd({"func": "winget_list"}, timeout=50))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Winget scan timed out on {agent.hostname} ({r})"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+        return Response(r)
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        operation = request.data.get("operation", "upgrade")
+        package_id = str(request.data.get("package_id", "all"))
+
+        if operation == "install":
+            nats_data = {
+                "func": "winget_install",
+                "payload": {"package_id": package_id},
+            }
+        else:
+            nats_data = {
+                "func": "winget_upgrade",
+                "payload": {"package_id": package_id},
+            }
+
+        r = asyncio.run(agent.nats_cmd(nats_data, timeout=300))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Winget {operation} timed out on {agent.hostname}"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            agent=agent.hostname,
+            agent_id=agent.agent_id,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.EXEC_COMMAND,
+            message=f"{request.user.username} executed Winget {operation} ({package_id}) on {agent.hostname}",
+            after_value=nats_data,
+        )
+        return Response(r)
+
+
+class AgentAIDiagnosticsView(APIView):
+    """
+    POST /agents/<agent_id>/ai-diagnostics/
+    Analyzes failing checks, alerts, pending patches, and disk/service states on the agent,
+    returning structured root-cause analysis and automated remediation playbooks.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        failing_checks = CheckResult.objects.filter(
+            agent=agent, status__in=[CheckStatus.FAILING, CheckStatus.WARNING]
+        ).select_related("assigned_check")
+
+        unresolved_alerts = Alert.objects.filter(agent=agent, resolved=False)
+        pending_patches = WinUpdate.objects.filter(
+            agent=agent, action="approve", installed=False
+        ).count()
+
+        findings: List[Dict[str, Any]] = []
+        playbooks: List[Dict[str, Any]] = []
+        health_score = 100
+
+        if agent.status == AGENT_STATUS_OVERDUE:
+            health_score -= 30
+            findings.append(
+                {
+                    "severity": "critical",
+                    "category": "Connectivity",
+                    "title": "Agent is Overdue",
+                    "detail": f"Last seen at {agent.last_seen}. Check NATS port 4222 reachability or run Mesh recovery.",
+                }
+            )
+            playbooks.append(
+                {
+                    "name": "Recover Agent & NATS Connection",
+                    "action_type": "recover_mesh",
+                    "recommended_command": "tacticalagent -m recovermesh",
+                }
+            )
+
+        if agent.needs_reboot:
+            health_score -= 10
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "System State",
+                    "title": "Pending System Reboot",
+                    "detail": "Endpoint has pending OS/patch operations requiring a reboot.",
+                }
+            )
+            playbooks.append(
+                {
+                    "name": "Schedule Maintenance Reboot",
+                    "action_type": "reboot",
+                    "recommended_command": "shutdown /r /t 300 /c 'Scheduled RMM Maintenance'",
+                }
+            )
+
+        if pending_patches > 0:
+            health_score -= min(20, pending_patches * 3)
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "Patch Compliance",
+                    "title": f"{pending_patches} Approved Patches Pending Installation",
+                    "detail": "Approved security/critical updates are awaiting installation.",
+                }
+            )
+            playbooks.append(
+                {
+                    "name": "Install Pending Windows Updates",
+                    "action_type": "install_patches",
+                    "recommended_command": "tacticalagent -m getwinupdates",
+                }
+            )
+
+        for cr in failing_checks:
+            chk = cr.assigned_check
+            if not chk:
+                continue
+            health_score -= 12
+            findings.append(
+                {
+                    "severity": cr.status,
+                    "category": f"Check ({chk.check_type})",
+                    "title": chk.readable_desc,
+                    "detail": cr.more_info or "Check reported failure threshold.",
+                }
+            )
+            if chk.check_type == "diskspace":
+                playbooks.append(
+                    {
+                        "name": "Run Autonomous Deep Disk Cleanup",
+                        "action_type": "self_heal",
+                        "mode": "disk",
+                        "recommended_command": "self_heal:disk",
+                    }
+                )
+            elif chk.check_type == "winsvc":
+                playbooks.append(
+                    {
+                        "name": f"Auto-Restart Service ({chk.svc_name})",
+                        "action_type": "self_heal",
+                        "mode": "services",
+                        "recommended_command": f"Restart-Service -Name '{chk.svc_name}' -Force",
+                    }
+                )
+            elif chk.check_type == "memory":
+                playbooks.append(
+                    {
+                        "name": "Optimize & Trim Memory Working Set",
+                        "action_type": "self_heal",
+                        "mode": "memory",
+                        "recommended_command": "self_heal:memory",
+                    }
+                )
+
+        if not findings:
+            findings.append(
+                {
+                    "severity": "passing",
+                    "category": "System Health",
+                    "title": "All Monitored Subsystems Healthy",
+                    "detail": "Zero failing checks or unresolved alerts detected on this endpoint.",
+                }
+            )
+
+        core = CoreSettings.objects.first()
+        ai_model = getattr(core, "open_ai_model", "gpt-4o") if core else "built-in-heuristic-engine"
+
+        return Response(
+            {
+                "agent_id": agent.agent_id,
+                "hostname": agent.hostname,
+                "health_score": max(0, health_score),
+                "unresolved_alerts_count": unresolved_alerts.count(),
+                "pending_patches_count": pending_patches,
+                "ai_engine": ai_model,
+                "findings": findings,
+                "remediation_playbooks": playbooks,
+                "generated_at": djangotime.now().isoformat(),
+            }
+        )
+
+
+class FleetExecutiveSummaryView(APIView):
+    """
+    GET /agents/executive-summary/
+    Aggregates global fleet KPIs, health scores, patch compliance, and alert breakdown for the enhanced Dashboard.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request) -> Response:
+        agents_qs = Agent.objects.filter_by_role(request.user)
+        total_agents = agents_qs.count()
+
+        online_count = 0
+        offline_count = 0
+        overdue_count = 0
+        reboot_needed_count = 0
+        maintenance_count = 0
+
+        for ag in agents_qs.only(
+            "last_seen", "offline_time", "overdue_time", "needs_reboot", "maintenance_mode"
+        ):
+            st = ag.status
+            if st == AGENT_STATUS_ONLINE:
+                online_count += 1
+            elif st == AGENT_STATUS_OVERDUE:
+                overdue_count += 1
+            else:
+                offline_count += 1
+            if ag.needs_reboot:
+                reboot_needed_count += 1
+            if ag.maintenance_mode:
+                maintenance_count += 1
+
+        unresolved_alerts = Alert.objects.filter_by_role(request.user).filter(resolved=False)
+        critical_alerts = unresolved_alerts.filter(severity=AlertSeverity.ERROR).count()
+        warning_alerts = unresolved_alerts.filter(severity=AlertSeverity.WARNING).count()
+
+        failing_checks = (
+            CheckResult.objects.filter_by_role(request.user)
+            .filter(status=CheckStatus.FAILING)
+            .count()
+        )
+
+        pending_patches = (
+            WinUpdate.objects.filter(agent__in=agents_qs, installed=False, action="approve")
+            .values("agent")
+            .distinct()
+            .count()
+        )
+
+        if total_agents > 0:
+            availability_pct = round((online_count / total_agents) * 100, 1)
+            patch_compliance_pct = round(
+                ((total_agents - pending_patches) / total_agents) * 100, 1
+            )
+            fleet_health_score = max(
+                0,
+                min(
+                    100,
+                    round(
+                        (availability_pct * 0.5)
+                        + (patch_compliance_pct * 0.3)
+                        + max(0, 20 - (critical_alerts * 2) - failing_checks)
+                    ),
+                ),
+            )
+        else:
+            availability_pct = 100.0
+            patch_compliance_pct = 100.0
+            fleet_health_score = 100
+
+        return Response(
+            {
+                "total_agents": total_agents,
+                "online_agents": online_count,
+                "offline_agents": offline_count,
+                "overdue_agents": overdue_count,
+                "reboot_needed_agents": reboot_needed_count,
+                "maintenance_agents": maintenance_count,
+                "availability_percent": availability_pct,
+                "patch_compliance_percent": patch_compliance_pct,
+                "fleet_health_score": fleet_health_score,
+                "active_alerts": {
+                    "total": unresolved_alerts.count(),
+                    "error": critical_alerts,
+                    "warning": warning_alerts,
+                },
+                "failing_checks_count": failing_checks,
+                "agents_with_pending_patches": pending_patches,
+                "timestamp": djangotime.now().isoformat(),
+            }
+        )

@@ -1,0 +1,84 @@
+{
+  "schema_version": "1.0.0",
+  "methodology": "morluto/rea (Reverse Engineer Anything)",
+  "target_system": "Tactical RMM Ecosystem (tacticalrmm + tacticalrmm-web + rmmagent)",
+  "repositories_analyzed": [
+    {
+      "name": "amidaware/tacticalrmm",
+      "role": "Backend API (Django REST Framework + Channels) & NATS Bridge (Go)",
+      "local_path": "api/ & natsapi/"
+    },
+    {
+      "name": "amidaware/tacticalrmm-web",
+      "role": "Administrator SPA Dashboard (Vue 3 + Quasar + Pinia/Vuex + TypeScript)",
+      "local_path": "web/"
+    },
+    {
+      "name": "amidaware/rmmagent",
+      "role": "Cross-Platform Endpoint Agent (Go + NATS + MessagePack + WinPTY/ConPTY)",
+      "local_path": "rmmagent/"
+    }
+  ],
+  "evidence_records": [
+    {
+      "evidence_id": "ev_001_nats_rpc_bus",
+      "kind": "static_source_observation",
+      "source_file": "rmmagent/agent/rpc.go",
+      "confidence": "verified",
+      "summary": "Agent subscribes to NATS subject equal to AgentID and decodes MessagePack NatsMsg payloads.",
+      "original_rpc_count": 42,
+      "enhanced_rpc_count": 60,
+      "added_rpc_methods": [
+        "netconnections",
+        "portscan",
+        "netdiag",
+        "security_audit",
+        "firewall_status",
+        "firewall_rule",
+        "startup_items",
+        "local_users",
+        "bitlocker_status",
+        "self_heal",
+        "disk_cleanup",
+        "trim_memory",
+        "reset_network",
+        "winget_list",
+        "winget_install",
+        "winget_upgrade",
+        "telemetry_snapshot",
+        "smart_health"
+      ]
+    },
+    {
+      "evidence_id": "ev_002_django_api_surface",
+      "kind": "static_source_observation",
+      "source_file": "api/tacticalrmm/agents/urls.py",
+      "confidence": "verified",
+      "summary": "REST API bridges Vue 3 dashboard requests to async NATS commands via Agent.nats_cmd().",
+      "added_endpoints": [
+        "/agents/executive-summary/",
+        "/agents/<agent_id>/telemetry/",
+        "/agents/<agent_id>/security-audit/",
+        "/agents/<agent_id>/firewall/",
+        "/agents/<agent_id>/network/",
+        "/agents/<agent_id>/self-heal/",
+        "/agents/<agent_id>/winget/",
+        "/agents/<agent_id>/ai-diagnostics/"
+      ]
+    },
+    {
+      "evidence_id": "ev_003_vue_dashboard_architecture",
+      "kind": "static_source_observation",
+      "source_file": "web/src/views/DashboardView.vue",
+      "confidence": "verified",
+      "summary": "Quasar split layout with Client/Site tree, virtual-scroll AgentTable, and SubTableTabs.",
+      "added_components": [
+        "web/src/components/dashboard/ExecutiveKPIBar.vue",
+        "web/src/components/agents/TelemetryTab.vue",
+        "web/src/components/agents/SecurityEDRTab.vue",
+        "web/src/components/agents/NetworkToolsTab.vue",
+        "web/src/components/agents/SelfHealWingetTab.vue"
+      ]
+    }
+  ]
+}
