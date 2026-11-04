@@ -1512,6 +1512,67 @@ func (a *Agent) RunRPC() {
 				_ = ret.Encode(res)
 				msg.Respond(resp)
 			}(payload)
+
+		case "hw_inventory":
+			go func() {
+				defer a.recoverFilesRPC("hw_inventory", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				inv := a.GetHardwareAndDomainInventory()
+				_ = ret.Encode(inv)
+				msg.Respond(resp)
+			}()
+
+		case "power_gpo_action":
+			go func(p *NatsMsg) {
+				defer a.recoverFilesRPC("power_gpo_action", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				res := a.ManagePowerAndGPO(p.Data["action"])
+				_ = ret.Encode(res)
+				msg.Respond(resp)
+			}(payload)
+
+		case "printers_list":
+			go func() {
+				defer a.recoverFilesRPC("printers_list", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				printers := a.GetPrintersAndSpooler()
+				_ = ret.Encode(printers)
+				msg.Respond(resp)
+			}()
+
+		case "printer_action":
+			go func(p *NatsMsg) {
+				defer a.recoverFilesRPC("printer_action", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				res := a.ManagePrinterAction(p.Data["action"], p.Data["printer_name"])
+				_ = ret.Encode(res)
+				msg.Respond(resp)
+			}(payload)
+
+		case "it_broadcast_msg":
+			go func(p *NatsMsg) {
+				defer a.recoverFilesRPC("it_broadcast_msg", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				timeoutSec, _ := strconv.Atoi(p.Data["timeout_sec"])
+				res := a.SendITSupportMessage(p.Data["title"], p.Data["message"], timeoutSec)
+				_ = ret.Encode(res)
+				msg.Respond(resp)
+			}(payload)
+
+		case "system_restore":
+			go func(p *NatsMsg) {
+				defer a.recoverFilesRPC("system_restore", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				res := a.ManageSystemRestorePoints(p.Data["action"], p.Data["description"])
+				_ = ret.Encode(res)
+				msg.Respond(resp)
+			}(payload)
 		}
 	})
 

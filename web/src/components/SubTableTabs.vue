@@ -120,6 +120,13 @@
           icon="desktop_windows"
           :label="t('tabs.rdpHa')"
         />
+        <q-tab
+          v-if="activeTabs.includes('itsupport')"
+          content-class="min-width"
+          name="itsupport"
+          icon="support_agent"
+          :label="t('tabs.itsupport')"
+        />
       </q-tabs>
       <q-separator />
     </q-header>
@@ -230,6 +237,13 @@
         >
           <RDPHAConnectivityTab />
         </q-tab-panel>
+        <q-tab-panel
+          v-if="activeTabs.includes('itsupport')"
+          name="itsupport"
+          class="q-pa-none"
+        >
+          <ITSupportHardwareTab />
+        </q-tab-panel>
       </q-tab-panels>
     </q-page-container>
   </q-layout>
@@ -256,6 +270,7 @@ import SecurityEDRTab from "@/components/agents/SecurityEDRTab.vue";
 import NetworkToolsTab from "@/components/agents/NetworkToolsTab.vue";
 import SelfHealWingetTab from "@/components/agents/SelfHealWingetTab.vue";
 import RDPHAConnectivityTab from "@/components/agents/RDPHAConnectivityTab.vue";
+import ITSupportHardwareTab from "@/components/agents/ITSupportHardwareTab.vue";
 
 export default {
   name: "SubTableTabs",
@@ -275,6 +290,7 @@ export default {
     NetworkToolsTab,
     SelfHealWingetTab,
     RDPHAConnectivityTab,
+    ITSupportHardwareTab,
   },
   props: {
     activeTabs: {
@@ -286,6 +302,7 @@ export default {
         "network",
         "selfheal",
         "rdpha",
+        "itsupport",
         "checks",
         "tasks",
         "patches",

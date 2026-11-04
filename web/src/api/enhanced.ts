@@ -336,3 +336,103 @@ export function downloadNativeRDPFile(hostname: string, hostAddress: string, por
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+export interface HardwareDomainInventory {
+  hostname: string;
+  platform: string;
+  manufacturer: string;
+  model: string;
+  serial_number: string;
+  bios_version: string;
+  domain_or_workgroup: string;
+  part_of_domain: boolean;
+  entra_id_joined: boolean;
+  active_power_plan: string;
+  gpus: string[];
+  battery_present: boolean;
+  battery_charge_pct: number;
+  battery_status: string;
+  printers_count: number;
+  restore_points_count: number;
+  timestamp: string;
+}
+
+export interface PrinterInfo {
+  name: string;
+  driver_name: string;
+  port_name: string;
+  printer_status: string;
+  shared: boolean;
+  job_count: number;
+}
+
+export interface RestorePointInfo {
+  sequence_number: number;
+  description: string;
+  creation_time: string;
+  event_type: string;
+}
+
+export async function fetchAgentHardwareInventory(
+  agentId: string,
+): Promise<HardwareDomainInventory> {
+  const { data } = await axios.get(`/agents/${agentId}/hardware-inventory/`);
+  return data;
+}
+
+export async function runAgentAdminAction(
+  agentId: string,
+  action: "gpupdate_force" | "high_performance_power" | "sync_time" | "clear_print_spooler",
+) {
+  const { data } = await axios.post(`/agents/${agentId}/hardware-inventory/`, {
+    action,
+  });
+  return data;
+}
+
+export async function fetchAgentPrinters(agentId: string): Promise<PrinterInfo[]> {
+  const { data } = await axios.get(`/agents/${agentId}/printers/`);
+  return data;
+}
+
+export async function runAgentPrinterAction(
+  agentId: string,
+  action: "clear_queue" | "set_default" | "test_page",
+  printerName: string,
+) {
+  const { data } = await axios.post(`/agents/${agentId}/printers/`, {
+    action,
+    printer_name: printerName,
+  });
+  return data;
+}
+
+export async function fetchAgentRestorePoints(
+  agentId: string,
+): Promise<{ restore_points: RestorePointInfo[] }> {
+  const { data } = await axios.get(`/agents/${agentId}/it-support/`);
+  return data;
+}
+
+export async function createAgentRestorePoint(agentId: string, description: string) {
+  const { data } = await axios.post(`/agents/${agentId}/it-support/`, {
+    tool_type: "system_restore",
+    description,
+  });
+  return data;
+}
+
+export async function sendAgentITSupportMessage(
+  agentId: string,
+  title: string,
+  message: string,
+  timeoutSec = 60,
+) {
+  const { data } = await axios.post(`/agents/${agentId}/it-support/`, {
+    tool_type: "broadcast_msg",
+    title,
+    message,
+    timeout_sec: timeoutSec,
+  });
+  return data;
+}

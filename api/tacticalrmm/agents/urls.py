@@ -58,6 +58,21 @@ urlpatterns = [
         views_enhanced.AgentRDPManagerView.as_view(),
         name="agent_rdp_manager",
     ),
+    path(
+        "<agent:agent_id>/hardware-inventory/",
+        views_enhanced.AgentHardwareInventoryView.as_view(),
+        name="agent_hardware_inventory",
+    ),
+    path(
+        "<agent:agent_id>/printers/",
+        views_enhanced.AgentPrintersManagerView.as_view(),
+        name="agent_printers_manager",
+    ),
+    path(
+        "<agent:agent_id>/it-support/",
+        views_enhanced.AgentITSupportToolsView.as_view(),
+        name="agent_it_support_tools",
+    ),
     # agent views
     path("", views.GetAgents.as_view()),
     path("<agent:agent_id>/", views.GetUpdateDeleteAgent.as_view()),

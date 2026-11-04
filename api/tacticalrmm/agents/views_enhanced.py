@@ -660,3 +660,163 @@ class AgentRDPManagerView(APIView):
             after_value=nats_data["data"],
         )
         return Response(r)
+
+
+class AgentHardwareInventoryView(APIView):
+    """
+    GET /agents/<agent_id>/hardware-inventory/
+    POST /agents/<agent_id>/hardware-inventory/
+    Retrieves BIOS/Service Tag, Domain/Entra ID status, GPU, Battery health, and runs GPO/Power/NTP actions.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        r = asyncio.run(agent.nats_cmd({"func": "hw_inventory"}, timeout=15))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {
+                    "hostname": agent.hostname,
+                    "platform": agent.plat,
+                    "manufacturer": "Unknown",
+                    "model": "Unknown",
+                    "serial_number": "Unavailable (Agent Offline)",
+                    "bios_version": "Unknown",
+                    "domain_or_workgroup": "WORKGROUP",
+                    "part_of_domain": False,
+                    "entra_id_joined": False,
+                    "active_power_plan": "Balanced",
+                    "gpus": [],
+                    "battery_present": False,
+                    "battery_charge_pct": 0,
+                    "battery_status": "AC Power",
+                    "printers_count": 0,
+                    "restore_points_count": 0,
+                    "timestamp": djangotime.now().isoformat(),
+                }
+            )
+        return Response(r)
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        action = request.data.get("action", "gpupdate_force")
+        nats_data = {"func": "power_gpo_action", "data": {"action": action}}
+        r = asyncio.run(agent.nats_cmd(nats_data, timeout=45))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Ação administrativa ({action}) expirou em {agent.hostname}"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            agent=agent.hostname,
+            agent_id=agent.agent_id,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.EXEC_COMMAND,
+            message=f"{request.user.username} executou ação administrativa '{action}' em {agent.hostname}",
+            after_value=nats_data["data"],
+        )
+        return Response(r)
+
+
+class AgentPrintersManagerView(APIView):
+    """
+    GET /agents/<agent_id>/printers/
+    POST /agents/<agent_id>/printers/
+    Lists installed printers/queues and executes queue clearing, default printer assignment, or test page printing.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        r = asyncio.run(agent.nats_cmd({"func": "printers_list"}, timeout=15))
+        if r in ("timeout", "natsdown"):
+            return Response([])
+        return Response(r)
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        action = request.data.get("action", "clear_queue")
+        printer_name = request.data.get("printer_name", "")
+
+        nats_data = {
+            "func": "printer_action",
+            "data": {"action": action, "printer_name": printer_name},
+        }
+        r = asyncio.run(agent.nats_cmd(nats_data, timeout=20))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Operação de impressora ({action}) expirou em {agent.hostname}"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            agent=agent.hostname,
+            agent_id=agent.agent_id,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.MODIFY,
+            message=f"{request.user.username} executou '{action}' na impressora '{printer_name}' em {agent.hostname}",
+            after_value=nats_data["data"],
+        )
+        return Response(r)
+
+
+class AgentITSupportToolsView(APIView):
+    """
+    GET /agents/<agent_id>/it-support/
+    POST /agents/<agent_id>/it-support/
+    Manages System Restore checkpoints and sends audited IT Helpdesk messages to the logged-in user screen.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        r = asyncio.run(
+            agent.nats_cmd({"func": "system_restore", "data": {"action": "list"}}, timeout=15)
+        )
+        if r in ("timeout", "natsdown"):
+            return Response({"restore_points": [], "success": False})
+        return Response(r)
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(Agent, agent_id=agent_id)
+        tool_type = request.data.get("tool_type", "broadcast_msg")
+
+        if tool_type == "system_restore":
+            description = request.data.get("description", "Ponto de Restauração TI - Tactical RMM")
+            nats_data = {
+                "func": "system_restore",
+                "data": {"action": "create", "description": description},
+            }
+            r = asyncio.run(agent.nats_cmd(nats_data, timeout=60))
+        else:
+            title = request.data.get("title", "Suporte de TI")
+            message = request.data.get("message", "")
+            timeout_sec = str(request.data.get("timeout_sec", 60))
+            nats_data = {
+                "func": "it_broadcast_msg",
+                "data": {"title": title, "message": message, "timeout_sec": timeout_sec},
+            }
+            r = asyncio.run(agent.nats_cmd(nats_data, timeout=15))
+
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Operação de suporte ({tool_type}) expirou em {agent.hostname}"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            agent=agent.hostname,
+            agent_id=agent.agent_id,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.EXEC_COMMAND,
+            message=f"{request.user.username} executou ferramenta de suporte '{tool_type}' em {agent.hostname}",
+            after_value=nats_data["data"],
+        )
+        return Response(r)

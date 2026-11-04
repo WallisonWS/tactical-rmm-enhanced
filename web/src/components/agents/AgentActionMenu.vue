@@ -193,6 +193,16 @@
           <q-item clickable v-ripple @click="quickDownloadRDP(agent)">
             <q-item-section>Baixar Conexão .RDP (1-Clique)</q-item-section>
           </q-item>
+          <q-separator />
+          <q-item clickable v-ripple @click="quickAdminAction(agent, 'gpupdate_force')">
+            <q-item-section>Forçar GPO (gpupdate /force)</q-item-section>
+          </q-item>
+          <q-item clickable v-ripple @click="quickAdminAction(agent, 'clear_print_spooler')">
+            <q-item-section>Resetar Spooler de Impressão</q-item-section>
+          </q-item>
+          <q-item clickable v-ripple @click="quickSendUserNotice(agent)">
+            <q-item-section>Enviar Aviso TI na Tela</q-item-section>
+          </q-item>
         </q-list>
       </q-menu>
     </q-item>
@@ -306,6 +316,8 @@ import {
   repairAgentHALink,
   manageAgentRDP,
   downloadNativeRDPFile,
+  runAgentAdminAction,
+  sendAgentITSupportMessage,
 } from "@/api/enhanced";
 import { notifySuccess, notifyError } from "@/utils/notify";
 
@@ -652,6 +664,35 @@ export default {
       notifySuccess(`Arquivo ${agent.hostname || targetIp}.rdp baixado!`);
     }
 
+    async function quickAdminAction(agent, action) {
+      try {
+        const res = await runAgentAdminAction(agent.agent_id, action);
+        notifySuccess(res?.steps?.[0] || `Ação (${action}) concluída em ${agent.hostname}`);
+      } catch (e) {
+        notifyError(e?.response?.data?.error || `Falha ao executar ${action}`);
+      }
+    }
+
+    function quickSendUserNotice(agent) {
+      $q.dialog({
+        title: `Aviso de Suporte TI — ${agent.hostname}`,
+        message: "Digite a mensagem que será exibida na tela do usuário:",
+        prompt: {
+          model: "Olá! A equipe de TI está realizando uma manutenção rápida no seu computador.",
+          type: "text",
+        },
+        cancel: true,
+      }).onOk(async (text) => {
+        if (!text) return;
+        try {
+          await sendAgentITSupportMessage(agent.agent_id, "Suporte de TI", text, 60);
+          notifySuccess(`Mensagem enviada para ${agent.hostname}!`);
+        } catch (e) {
+          notifyError(e?.response?.data?.error || "Falha ao enviar mensagem");
+        }
+      });
+    }
+
     return {
       // reactive data
       urlActions,
@@ -684,6 +725,8 @@ export default {
       quickRepairHALink,
       quickEnableRDP,
       quickDownloadRDP,
+      quickAdminAction,
+      quickSendUserNotice,
     };
   },
 };

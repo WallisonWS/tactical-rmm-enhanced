@@ -138,6 +138,24 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     "rdpha.state": "Estado",
     "rdpha.actions": "Ações",
     "rdpha.logoff": "Encerrar Sessão",
+
+    // IT Support & Hardware Tab
+    "tabs.itsupport": "Suporte TI & Hardware",
+    "itsupport.title": "Central de Suporte TI, Inventário de Hardware & Administração Corporativa",
+    "itsupport.subtitle": "Controle de GPO/Active Directory, Impressoras/Spooler, Mensagens ao Usuário, BIOS/Service Tag e Pontos de Restauração",
+    "itsupport.refresh": "Atualizar Inventário & Impressoras",
+    "itsupport.gpupdate": "Forçar GPO (gpupdate /force)",
+    "itsupport.syncTime": "Sincronizar Hora NTP/AD",
+    "itsupport.highPerf": "Ativar Energia Alto Desempenho",
+    "itsupport.clearSpooler": "Resetar Spooler de Impressão",
+    "itsupport.hwSection": "Identidade do Hardware, BIOS & Domínio Corporativo",
+    "itsupport.msgSection": "Aviso na Tela do Colaborador (IT Helpdesk Broadcast)",
+    "itsupport.msgTitle": "Título do Aviso",
+    "itsupport.msgBody": "Mensagem para exibir na tela do usuário...",
+    "itsupport.sendMsg": "Enviar Aviso na Tela",
+    "itsupport.printersSection": "Gerenciador de Impressoras & Filas de Impressão",
+    "itsupport.restoreSection": "Pontos de Restauração do Sistema (Safety Checkpoints)",
+    "itsupport.createRestore": "Criar Ponto de Restauração",
   },
   "en-US": {
     // Top Header & Navigation
@@ -247,6 +265,24 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     "rdpha.state": "State",
     "rdpha.actions": "Actions",
     "rdpha.logoff": "Logoff Session",
+
+    // IT Support & Hardware Tab
+    "tabs.itsupport": "IT Support & Hardware",
+    "itsupport.title": "IT Support Center, Hardware Inventory & Corporate Administration",
+    "itsupport.subtitle": "GPO/Active Directory control, Printers/Spooler, User Broadcast Messages, BIOS/Service Tag & Restore Points",
+    "itsupport.refresh": "Refresh Inventory & Printers",
+    "itsupport.gpupdate": "Force GPO (gpupdate /force)",
+    "itsupport.syncTime": "Sync NTP/AD Clock",
+    "itsupport.highPerf": "Set High Performance Power",
+    "itsupport.clearSpooler": "Reset Print Spooler",
+    "itsupport.hwSection": "Hardware Identity, BIOS & Corporate Domain",
+    "itsupport.msgSection": "On-Screen User Notification (IT Helpdesk Broadcast)",
+    "itsupport.msgTitle": "Notification Title",
+    "itsupport.msgBody": "Message to display on the user's screen...",
+    "itsupport.sendMsg": "Send On-Screen Message",
+    "itsupport.printersSection": "Printers & Print Queue Manager",
+    "itsupport.restoreSection": "System Restore Points (Safety Checkpoints)",
+    "itsupport.createRestore": "Create Restore Point",
   },
   "es-ES": {
     // Top Header & Navigation
@@ -356,6 +392,24 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     "rdpha.state": "Estado",
     "rdpha.actions": "Acciones",
     "rdpha.logoff": "Cerrar Sesión",
+
+    // IT Support & Hardware Tab
+    "tabs.itsupport": "Soporte TI y Hardware",
+    "itsupport.title": "Centro de Soporte TI, Inventario de Hardware y Administración Corporativa",
+    "itsupport.subtitle": "Control de GPO/Active Directory, Impresoras/Spooler, Mensajes al Usuario, BIOS/Service Tag y Puntos de Restauración",
+    "itsupport.refresh": "Actualizar Inventario e Impresoras",
+    "itsupport.gpupdate": "Forzar GPO (gpupdate /force)",
+    "itsupport.syncTime": "Sincronizar Reloj NTP/AD",
+    "itsupport.highPerf": "Activar Energía Alto Rendimiento",
+    "itsupport.clearSpooler": "Reiniciar Spooler de Impresión",
+    "itsupport.hwSection": "Identidad de Hardware, BIOS y Dominio Corporativo",
+    "itsupport.msgSection": "Aviso en Pantalla al Usuario (IT Helpdesk Broadcast)",
+    "itsupport.msgTitle": "Título del Aviso",
+    "itsupport.msgBody": "Mensaje para mostrar en la pantalla del usuario...",
+    "itsupport.sendMsg": "Enviar Aviso en Pantalla",
+    "itsupport.printersSection": "Gestor de Impresoras y Colas de Impresión",
+    "itsupport.restoreSection": "Puntos de Restauración del Sistema (Safety Checkpoints)",
+    "itsupport.createRestore": "Crear Punto de Restauración",
   },
 };
 
