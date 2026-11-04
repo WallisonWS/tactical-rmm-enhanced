@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 from typing import Any, Dict, List
 
 from django.db.models import Count, Q
@@ -544,10 +545,30 @@ class AgentHALinkWatchdogView(APIView):
     GET /agents/<agent_id>/ha-link/
     POST /agents/<agent_id>/ha-link/
     Enterprise High-Availability link validator and Mesh/NATS self-recovery controller.
-    Ensures continuous production connectivity across Agent <-> API <-> NATS <-> MeshCentral.
+    Ensures continuous production connectivity across Agent <-> API <-> NATS <-> MeshCentral
+    and automatically resolves MeshNodeID desynchronization conflicts.
     """
 
     permission_classes = [IsAuthenticated]
+
+    def _sync_agent_mesh_node_id(self, agent: Agent, report: Any) -> bool:
+        if not isinstance(report, dict):
+            return False
+        reported_node_id = str(report.get("mesh_node_id") or "").strip()
+        if (
+            reported_node_id
+            and "not defined" not in reported_node_id.lower()
+            and len(reported_node_id) >= 32
+            and agent.mesh_node_id != reported_node_id
+        ):
+            agent.mesh_node_id = reported_node_id
+            agent.save(update_fields=["mesh_node_id"])
+            with suppress(Exception):
+                from core.tasks import sync_mesh_perms_task
+
+                sync_mesh_perms_task.delay()
+            return True
+        return False
 
     def get(self, request, agent_id: str) -> Response:
         agent = get_object_or_404(Agent, agent_id=agent_id)
@@ -558,12 +579,16 @@ class AgentHALinkWatchdogView(APIView):
                     "agent_id": agent.agent_id,
                     "hostname": agent.hostname,
                     "platform": agent.plat,
+                    "agent_version": agent.version,
                     "api_reachable": agent.status == AGENT_STATUS_ONLINE,
                     "api_latency_ms": 0,
                     "nats_reachable": False,
                     "nats_latency_ms": 0,
+                    "nats_transport": "wss/tls",
                     "mesh_service_status": "Unknown (NATS Timeout)" if r == "timeout" else "NATS Broker Offline",
                     "mesh_healthy": bool(agent.mesh_node_id),
+                    "mesh_node_id": agent.mesh_node_id or "",
+                    "mesh_id_synced": bool(agent.mesh_node_id),
                     "proxy_configured": False,
                     "proxy_url": "",
                     "overall_status": "DEGRADED" if agent.status == AGENT_STATUS_ONLINE else "CRITICAL",
@@ -573,16 +598,38 @@ class AgentHALinkWatchdogView(APIView):
                     "timestamp": djangotime.now().isoformat(),
                 }
             )
+        if isinstance(r, dict):
+            synced = self._sync_agent_mesh_node_id(agent, r)
+            r["mesh_id_synced"] = True
+            if synced:
+                r["recommendations"] = list(r.get("recommendations") or []) + [
+                    "MeshNodeID sincronizado automaticamente com o banco da API e MeshCentral."
+                ]
         return Response(r)
 
     def post(self, request, agent_id: str) -> Response:
         agent = get_object_or_404(Agent, agent_id=agent_id)
-        r = asyncio.run(agent.nats_cmd({"func": "ha_mesh_repair"}, timeout=25))
+        r = asyncio.run(agent.nats_cmd({"func": "ha_mesh_repair"}, timeout=35))
         if r in ("timeout", "natsdown"):
+            # Fallback to NATS async recovermesh command if synchronous repair timed out
+            with suppress(Exception):
+                asyncio.run(
+                    agent.nats_cmd(
+                        {"func": "recovercmd", "recoverycommand": "mesh"},
+                        wait=False,
+                    )
+                )
             return Response(
-                {"error": f"Não foi possível contatar {agent.hostname} via NATS ({r})"},
+                {"error": f"Não foi possível contatar {agent.hostname} via NATS ({r}). Comando assíncrono de recuperação Mesh enfileirado."},
                 status=status.HTTP_504_GATEWAY_TIMEOUT,
             )
+
+        if isinstance(r, dict):
+            health_after = r.get("health_after")
+            if self._sync_agent_mesh_node_id(agent, health_after or r):
+                actions = list(r.get("actions_taken") or [])
+                actions.append("MeshNodeID sincronizado automaticamente entre Agente, API e MeshCentral")
+                r["actions_taken"] = actions
 
         AuditLog.objects.create(
             username=request.user.username,

@@ -240,12 +240,18 @@ export interface HALinkHealthReport {
   agent_id: string;
   hostname: string;
   platform: string;
+  agent_version?: string;
   api_reachable: boolean;
   api_latency_ms: number;
   nats_reachable: boolean;
   nats_latency_ms: number;
+  nats_transport?: string;
   mesh_service_status: string;
   mesh_healthy: boolean;
+  mesh_binary_exists?: boolean;
+  mesh_process_count?: number;
+  mesh_node_id?: string;
+  mesh_id_synced?: boolean;
   proxy_configured: boolean;
   proxy_url: string;
   overall_status: "HEALTHY" | "DEGRADED" | "CRITICAL";

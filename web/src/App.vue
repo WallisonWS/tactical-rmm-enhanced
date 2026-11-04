@@ -69,12 +69,18 @@ a
   .q-table__bottom,
   thead tr:first-child th
     background-color: #f5f4f2
+    font-weight: 600
+  tbody tr:hover
+    background-color: rgba(25, 118, 210, 0.08)
 
 .table-bgcolor-dark
   .q-table__top,
   .q-table__bottom,
   thead tr:first-child th
-    background-color: #1d1d1d
+    background-color: #181b20
+    font-weight: 600
+  tbody tr:hover
+    background-color: rgba(25, 118, 210, 0.16)
 
 .bg-dark
   background-color: --q-page-dark
@@ -83,10 +89,12 @@ a
   background-color: #ffffff
 
 .highlight
-  background-color: #c9e6ff
+  background-color: #c9e6ff !important
+  box-shadow: inset 3px 0 0 #1976D2
 
 .highlight-dark
-  background-color: #404040
+  background-color: #263244 !important
+  box-shadow: inset 3px 0 0 #42a5f5
 
 .action-completed
   background-color: $positive

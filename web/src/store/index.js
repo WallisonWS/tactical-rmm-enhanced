@@ -24,7 +24,8 @@ export default function () {
         agentUrlAction: null,
         defaultAgentTblTab: null,
         clientTreeSort: "alphafail",
-        clientTreeSplitter: 20,
+        clientTreeSplitter: 15,
+        showKpiBar: false,
         noCodeSign: false,
         hosted: false,
         clearSearchWhenSwitching: false,
@@ -89,11 +90,16 @@ export default function () {
         state.tokenExpired = action;
       },
       SET_SPLITTER(state, val) {
-        // top toolbar is 50px. Filebar is 40px and agent filter tabs are 44px
-        state.tableHeight = `${Screen.height - 50 - 40 - 78 - val}px`;
+        // top toolbar is 50px. Filebar is 36px and agent filter tabs are 44px
+        const kpiOffset = state.showKpiBar ? 92 : 0;
+        const availTable = Math.max(160, Screen.height - 50 - 36 - 52 - kpiOffset - val);
+        state.tableHeight = `${availTable}px`;
 
         // q-tabs are 37px
-        state.tabHeight = `${val - 37}px`;
+        state.tabHeight = `${Math.max(40, val - 37)}px`;
+      },
+      SET_SHOW_KPI_BAR(state, val) {
+        state.showKpiBar = val;
       },
       SET_CLIENT_SPLITTER(state, val) {
         state.clientTreeSplitter = val;

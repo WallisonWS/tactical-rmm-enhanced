@@ -7,6 +7,8 @@
         v-model="subtab"
         dense
         inline-label
+        mobile-arrows
+        outside-arrows
         class="text-grey"
         active-color="primary"
         indicator-color="primary"

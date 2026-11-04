@@ -30,12 +30,12 @@ WEB_VERSION = "0.101.65"
 
 # bump this version everytime vue code is changed
 # to alert user they need to manually refresh their browser
-APP_VER = "0.0.204"
+APP_VER = "0.0.205"
 
 # https://github.com/amidaware/rmmagent
 LATEST_AGENT_VER = "2.12.0"
 
-MESH_VER = "1.3.1"
+MESH_VER = "1.1.56"
 
 NATS_SERVER_VER = "2.15.1"
 

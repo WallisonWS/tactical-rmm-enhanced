@@ -93,22 +93,39 @@ class MeshSync:
 
     def mesh_action(
         self, *, payload: dict[str, Any], wait=True
-    ) -> dict[str, Any] | None:
-        async def _do(payload):
-            async with websockets.connect(self.uri, max_size=TRMM_WS_MAX_SIZE) as ws:
-                await ws.send(json.dumps(payload))
-                if wait:
-                    while 1:
-                        try:
-                            message = await asyncio.wait_for(ws.recv(), 120)
-                            r = json.loads(message)
-                            if r["action"] == payload["action"]:
-                                return r
-                        except asyncio.TimeoutError:
-                            logger.error("Timeout reached.")
-                            return None
-                else:
-                    return None
+    ) -> dict[str, Any]:
+        async def _do(payload) -> dict[str, Any]:
+            last_err = None
+            for attempt in range(3):
+                try:
+                    async with websockets.connect(
+                        self.uri,
+                        max_size=TRMM_WS_MAX_SIZE,
+                        ping_interval=20,
+                        ping_timeout=20,
+                        close_timeout=10,
+                        open_timeout=15,
+                    ) as ws:
+                        await ws.send(json.dumps(payload))
+                        if wait:
+                            while True:
+                                try:
+                                    message = await asyncio.wait_for(ws.recv(), 90)
+                                    r = json.loads(message)
+                                    if isinstance(r, dict) and r.get("action") == payload.get("action"):
+                                        return r
+                                except asyncio.TimeoutError:
+                                    logger.error(f"MeshCentral WebSocket timeout waiting for action={payload.get('action')}")
+                                    break
+                        else:
+                            return {"status": "sent", "users": [], "nodes": {}}
+                except Exception as exc:
+                    last_err = exc
+                    if attempt < 2:
+                        await asyncio.sleep(0.6 * (attempt + 1))
+            if last_err:
+                logger.debug(f"MeshSync WebSocket action {payload.get('action')} failed after retries: {last_err}")
+            return {"users": [], "nodes": {}}
 
         payload["responseid"] = "meshctrl"
         logger.debug(payload)
@@ -124,10 +141,12 @@ class MeshSync:
 
     def get_trmm_mesh_users(self):
         payload = {"action": "users"}
+        res = self.mesh_action(payload=payload, wait=True)
+        users_list = res.get("users") or [] if isinstance(res, dict) else []
         ret = {
             i["_id"]: i
-            for i in self.mesh_action(payload=payload, wait=True)["users"]
-            if re.search(r".*___\d+", i["_id"])
+            for i in users_list
+            if isinstance(i, dict) and "_id" in i and re.search(r".*___\d+", i["_id"])
         }
         return ret
 

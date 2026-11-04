@@ -270,7 +270,47 @@
             props.row.client_name
           }}</q-td>
           <q-td key="site_name" :props="props">{{ props.row.site_name }}</q-td>
-          <q-td key="hostname" :props="props">{{ props.row.hostname }}</q-td>
+          <q-td key="hostname" :props="props">
+            <span class="text-weight-medium">{{ props.row.hostname }}</span>
+          </q-td>
+          <q-td key="quick_actions" :props="props" auto-width @click.stop>
+            <div class="row no-wrap items-center q-gutter-x-xs">
+              <q-btn
+                dense
+                flat
+                round
+                size="sm"
+                color="primary"
+                icon="desktop_windows"
+                @click.stop="quickTakeControl(props.row.agent_id)"
+              >
+                <q-tooltip>{{ t("menu.takeControl") }}</q-tooltip>
+              </q-btn>
+              <q-btn
+                dense
+                flat
+                round
+                size="sm"
+                color="teal-5"
+                icon="terminal"
+                @click.stop="quickRemoteBg(props.row.agent_id, props.row.plat)"
+              >
+                <q-tooltip>{{ t("menu.remoteBg") }}</q-tooltip>
+              </q-btn>
+              <q-btn
+                dense
+                flat
+                round
+                size="sm"
+                color="amber-7"
+                icon="healing"
+                :loading="repairingAgentId === props.row.agent_id"
+                @click.stop="quickRepairMesh(props.row)"
+              >
+                <q-tooltip>{{ t("dash.repairMeshQuick") }}</q-tooltip>
+              </q-btn>
+            </div>
+          </q-td>
           <q-td key="description" :props="props">{{
             props.row.description
           }}</q-td>
@@ -362,6 +402,8 @@ import PendingActions from "@/components/logs/PendingActions.vue";
 import AgentActionMenu from "@/components/agents/AgentActionMenu.vue";
 import { runURLAction } from "@/api/core";
 import { runTakeControl, runRemoteBackground } from "@/api/agents";
+import { repairAgentHALink } from "@/api/enhanced";
+import { t } from "@/i18n";
 import { capitalize } from "@vue/shared";
 
 export default {
@@ -374,6 +416,7 @@ export default {
   mixins: [mixins],
   data() {
     return {
+      repairingAgentId: null,
       pagination: {
         rowsPerPage: 0,
         sortBy: "hostname",
@@ -385,6 +428,28 @@ export default {
     };
   },
   methods: {
+    t,
+    quickTakeControl(agent_id) {
+      this.$store.commit("setActiveRow", agent_id);
+      runTakeControl(agent_id);
+    },
+    quickRemoteBg(agent_id, plat) {
+      this.$store.commit("setActiveRow", agent_id);
+      this.$store.commit("setAgentPlatform", plat);
+      runRemoteBackground(agent_id, plat);
+    },
+    async quickRepairMesh(agent) {
+      this.repairingAgentId = agent.agent_id;
+      try {
+        await repairAgentHALink(agent.agent_id);
+        this.notifySuccess(`${agent.hostname}: Mesh & Link sincronizados sem conflito`);
+        this.refreshDashboard();
+      } catch (e) {
+        this.notifyError(`Falha ao reparar Mesh em ${agent.hostname}`);
+      } finally {
+        this.repairingAgentId = null;
+      }
+    },
     filterTable(rows, terms, cols, cellValue) {
       const hiddenFields = [
         "version",

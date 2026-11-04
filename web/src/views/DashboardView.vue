@@ -1,10 +1,11 @@
 <template>
   <q-page>
     <FileBar />
-    <ExecutiveKPIBar />
+    <ExecutiveKPIBar v-if="showKpiBar" />
     <q-splitter
       v-model="clientTreeSplitter"
-      :style="{ height: `${$q.screen.height - 50 - 110}px` }"
+      :limits="[0, 40]"
+      :style="{ height: `${$q.screen.height - 50 - (showKpiBar ? 132 : 38)}px` }"
     >
       <template v-slot:before>
         <div
@@ -239,7 +240,20 @@
           emit-immediately
         >
           <template v-slot:before>
-            <div class="row">
+            <div class="row items-center no-wrap q-px-xs q-py-xs q-gutter-x-xs">
+              <!-- Sidebar Toggle Button -->
+              <q-btn
+                dense
+                flat
+                round
+                size="sm"
+                :icon="clientTreeSplitter > 2 ? 'menu_open' : 'menu'"
+                color="primary"
+                @click="toggleClientSidebar"
+              >
+                <q-tooltip>{{ t("dash.toggleSidebar") }}</q-tooltip>
+              </q-btn>
+
               <q-tabs
                 v-model="tab"
                 dense
@@ -259,16 +273,98 @@
                 />
                 <q-tab name="mixed" :label="t('dash.mixed')" />
               </q-tabs>
+
+              <!-- 1-Click Quick Filter Chips -->
+              <div class="row items-center no-wrap q-gutter-x-xs gt-xs">
+                <q-chip
+                  clickable
+                  dense
+                  size="sm"
+                  :outline="search !== ''"
+                  color="primary"
+                  text-color="white"
+                  @click="clearFilter"
+                >
+                  {{ t("dash.quickAll") }} ({{ filteredAgents.length }})
+                </q-chip>
+                <q-chip
+                  clickable
+                  dense
+                  size="sm"
+                  :outline="!search.includes('is:online')"
+                  color="positive"
+                  text-color="white"
+                  icon="check_circle"
+                  @click="setQuickFilter('is:online')"
+                >
+                  {{ t("dash.quickOnline") }} ({{ onlineCount }})
+                </q-chip>
+                <q-chip
+                  v-if="offlineOrOverdueCount > 0"
+                  clickable
+                  dense
+                  size="sm"
+                  :outline="!search.includes('is:offline') && !search.includes('is:overdue')"
+                  color="warning"
+                  text-color="black"
+                  icon="power_off"
+                  @click="setQuickFilter('is:offline')"
+                >
+                  {{ t("dash.quickOffline") }} ({{ offlineOrOverdueCount }})
+                </q-chip>
+                <q-chip
+                  v-if="failingChecksCount > 0"
+                  clickable
+                  dense
+                  size="sm"
+                  :outline="!search.includes('is:checksfailing')"
+                  color="negative"
+                  text-color="white"
+                  icon="warning"
+                  @click="setQuickFilter('is:checksfailing')"
+                >
+                  {{ t("dash.quickFailing") }} ({{ failingChecksCount }})
+                </q-chip>
+                <q-chip
+                  v-if="patchesPendingCount > 0"
+                  clickable
+                  dense
+                  size="sm"
+                  :outline="!search.includes('is:patchespending')"
+                  color="info"
+                  text-color="white"
+                  icon="system_update"
+                  @click="setQuickFilter('is:patchespending')"
+                >
+                  {{ t("dash.quickPatches") }} ({{ patchesPendingCount }})
+                </q-chip>
+                <q-chip
+                  v-if="rebootNeededCount > 0"
+                  clickable
+                  dense
+                  size="sm"
+                  :outline="!search.includes('is:rebootneeded')"
+                  color="deep-orange"
+                  text-color="white"
+                  icon="restart_alt"
+                  @click="setQuickFilter('is:rebootneeded')"
+                >
+                  {{ t("dash.quickReboot") }} ({{ rebootNeededCount }})
+                </q-chip>
+              </div>
+
               <q-space />
+
+              <!-- Responsive Search & Action Controls -->
               <q-input
                 v-model="search"
-                style="width: 450px"
+                style="min-width: 170px; max-width: 340px; flex: 1 1 200px"
                 :label="t('dash.search')"
                 dense
                 outlined
                 clearable
                 @clear="clearFilter"
-                class="q-pr-md q-pb-xs"
+                class="q-pr-xs"
               >
                 <template v-slot:prepend>
                   <q-icon name="search" color="primary" />
@@ -406,6 +502,26 @@
                       </div>
                     </q-menu>
                   </q-btn>
+                  <q-btn
+                    round
+                    dense
+                    flat
+                    icon="analytics"
+                    :color="showKpiBar ? 'primary' : ''"
+                    @click="toggleKpiBar"
+                  >
+                    <q-tooltip>{{ t("dash.toggleKpis") }}</q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    round
+                    dense
+                    flat
+                    :icon="innerModel > 90 ? 'unfold_less' : 'unfold_more'"
+                    color="primary"
+                    @click="toggleBottomPanel"
+                  >
+                    <q-tooltip>{{ t("dash.maximizeTable") }}</q-tooltip>
+                  </q-btn>
                 </template>
               </q-input>
             </div>
@@ -482,7 +598,8 @@ export default {
     return {
       showInstallAgentModal: false,
       sitePk: null,
-      innerModel: (this.$q.screen.height - 82) / 2,
+      savedSidebarWidth: 15,
+      innerModel: 48,
       search: this.$route.query.search ? this.$route.query.search : "",
       filterTextLength: 0,
       filterAvailability: "all",
@@ -547,6 +664,13 @@ export default {
           label: "Hostname",
           field: "hostname",
           sortable: true,
+          align: "left",
+        },
+        {
+          name: "quick_actions",
+          label: "Quick Actions",
+          field: "agent_id",
+          sortable: false,
           align: "left",
         },
         {
@@ -624,6 +748,7 @@ export default {
         "client_name",
         "site_name",
         "hostname",
+        "quick_actions",
         "description",
         "user",
         "patchespending",
@@ -646,9 +771,48 @@ export default {
     tab() {
       this.$store.dispatch("loadAgents");
     },
+    selectedRow(newVal) {
+      if (newVal) {
+        if (this.innerModel < 180) {
+          this.innerModel = Math.round(Math.max(270, (this.$q.screen.height - 110) * 0.42));
+          this.$store.commit("SET_SPLITTER", this.innerModel);
+        }
+      } else {
+        this.innerModel = 48;
+        this.$store.commit("SET_SPLITTER", this.innerModel);
+      }
+    },
   },
   methods: {
     t,
+    toggleClientSidebar() {
+      if (this.clientTreeSplitter > 2) {
+        this.savedSidebarWidth = this.clientTreeSplitter;
+        this.clientTreeSplitter = 0;
+      } else {
+        this.clientTreeSplitter = this.savedSidebarWidth || 15;
+      }
+    },
+    toggleKpiBar() {
+      this.$store.commit("SET_SHOW_KPI_BAR", !this.showKpiBar);
+      this.$store.commit("SET_SPLITTER", this.innerModel);
+    },
+    toggleBottomPanel() {
+      if (this.innerModel > 90) {
+        this.innerModel = 48;
+      } else {
+        this.innerModel = Math.round(Math.max(270, (this.$q.screen.height - 110) * 0.44));
+      }
+      this.$store.commit("SET_SPLITTER", this.innerModel);
+    },
+    setQuickFilter(token) {
+      if (this.search.trim() === token) {
+        this.clearFilter();
+      } else {
+        this.search = token + " ";
+        this.filterTextLength = token.length;
+      }
+    },
     getTree() {
       this.$store.dispatch("loadTree");
     },
@@ -863,6 +1027,8 @@ export default {
       treeReady: (state) => state.treeReady,
       clearSearchWhenSwitching: (state) => state.clearSearchWhenSwitching,
       agents: (state) => state.agents,
+      selectedRow: (state) => state.selectedRow,
+      showKpiBar: (state) => state.showKpiBar,
     }),
     clientTreeSplitter: {
       get() {
@@ -897,6 +1063,21 @@ export default {
       if (this.tab === "mixed") return this.agents;
       else return this.agents.filter((k) => k.monitoring_type === this.tab);
     },
+    onlineCount() {
+      return this.filteredAgents.filter((a) => a.status === "online").length;
+    },
+    offlineOrOverdueCount() {
+      return this.filteredAgents.filter((a) => a.status !== "online").length;
+    },
+    failingChecksCount() {
+      return this.filteredAgents.filter((a) => a.checks && a.checks.has_failing_checks).length;
+    },
+    patchesPendingCount() {
+      return this.filteredAgents.filter((a) => a.has_patches_pending).length;
+    },
+    rebootNeededCount() {
+      return this.filteredAgents.filter((a) => a.needs_reboot).length;
+    },
     isFilteringTable() {
       return (
         this.filterPatchesPending ||
@@ -911,6 +1092,7 @@ export default {
         client_name: this.t("dash.colClient"),
         site_name: this.t("dash.colSite"),
         hostname: this.t("dash.colHostname"),
+        quick_actions: this.t("dash.colQuickActions"),
         description: this.t("dash.colDescription"),
         user: this.t("dash.colUser"),
         last_seen: this.t("dash.colLastSeen"),
@@ -923,6 +1105,9 @@ export default {
   },
   mounted() {
     this.getTree();
+    if (this.$q.screen.width < 1100 && this.clientTreeSplitter > 12) {
+      this.clientTreeSplitter = 0;
+    }
 
     // set initial value for agent table and agent tabs
     this.$store.commit("SET_SPLITTER", this.innerModel);

@@ -80,6 +80,9 @@
                 </div>
                 <div class="text-caption">
                   {{ t("rdpha.latency") }}: <b>{{ haHealth.nats_latency_ms }} ms</b>
+                  <span v-if="haHealth.nats_transport" class="q-ml-xs text-grey">
+                    ({{ haHealth.nats_transport }})
+                  </span>
                 </div>
               </div>
               <q-icon
@@ -105,10 +108,13 @@
                 </div>
                 <div class="text-caption">
                   Status Global: <q-badge :color="haHealth.overall_status === 'HEALTHY' ? 'positive' : 'warning'">{{ haHealth.overall_status }}</q-badge>
+                  <q-badge v-if="haHealth.mesh_id_synced || haHealth.mesh_node_id" color="teal" class="q-ml-xs">
+                    NodeID Synced
+                  </q-badge>
                 </div>
               </div>
               <q-icon
-                :name="haHealth.mesh_healthy ? 'verified_user' : 'Report_problem'"
+                :name="haHealth.mesh_healthy ? 'verified_user' : 'report_problem'"
                 :color="haHealth.mesh_healthy ? 'positive' : 'warning'"
                 size="md"
               />

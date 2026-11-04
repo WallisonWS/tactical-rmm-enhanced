@@ -83,11 +83,15 @@ class SyncMeshNodeID(APIView):
             Agent.objects.defer(*AGENT_DEFER),
             user=request.user,
         )
-        if agent.mesh_node_id != request.data["nodeid"]:
-            agent.mesh_node_id = request.data["nodeid"]
-            agent.save(update_fields=["mesh_node_id"])
+        raw_node_id = str(request.data.get("nodeid", "")).strip()
+        node_changed = False
+        if raw_node_id and "not defined" not in raw_node_id.lower():
+            if agent.mesh_node_id != raw_node_id:
+                agent.mesh_node_id = raw_node_id
+                agent.save(update_fields=["mesh_node_id"])
+                node_changed = True
 
-        if request.data.get("run_sync_task"):
+        if node_changed or request.data.get("run_sync_task"):
             sync_mesh_perms_task.delay()
 
         return Response("ok")
