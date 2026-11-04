@@ -85,7 +85,11 @@ class SyncMeshNodeID(APIView):
         )
         raw_node_id = str(request.data.get("nodeid", "")).strip()
         node_changed = False
-        if raw_node_id and "not defined" not in raw_node_id.lower():
+        if (
+            raw_node_id
+            and "not defined" not in raw_node_id.lower()
+            and "error" not in raw_node_id.lower()
+        ):
             if agent.mesh_node_id != raw_node_id:
                 agent.mesh_node_id = raw_node_id
                 agent.save(update_fields=["mesh_node_id"])
@@ -444,10 +448,21 @@ class MeshExe(APIView):
 
     def post(self, request):
         match request.data:
-            case {"goarch": GoArch.AMD64, "plat": AgentPlat.WINDOWS}:
+            case {"goarch": GoArch.AMD64, "plat": AgentPlat.WINDOWS} | {
+                "goarch": GoArch.ARM64,
+                "plat": AgentPlat.WINDOWS,
+            }:
                 ident = MeshAgentIdent.WIN64
             case {"goarch": GoArch.i386, "plat": AgentPlat.WINDOWS}:
                 ident = MeshAgentIdent.WIN32
+            case {"goarch": GoArch.AMD64, "plat": AgentPlat.LINUX}:
+                ident = MeshAgentIdent.LINUX64
+            case {"goarch": GoArch.i386, "plat": AgentPlat.LINUX}:
+                ident = MeshAgentIdent.LINUX32
+            case {"goarch": GoArch.ARM64, "plat": AgentPlat.LINUX}:
+                ident = MeshAgentIdent.LINUX_ARM_64
+            case {"goarch": GoArch.ARM32, "plat": AgentPlat.LINUX}:
+                ident = MeshAgentIdent.LINUX_ARM_HF
             case {"goarch": GoArch.AMD64, "plat": AgentPlat.DARWIN} | {
                 "goarch": GoArch.ARM64,
                 "plat": AgentPlat.DARWIN,
@@ -498,12 +513,24 @@ class MeshReinstall(APIView):
         except:
             return notify_error("Unable to connect to mesh to get group id information")
 
-        # windows only for now
-        ident = (
-            MeshAgentIdent.WIN64
-            if agent.goarch == GoArch.AMD64
-            else MeshAgentIdent.WIN32
-        )
+        if agent.plat == AgentPlat.WINDOWS:
+            ident = (
+                MeshAgentIdent.WIN32
+                if agent.goarch == GoArch.i386
+                else MeshAgentIdent.WIN64
+            )
+        elif agent.plat == AgentPlat.LINUX:
+            if agent.goarch == GoArch.i386:
+                ident = MeshAgentIdent.LINUX32
+            elif agent.goarch == GoArch.ARM64:
+                ident = MeshAgentIdent.LINUX_ARM_64
+            elif agent.goarch == GoArch.ARM32:
+                ident = MeshAgentIdent.LINUX_ARM_HF
+            else:
+                ident = MeshAgentIdent.LINUX64
+        else:
+            ident = MeshAgentIdent.DARWIN_UNIVERSAL
+
         dl_url = get_meshagent_url(
             ident=ident,
             plat=agent.plat,
@@ -579,9 +606,7 @@ class NewAgent(APIView):
         reload_nats()
         ret = {"pk": agent.pk, "token": token.key}
 
-        if agent.plat == AgentPlat.WINDOWS:
-            sync_mesh_perms_task.delay()
-
+        sync_mesh_perms_task.delay()
         cache_agents_alert_template.delay()
         return Response(ret)
 

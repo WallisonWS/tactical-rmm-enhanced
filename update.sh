@@ -74,10 +74,9 @@ curl -s -L "${LATEST_SETTINGS_URL}" >${TMP_SETTINGS}
 LATEST_TRMM_VER=$(grep "^TRMM_VERSION" "$TMP_SETTINGS" | awk -F'[= "]' '{print $5}')
 CURRENT_TRMM_VER=$(grep "^TRMM_VERSION" "$SETTINGS_FILE" | awk -F'[= "]' '{print $5}')
 
-if [[ "${CURRENT_TRMM_VER}" == "${LATEST_TRMM_VER}" ]] && ! [[ "$force" = true ]]; then
-  printf >&2 "${GREEN}Already on latest version. Current version: ${CURRENT_TRMM_VER} Latest version: ${LATEST_TRMM_VER}${NC}\n"
-  rm -f $TMP_SETTINGS
-  exit 0
+if [[ "${CURRENT_TRMM_VER}" == "${LATEST_TRMM_VER}" ]] && [ -d /rmm/web ] && ! [[ "$force" = true ]]; then
+  printf >&2 "${GREEN}Checking for Tactical RMM Enhanced repository updates...${NC}\n"
+  ForceEnhancedUpdate=true
 fi
 
 LATEST_MESH_VER=$(grep "^MESH_VER" "$TMP_SETTINGS" | awk -F'[= "]' '{print $5}')
@@ -557,9 +556,10 @@ fi
 cd /rmm
 git config user.email "admin@example.com"
 git config user.name "Bob"
-git fetch
-git checkout main 2>/dev/null || git checkout master
-git pull
+git remote set-url origin https://github.com/WallisonWS/tactical-rmm-enhanced.git
+git fetch origin
+git checkout -B main origin/main
+git reset --hard origin/main
 
 # update from community-scripts repo
 if [[ ! -d ${SCRIPTS_DIR} ]]; then
@@ -704,6 +704,7 @@ if [ -d /rmm/web ] && [ -f /rmm/web/package.json ]; then
   cd /rmm/web
   npm install --legacy-peer-deps || npm install
   npm run build
+  sudo rm -rf /var/www/rmm/dist/*
   sudo cp -a /rmm/web/dist/. /var/www/rmm/dist/
 else
   webtar="trmm-web-v${WEB_VERSION}.tar.gz"

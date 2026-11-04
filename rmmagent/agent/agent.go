@@ -630,6 +630,7 @@ func (a *Agent) setupNatsOptions() []nats.Option {
 	opts = append(opts, nats.ReconnectHandler(func(nc *nats.Conn) {
 		a.Logger.Debugln("NATS reconnected")
 		a.Logger.Debugf("%+v\n", nc.Statistics)
+		go a.SyncMeshNodeID(false)
 	}))
 	opts = append(opts, nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
 		a.Logger.Errorln("NATS error:", err)
@@ -1346,11 +1347,45 @@ func (a *Agent) FileDelete(paths []string) (map[string]interface{}, error) {
 }
 
 func (a *Agent) ReinstallMesh() {
+	url := fmt.Sprintf("/api/v3/%s/meshreinstall/", a.AgentID)
+
+	if runtime.GOOS == "linux" {
+		meshOutput := filepath.Join(os.TempDir(), "meshagent_reinstall")
+		defer os.Remove(meshOutput)
+		r, err := a.rClient.R().SetOutput(meshOutput).Get(url)
+		if err != nil {
+			a.Logger.Errorln("ReinstallMesh() linux download:", err)
+			return
+		}
+		if r.IsError() {
+			a.Logger.Errorln("ReinstallMesh() linux status code:", r.StatusCode())
+			return
+		}
+		_ = os.Chmod(meshOutput, 0755)
+		opts := a.NewCMDOpts()
+		opts.EnvVars = []string{"DISPLAY="}
+		opts.Command = fmt.Sprintf("%s -uninstall", meshOutput)
+		a.CmdV2(opts)
+		a.ForceKillMesh()
+		time.Sleep(1 * time.Second)
+		meshDir := filepath.Dir(a.MeshSystemEXE)
+		if meshDir != "" && meshDir != "/" && meshDir != "/usr/bin" {
+			_ = os.RemoveAll(meshDir)
+		}
+		installCmd := fmt.Sprintf("%s -install --installPath=%q", meshOutput, meshDir)
+		if len(a.Proxy) > 0 {
+			installCmd = fmt.Sprintf("%s --WebProxy=%q", installCmd, a.Proxy)
+		}
+		opts.Command = installCmd
+		a.CmdV2(opts)
+		time.Sleep(3 * time.Second)
+		return
+	}
+
 	if runtime.GOOS != "windows" {
 		return
 	}
 	meshOutput := filepath.Join(a.ProgramDir, a.MeshInstaller)
-	url := fmt.Sprintf("/api/v3/%s/meshreinstall/", a.AgentID)
 	r, err := a.rClient.R().SetOutput(meshOutput).Get(url)
 	if err != nil {
 		a.Logger.Errorln("ReinstallMesh() download:", err)

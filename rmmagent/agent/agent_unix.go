@@ -404,16 +404,21 @@ func (a *Agent) NixMeshNodeID() string {
 	opts.IsExecutable = true
 	opts.Shell = a.MeshSystemEXE
 	opts.Command = "-nodeid"
+	opts.EnvVars = []string{"DISPLAY="}
 
 	const maxAttempts = 10
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		out := a.CmdV2(opts)
-		meshNodeID = out.Stdout
+		meshNodeID = StripAll(out.Stdout)
 		a.Logger.Debugln("NixMeshNodeID() Stdout:", out.Stdout)
 		a.Logger.Debugln("NixMeshNodeID() Stderr:", out.Stderr)
 
-		notReady := meshNodeID == "" || strings.Contains(strings.ToLower(meshNodeID), "graphical version") || strings.Contains(strings.ToLower(meshNodeID), "zenity")
+		lowerID := strings.ToLower(meshNodeID)
+		notReady := meshNodeID == "" ||
+			strings.Contains(lowerID, "graphicalversion") ||
+			strings.Contains(lowerID, "zenity") ||
+			strings.Contains(lowerID, "notdefined")
 
 		if !notReady {
 			return meshNodeID
@@ -429,22 +434,41 @@ func (a *Agent) NixMeshNodeID() string {
 }
 
 func (a *Agent) getMeshNodeID() (string, error) {
-	return a.NixMeshNodeID(), nil
+	id := StripAll(a.NixMeshNodeID())
+	lowerID := strings.ToLower(id)
+	if id == "" || strings.Contains(lowerID, "error") || strings.Contains(lowerID, "notdefined") {
+		return "", errors.New("failed to get mesh node id")
+	}
+	return id, nil
 }
 
 func (a *Agent) RecoverMesh() {
 	a.Logger.Infoln("Attempting mesh recovery")
+	if !trmm.FileExists(a.MeshSystemEXE) && runtime.GOOS == "linux" {
+		a.ReinstallMesh()
+		a.SyncMeshNodeID(true)
+		return
+	}
+
 	opts := a.NewCMDOpts()
-	def := "systemctl restart meshagent.service"
 	switch runtime.GOOS {
 	case "linux":
-		opts.Command = def
+		opts.Command = "systemctl stop meshagent.service"
+		a.CmdV2(opts)
+		a.ForceKillMesh()
+		opts.Command = "systemctl start meshagent.service"
+		a.CmdV2(opts)
+		time.Sleep(2 * time.Second)
+		if _, err := a.getMeshNodeID(); err != nil {
+			a.ReinstallMesh()
+		}
 	case "darwin":
 		opts.Command = "launchctl kickstart -k system/meshagent"
+		a.CmdV2(opts)
 	default:
-		opts.Command = def
+		opts.Command = "systemctl restart meshagent.service"
+		a.CmdV2(opts)
 	}
-	a.CmdV2(opts)
 	a.SyncMeshNodeID(true)
 }
 

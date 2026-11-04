@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import os
@@ -112,17 +113,37 @@ def get_mesh_ws_url() -> str:
     return uri
 
 
-async def get_mesh_device_id(uri: str, device_group: str) -> None:
-    async with websockets.connect(uri, max_size=TRMM_WS_MAX_SIZE) as ws:
+async def get_mesh_device_id(uri: str, device_group: str) -> str:
+    async with websockets.connect(
+        uri, max_size=TRMM_WS_MAX_SIZE, open_timeout=15, ping_interval=20
+    ) as ws:
         payload = {"action": "meshes", "responseid": "meshctrl"}
         await ws.send(json.dumps(payload))
 
-        async for message in ws:
+        while True:
+            message = await asyncio.wait_for(ws.recv(), timeout=20)
             r = json.loads(message)
-            if r["action"] == "meshes":
-                return list(filter(lambda x: x["name"] == device_group, r["meshes"]))[
-                    0
-                ]["_id"].split("mesh//")[1]
+            action = r.get("action")
+            if action == "meshes":
+                meshes = r.get("meshes") or []
+                matched = [x for x in meshes if x.get("name") == device_group]
+                if matched:
+                    return matched[0]["_id"].split("mesh//")[1]
+                if meshes:
+                    return meshes[0]["_id"].split("mesh//")[1]
+                # Auto-create device_group if no mesh group exists yet
+                await ws.send(
+                    json.dumps(
+                        {
+                            "action": "createmesh",
+                            "meshname": device_group,
+                            "meshtype": 2,
+                            "responseid": "meshctrl",
+                        }
+                    )
+                )
+            elif action == "createmesh" and r.get("meshid"):
+                return str(r["meshid"]).split("mesh//")[-1]
 
 
 def download_mesh_agent(dl_url: str) -> HttpResponse:
@@ -176,14 +197,33 @@ def get_mesh_installer(goarch: GoArch, dl_url: str, plat: AgentPlat):
 
 
 def _b64_to_hex(h: str) -> str:
-    return b64encode(bytes.fromhex(h)).decode().replace(r"/", "$").replace(r"+", "@")
+    if not h:
+        raise ValueError("empty mesh_node_id")
+    cleaned = h.strip()
+    if cleaned.startswith("node//"):
+        cleaned = cleaned.split("node//", 1)[1].strip()
+    if not cleaned or "not defined" in cleaned.lower() or "error" in cleaned.lower():
+        raise ValueError(f"invalid mesh_node_id: {h}")
+    try:
+        return (
+            b64encode(bytes.fromhex(cleaned))
+            .decode()
+            .replace(r"/", "$")
+            .replace(r"+", "@")
+        )
+    except ValueError:
+        if 40 <= len(cleaned) <= 48:
+            return cleaned.replace(r"/", "$").replace(r"+", "@")
+        raise
 
 
 async def send_command_with_mesh(
     cmd: str, uri: str, mesh_node_id: str, shell: int, run_as_user: int
 ) -> None:
     node_id = _b64_to_hex(mesh_node_id)
-    async with websockets.connect(uri) as ws:
+    async with websockets.connect(
+        uri, max_size=TRMM_WS_MAX_SIZE, open_timeout=15, ping_interval=20
+    ) as ws:
         await ws.send(
             json.dumps(
                 {
@@ -200,7 +240,9 @@ async def send_command_with_mesh(
 
 async def wake_on_lan(*, uri: str, mesh_node_id: str) -> None:
     node_id = _b64_to_hex(mesh_node_id)
-    async with websockets.connect(uri) as ws:
+    async with websockets.connect(
+        uri, max_size=TRMM_WS_MAX_SIZE, open_timeout=15, ping_interval=20
+    ) as ws:
         await ws.send(
             json.dumps(
                 {
@@ -214,7 +256,9 @@ async def wake_on_lan(*, uri: str, mesh_node_id: str) -> None:
 
 async def remove_mesh_agent(uri: str, mesh_node_id: str) -> None:
     node_id = _b64_to_hex(mesh_node_id)
-    async with websockets.connect(uri) as ws:
+    async with websockets.connect(
+        uri, max_size=TRMM_WS_MAX_SIZE, open_timeout=15, ping_interval=20
+    ) as ws:
         await ws.send(
             json.dumps(
                 {
