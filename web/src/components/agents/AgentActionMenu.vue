@@ -160,47 +160,53 @@
       <q-item-section>{{ t("menu.runChecks") }}</q-item-section>
     </q-item>
 
-    <!-- Autonomous Self-Heal & Winget Quick Menu -->
+    <!-- Ferramentas Equipe de TI -->
     <q-item clickable>
       <q-item-section side>
-        <q-icon size="xs" name="auto_fix_high" />
+        <q-icon size="xs" name="build" />
       </q-item-section>
       <q-item-section>{{ t("menu.enhancedTools") }}</q-item-section>
       <q-item-section side>
         <q-icon name="keyboard_arrow_right" />
       </q-item-section>
       <q-menu auto-close anchor="top right" self="top left">
-        <q-list dense style="min-width: 190px">
-          <q-item clickable v-ripple @click="quickSelfHeal(agent, 'self_heal', 'full')">
-            <q-item-section>Full Autonomous Self-Heal</q-item-section>
-          </q-item>
-          <q-item clickable v-ripple @click="quickSelfHeal(agent, 'disk_cleanup', 'disk')">
-            <q-item-section>Deep Disk Cleanup</q-item-section>
-          </q-item>
-          <q-item clickable v-ripple @click="quickSelfHeal(agent, 'self_heal', 'services')">
-            <q-item-section>Restart Stopped Services</q-item-section>
-          </q-item>
-          <q-item clickable v-ripple @click="quickWingetUpgrade(agent)">
-            <q-item-section>Winget Upgrade All Software</q-item-section>
-          </q-item>
-          <q-separator />
-          <q-item clickable v-ripple @click="quickRepairHALink(agent)">
-            <q-item-section>Reparar Link &amp; Mesh (HA)</q-item-section>
+        <q-list dense style="min-width: 220px">
+          <q-item clickable v-ripple @click="quickDownloadRDP(agent)">
+            <q-item-section side>
+              <q-icon size="xs" name="computer" color="primary" />
+            </q-item-section>
+            <q-item-section>Conectar / Baixar .RDP (1-Clique)</q-item-section>
           </q-item>
           <q-item clickable v-ripple @click="quickEnableRDP(agent)">
+            <q-item-section side>
+              <q-icon size="xs" name="lock_open" color="positive" />
+            </q-item-section>
             <q-item-section>Habilitar RDP Seguro (NLA)</q-item-section>
-          </q-item>
-          <q-item clickable v-ripple @click="quickDownloadRDP(agent)">
-            <q-item-section>Baixar Conexão .RDP (1-Clique)</q-item-section>
           </q-item>
           <q-separator />
           <q-item clickable v-ripple @click="quickAdminAction(agent, 'gpupdate_force')">
+            <q-item-section side>
+              <q-icon size="xs" name="policy" color="info" />
+            </q-item-section>
             <q-item-section>Forçar GPO (gpupdate /force)</q-item-section>
           </q-item>
           <q-item clickable v-ripple @click="quickAdminAction(agent, 'clear_print_spooler')">
+            <q-item-section side>
+              <q-icon size="xs" name="print" color="teal" />
+            </q-item-section>
             <q-item-section>Resetar Spooler de Impressão</q-item-section>
           </q-item>
+          <q-item clickable v-ripple @click="quickSelfHeal(agent, 'disk_cleanup', 'disk')">
+            <q-item-section side>
+              <q-icon size="xs" name="cleaning_services" color="amber-8" />
+            </q-item-section>
+            <q-item-section>Limpar Arquivos Temporários</q-item-section>
+          </q-item>
+          <q-separator />
           <q-item clickable v-ripple @click="quickSendUserNotice(agent)">
+            <q-item-section side>
+              <q-icon size="xs" name="campaign" color="orange" />
+            </q-item-section>
             <q-item-section>Enviar Aviso TI na Tela</q-item-section>
           </q-item>
         </q-list>

@@ -94,41 +94,6 @@
           icon="speed"
           :label="t('tabs.telemetry')"
         />
-        <q-tab
-          v-if="activeTabs.includes('security')"
-          content-class="min-width"
-          name="security"
-          icon="security"
-          :label="t('tabs.security')"
-        />
-        <q-tab
-          v-if="activeTabs.includes('network')"
-          content-class="min-width"
-          name="network"
-          icon="lan"
-          :label="t('tabs.network')"
-        />
-        <q-tab
-          v-if="activeTabs.includes('selfheal')"
-          content-class="min-width"
-          name="selfheal"
-          icon="auto_fix_high"
-          :label="t('tabs.selfheal')"
-        />
-        <q-tab
-          v-if="activeTabs.includes('rdpha')"
-          content-class="min-width"
-          name="rdpha"
-          icon="desktop_windows"
-          :label="t('tabs.rdpHa')"
-        />
-        <q-tab
-          v-if="activeTabs.includes('itsupport')"
-          content-class="min-width"
-          name="itsupport"
-          icon="support_agent"
-          :label="t('tabs.itsupport')"
-        />
       </q-tabs>
       <q-separator />
     </q-header>
@@ -211,41 +176,6 @@
         >
           <TelemetryTab />
         </q-tab-panel>
-        <q-tab-panel
-          v-if="activeTabs.includes('security')"
-          name="security"
-          class="q-pa-none"
-        >
-          <SecurityEDRTab />
-        </q-tab-panel>
-        <q-tab-panel
-          v-if="activeTabs.includes('network')"
-          name="network"
-          class="q-pa-none"
-        >
-          <NetworkToolsTab />
-        </q-tab-panel>
-        <q-tab-panel
-          v-if="activeTabs.includes('selfheal')"
-          name="selfheal"
-          class="q-pa-none"
-        >
-          <SelfHealWingetTab />
-        </q-tab-panel>
-        <q-tab-panel
-          v-if="activeTabs.includes('rdpha')"
-          name="rdpha"
-          class="q-pa-none"
-        >
-          <RDPHAConnectivityTab />
-        </q-tab-panel>
-        <q-tab-panel
-          v-if="activeTabs.includes('itsupport')"
-          name="itsupport"
-          class="q-pa-none"
-        >
-          <ITSupportHardwareTab />
-        </q-tab-panel>
       </q-tab-panels>
     </q-page-container>
   </q-layout>
@@ -268,11 +198,6 @@ import DebugTab from "@/components/agents/DebugTab.vue";
 import AssetsTab from "@/components/agents/AssetsTab.vue";
 import NotesTab from "@/components/agents/NotesTab.vue";
 import TelemetryTab from "@/components/agents/TelemetryTab.vue";
-import SecurityEDRTab from "@/components/agents/SecurityEDRTab.vue";
-import NetworkToolsTab from "@/components/agents/NetworkToolsTab.vue";
-import SelfHealWingetTab from "@/components/agents/SelfHealWingetTab.vue";
-import RDPHAConnectivityTab from "@/components/agents/RDPHAConnectivityTab.vue";
-import ITSupportHardwareTab from "@/components/agents/ITSupportHardwareTab.vue";
 
 export default {
   name: "SubTableTabs",
@@ -288,23 +213,12 @@ export default {
     AssetsTab,
     NotesTab,
     TelemetryTab,
-    SecurityEDRTab,
-    NetworkToolsTab,
-    SelfHealWingetTab,
-    RDPHAConnectivityTab,
-    ITSupportHardwareTab,
   },
   props: {
     activeTabs: {
       type: Array,
       default: () => [
         "summary",
-        "telemetry",
-        "security",
-        "network",
-        "selfheal",
-        "rdpha",
-        "itsupport",
         "checks",
         "tasks",
         "patches",
@@ -314,6 +228,7 @@ export default {
         "assets",
         "debug",
         "audit",
+        "telemetry",
       ],
     },
   },

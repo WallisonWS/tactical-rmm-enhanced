@@ -2,6 +2,7 @@ import { watch, type Ref } from "vue";
 import type { SupportedLocale } from "./index";
 
 const originalTextMap = new WeakMap<Text, string>();
+const lastWrittenTextMap = new WeakMap<Text, string>();
 const originalAttrMap = new WeakMap<Element, Record<string, string>>();
 
 const SKIP_TAGS = new Set([
@@ -201,6 +202,7 @@ const EXACT_PHRASES: Array<[string, string, string]> = [
   ["Processes", "Processos", "Procesos"],
   ["Event Log", "Visualizador de Eventos", "Visor de Eventos"],
   ["File Browser", "Gerenciador de Arquivos", "Explorador de Archivos"],
+  ["Registry", "Editor de Registro", "Editor de Registro"],
   ["User Preferences", "Preferências do Usuário", "Preferencias del Usuario"],
   ["General", "Geral", "General"],
   ["Key Store", "Cofre de Chaves", "Almacén de Claves"],
@@ -208,6 +210,116 @@ const EXACT_PHRASES: Array<[string, string, string]> = [
   ["MeshCentral", "MeshCentral", "MeshCentral"],
   ["Email Alerts", "Alertas por E-mail", "Alertas por Correo"],
   ["SMS Alerts", "Alertas por SMS", "Alertas por SMS"],
+
+  // RolesForm.vue & PermissionsManager.vue (Complete Translation)
+  ["Editing Role", "Editando Função / Perfil", "Editando Rol / Perfil"],
+  ["Adding Role", "Adicionando Função / Perfil", "Añadiendo Rol / Perfil"],
+  ["Add Role", "Adicionar Função", "Añadir Rol"],
+  ["Role Name", "Nome da Função / Perfil", "Nombre del Rol / Perfil"],
+  ["*Required", "*Obrigatório", "*Obligatorio"],
+  ["Super User", "Superusuário (Acesso Total)", "Superusuario (Acceso Total)"],
+  ["Reporting Viewer", "Visualizador de Relatórios", "Visor de Informes"],
+  ["Accounts", "Contas e Perfis", "Cuentas y Perfiles"],
+  ["List User Accounts", "Listar Contas de Usuários", "Listar Cuentas de Usuarios"],
+  ["Manage User Accounts", "Gerenciar Contas de Usuários", "Gestionar Cuentas de Usuarios"],
+  ["List Roles", "Listar Funções / Perfis", "Listar Roles / Perfiles"],
+  ["Manage Roles", "Gerenciar Funções / Perfis", "Gestionar Roles / Perfiles"],
+  ["Agents", "Agentes (Computadores)", "Agentes (Equipos)"],
+  ["List Agents", "Listar Agentes", "Listar Agentes"],
+  ["List Agent History", "Listar Histórico do Agente", "Listar Historial del Agente"],
+  ["Use MeshCentral", "Usar Controle Remoto (MeshCentral)", "Usar Control Remoto (MeshCentral)"],
+  ["Uninstall Agents", "Desinstalar Agentes", "Desinstalar Agentes"],
+  ["Edit Agents", "Editar Agentes", "Editar Agentes"],
+  ["Manage Processes", "Gerenciar Processos", "Gestionar Procesos"],
+  ["View Event Logs", "Visualizar Logs de Eventos", "Ver Registros de Eventos"],
+  ["Use Terminal", "Usar Terminal Remoto", "Usar Terminal Remoto"],
+  ["Shutdown / Reboot Agents", "Desligar / Reiniciar Agentes", "Apagar / Reiniciar Agentes"],
+  ["Wake-Up (WoL) Agents", "Acordar Agentes (Wake-on-LAN)", "Despertar Agentes (Wake-on-LAN)"],
+  ["Install Agents", "Instalar Agentes", "Instalar Agentes"],
+  ["Bulk Actions", "Ações em Massa", "Acciones Masivas"],
+  ["Recover Agents", "Recuperar Agentes", "Recuperar Agentes"],
+  ["Use Registry", "Usar Editor de Registro", "Usar Editor de Registro"],
+  ["Use File Browser", "Usar Gerenciador de Arquivos", "Usar Explorador de Archivos"],
+  ["Core", "Sistema Principal (Core)", "Sistema Principal (Core)"],
+  ["List Notes", "Listar Notas", "Listar Notas"],
+  ["Manage Notes", "Gerenciar Notas", "Gestionar Notas"],
+  ["View Global Settings", "Visualizar Configurações Globais", "Ver Configuración Global"],
+  ["Edit Global Settings", "Editar Configurações Globais", "Editar Configuración Global"],
+  ["View Global Key Store", "Visualizar Cofre de Chaves Global", "Ver Almacén de Claves Global"],
+  ["Edit Global Key Store", "Editar Cofre de Chaves Global", "Editar Almacén de Claves Global"],
+  ["Do Server Maintenance", "Executar Manutenção do Servidor", "Realizar Mantenimiento del Servidor"],
+  ["Manage Code Signing", "Gerenciar Assinatura de Código", "Gestionar Firma de Código"],
+  ["List API Keys", "Listar Chaves de API", "Listar Claves de API"],
+  ["Manage API Keys", "Gerenciar Chaves de API", "Gestionar Claves de API"],
+  ["Run URL Actions", "Executar Ações de URL", "Ejecutar Acciones URL"],
+  ["View Custom Fields", "Visualizar Campos Personalizados", "Ver Campos Personalizados"],
+  ["Edit Custom Fields", "Editar Campos Personalizados", "Editar Campos Personalizados"],
+  ["List Schedules", "Listar Agendamentos", "Listar Programaciones"],
+  ["Manage Schedules", "Gerenciar Agendamentos", "Gestionar Programaciones"],
+  ["Use TRMM Server Web Terminal", "Usar Terminal Web do Servidor TRMM", "Usar Terminal Web del Servidor TRMM"],
+  ["Checks", "Verificações (Checks)", "Verificaciones (Checks)"],
+  ["List Checks", "Listar Verificações", "Listar Verificaciones"],
+  ["Manage Checks", "Gerenciar Verificações", "Gestionar Verificaciones"],
+  ["Clients", "Clientes e Unidades", "Clientes y Sitios"],
+  ["List Clients", "Listar Clientes", "Listar Clientes"],
+  ["Manage Clients", "Gerenciar Clientes", "Gestionar Clientes"],
+  ["List Sites", "Listar Unidades / Sites", "Listar Sitios / Sedes"],
+  ["Manage Sites", "Gerenciar Unidades / Sites", "Gestionar Sitios / Sedes"],
+  ["List Deployments", "Listar Implantações", "Listar Despliegues"],
+  ["Allowed Clients", "Clientes Permitidos", "Clientes Permitidos"],
+  ["Empty means all clients are allowed", "Vazio significa que todos os clientes são permitidos", "Vacío significa que todos los clientes están permitidos"],
+  ["Allowed Sites", "Unidades / Sites Permitidos", "Sitios / Sedes Permitidos"],
+  ["Empty means all sites are allowed", "Vazio significa que todas as unidades são permitidas", "Vacío significa que todos los sitios están permitidos"],
+  ["Automation Policies", "Políticas de Automação", "Políticas de Automatización"],
+  ["List Automation Policies", "Listar Políticas de Automação", "Listar Políticas de Automatización"],
+  ["Manage Automation Policies", "Gerenciar Políticas de Automação", "Gestionar Políticas de Automatización"],
+  ["Tasks", "Tarefas Automatizadas", "Tareas Automatizadas"],
+  ["List Tasks", "Listar Tarefas", "Listar Tareas"],
+  ["Manage Tasks", "Gerenciar Tarefas", "Gestionar Tareas"],
+  ["Run Tasks", "Executar Tarefas", "Ejecutar Tareas"],
+  ["Logs", "Logs e Auditoria", "Registros y Auditoría"],
+  ["View Audit Logs", "Visualizar Logs de Auditoria", "Ver Registros de Auditoría"],
+  ["View Debug Logs", "Visualizar Logs de Depuração", "Ver Registros de Depuración"],
+  ["List Pending Actions", "Listar Ações Pendentes", "Listar Acciones Pendientes"],
+  ["Manage Pending Actions", "Gerenciar Ações Pendentes", "Gestionar Acciones Pendientes"],
+  ["Scripts", "Scripts", "Scripts"],
+  ["List Scripts", "Listar Scripts", "Listar Scripts"],
+  ["Manage Scripts", "Gerenciar Scripts", "Gestionar Scripts"],
+  ["Run Scripts on TRMM Server", "Executar Scripts no Servidor TRMM", "Ejecutar Scripts en el Servidor TRMM"],
+  ["Alerts", "Alertas", "Alertas"],
+  ["List Alerts", "Listar Alertas", "Listar Alertas"],
+  ["Manage Alerts", "Gerenciar Alertas", "Gestionar Alertas"],
+  ["List Alert Templates", "Listar Modelos de Alerta", "Listar Plantillas de Alerta"],
+  ["Manage Alert Templates", "Gerenciar Modelos de Alerta", "Gestionar Plantillas de Alerta"],
+  ["Windows Services", "Serviços do Windows", "Servicios de Windows"],
+  ["Manage Windows Services", "Gerenciar Serviços do Windows", "Gestionar Servicios de Windows"],
+  ["Software", "Softwares", "Software"],
+  ["List Software", "Listar Softwares", "Listar Software"],
+  ["Manage Software", "Gerenciar Softwares", "Gestionar Software"],
+  ["Windows Updates", "Atualizações do Windows", "Actualizaciones de Windows"],
+  ["Manage Windows Updates", "Gerenciar Atualizações do Windows", "Gestionar Actualizaciones de Windows"],
+
+  // AdminManager, UserPreferences, EditCoreSettings, EditAgent, ServerMaintenance
+  ["Users", "Usuários", "Usuarios"],
+  ["Add User", "Adicionar Usuário", "Añadir Usuario"],
+  ["Edit User", "Editar Usuário", "Editar Usuario"],
+  ["Active", "Ativo", "Activo"],
+  ["Role", "Função / Perfil", "Rol / Perfil"],
+  ["Last Login", "Último Acesso", "Último Acceso"],
+  ["API Keys", "Chaves de API", "Claves de API"],
+  ["Add API Key", "Adicionar Chave de API", "Añadir Clave de API"],
+  ["Expiration", "Expiração", "Expiración"],
+  ["Agent Auto-Update", "Atualização Automática dos Agentes", "Actualización Automática de Agentes"],
+  ["Default TimeZone", "Fuso Horário Padrão", "Zona Horaria Predeterminada"],
+  ["Default Agent Table Tab", "Aba Padrão da Tabela de Agentes", "Pestaña Predeterminada de Agentes"],
+  ["Client Tree Sort", "Ordenação da Árvore de Clientes", "Orden del Árbol de Clientes"],
+  ["Client Tree Panel Width", "Largura do Painel de Clientes", "Ancho del Panel de Clientes"],
+  ["Clear search when switching client/site", "Limpar pesquisa ao trocar de cliente/unidade", "Limpiar búsqueda al cambiar de cliente/sitio"],
+  ["Double-Click Action on Agent Table", "Ação de Duplo Clique no Computador", "Acción de Doble Clic en el Equipo"],
+  ["Conectar / Baixar .RDP (1-Clique)", "Connect / Download .RDP (1-Click)", "Conectar / Descargar .RDP (1-Clic)"],
+  ["Limpar Arquivos Temporários", "Clean Temporary Files", "Limpiar Archivos Temporales"],
+  ["Conectar RDP (.rdp)", "Connect RDP (.rdp)", "Conectar RDP (.rdp)"],
+  ["Ingressar no AD", "Join AD", "Unir a AD"],
 
   // Enhanced Context Menu & Sub-tabs (Portuguese -> English / Spanish)
   ["Full Autonomous Self-Heal", "Auto-Cura Completa Autônoma", "Auto-Curación Completa Autónoma"],
@@ -255,6 +367,10 @@ for (const [enText, ptText, esText] of EXACT_PHRASES) {
     "Forçar GPO (gpupdate /force)",
     "Resetar Spooler de Impressão",
     "Enviar Aviso TI na Tela",
+    "Conectar / Baixar .RDP (1-Clique)",
+    "Limpar Arquivos Temporários",
+    "Conectar RDP (.rdp)",
+    "Ingressar no AD",
     "Active Directory (GPO) & Unidades Sem AD (Workgroup / Windows Server)",
     "Levantamento de Computadores na Rede da Unidade (Sem AD / via Servidor Local)",
     "Escanear Rede da Unidade",
@@ -412,14 +528,30 @@ export function translateDomSubtree(root: Node, locale: SupportedLocale) {
     while (node) {
       const parent = node.parentElement;
       if (parent && !shouldSkipElement(parent)) {
-        if (!originalTextMap.has(node)) {
-          originalTextMap.set(node, node.nodeValue || "");
+        const currentVal = node.nodeValue || "";
+        const lastWritten = lastWrittenTextMap.get(node);
+        // If this node was never seen, or Vue/Quasar reactively updated its text since we last touched it:
+        if (
+          !originalTextMap.has(node) ||
+          (lastWritten !== undefined && currentVal !== lastWritten) ||
+          (lastWritten === undefined && currentVal !== originalTextMap.get(node))
+        ) {
+          originalTextMap.set(node, currentVal);
+          lastWrittenTextMap.delete(node);
         }
+
         const orig = originalTextMap.get(node) || "";
         const translated = translateDynamicPatterns(orig, locale);
-        const targetVal = translated !== null ? translated : orig;
-        if (node.nodeValue !== targetVal) {
-          node.nodeValue = targetVal;
+        if (translated !== null) {
+          if (node.nodeValue !== translated) {
+            node.nodeValue = translated;
+          }
+          lastWrittenTextMap.set(node, translated);
+        } else if (lastWrittenTextMap.has(node)) {
+          if (node.nodeValue !== orig) {
+            node.nodeValue = orig;
+          }
+          lastWrittenTextMap.delete(node);
         }
       }
       node = walker.nextNode() as Text | null;

@@ -53,6 +53,51 @@
       <q-space />
       <q-btn
         dense
+        unelevated
+        color="primary"
+        label="Take Control"
+        icon="computer"
+        size="sm"
+        no-caps
+        class="q-mr-sm q-px-sm"
+        @click="runTakeControl(selectedAgent)"
+      />
+      <q-btn
+        dense
+        flat
+        label="Remote Background"
+        icon="terminal"
+        size="md"
+        no-caps
+        class="q-mr-sm"
+        @click="runRemoteBackground(selectedAgent, summary.plat)"
+      />
+      <q-btn
+        v-if="summary.plat === 'windows'"
+        dense
+        flat
+        label="Conectar RDP (.rdp)"
+        icon="desktop_windows"
+        size="md"
+        no-caps
+        class="q-mr-sm"
+        :loading="rdpConnecting"
+        @click="connectNativeRDP"
+      />
+      <q-btn
+        v-if="summary.plat === 'windows' && !adDomainInfo.inDomain"
+        dense
+        unelevated
+        color="amber-9"
+        label="Ingressar no AD"
+        icon="domain_add"
+        size="sm"
+        no-caps
+        class="q-mr-sm q-px-sm"
+        @click="showJoinAdDialog = true"
+      />
+      <q-btn
+        dense
         flat
         label="Popout"
         icon="open_in_new"
@@ -60,16 +105,6 @@
         no-caps
         class="q-mr-sm"
         @click="openAgentWindow(selectedAgent)"
-      />
-      <q-btn
-        dense
-        flat
-        label="Take Control"
-        icon="computer"
-        size="md"
-        no-caps
-        class="q-mr-sm"
-        @click="runTakeControl(selectedAgent)"
       />
       <q-btn-dropdown dense flat size="md" no-caps label="Actions">
         <AgentActionMenu :agent="summary" />
@@ -132,6 +167,32 @@
               <q-icon name="fas fa-network-wired" />
             </q-item-section>
             <q-item-section>LAN IP: {{ summary.local_ips }}</q-item-section>
+          </q-item>
+          <q-item v-if="summary.plat === 'windows'">
+            <q-item-section avatar>
+              <q-icon :name="adDomainInfo.inDomain ? 'domain' : 'domain_disabled'" />
+            </q-item-section>
+            <q-item-section>
+              <div class="row items-center q-gutter-x-xs">
+                <span v-if="adDomainInfo.inDomain">
+                  Domínio AD: <b>{{ adDomainInfo.domainName }}</b>
+                </span>
+                <span v-else class="text-warning">
+                  Fora do AD ({{ adDomainInfo.domainName }})
+                </span>
+                <q-btn
+                  v-if="!adDomainInfo.inDomain"
+                  dense
+                  flat
+                  size="xs"
+                  color="amber-8"
+                  icon="domain_add"
+                  label="Ingressar no AD"
+                  no-caps
+                  @click="showJoinAdDialog = true"
+                />
+              </div>
+            </q-item-section>
           </q-item>
         </q-list>
       </div>
@@ -226,6 +287,64 @@
       </div>
       <div class="col-2"></div>
     </div>
+
+    <!-- Modal: Ingressar Computador no Domínio Active Directory -->
+    <q-dialog v-model="showJoinAdDialog" persistent>
+      <q-card style="min-width: 440px">
+        <q-card-section class="row items-center">
+          <q-icon name="domain_add" color="primary" size="sm" class="q-mr-sm" />
+          <div class="text-subtitle1 text-weight-bold">
+            Ingressar {{ summary.hostname }} no Active Directory
+          </div>
+          <q-space />
+          <q-btn icon="close" flat round dense v-close-popup />
+        </q-card-section>
+        <q-separator />
+        <q-card-section class="q-gutter-y-sm">
+          <q-input
+            v-model="joinAdForm.domain_name"
+            dense
+            outlined
+            label="Domínio Active Directory (ex: crd.med.br)"
+          />
+          <q-input
+            v-model="joinAdForm.admin_user"
+            dense
+            outlined
+            label="Usuário Administrador do Domínio (ex: CRD\administrador)"
+          />
+          <q-input
+            v-model="joinAdForm.admin_password"
+            type="password"
+            dense
+            outlined
+            label="Senha do Administrador do Domínio"
+          />
+          <q-input
+            v-model="joinAdForm.ou_path"
+            dense
+            outlined
+            label="Caminho da OU (Opcional — ex: OU=Computadores,DC=crd,DC=med,DC=br)"
+          />
+          <q-checkbox
+            v-model="joinAdForm.restart"
+            dense
+            label="Reiniciar o computador automaticamente após ingressar no AD"
+          />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat label="Cancelar" v-close-popup />
+          <q-btn
+            color="primary"
+            icon="domain_add"
+            label="Ingressar no Domínio"
+            :loading="joinAdLoading"
+            @click="submitJoinAd"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <q-inner-loading :showing="loading" color="primary" />
   </div>
 </template>
@@ -238,9 +357,17 @@ import {
   fetchAgent,
   refreshAgentWMI,
   runTakeControl,
+  runRemoteBackground,
   openAgentWindow,
 } from "@/api/agents";
-import { notifySuccess } from "@/utils/notify";
+import {
+  manageAgentRDP,
+  downloadNativeRDPFile,
+  joinAgentToADDomain,
+  fetchFleetExecutiveSummary,
+  fleetDomainMap,
+} from "@/api/enhanced";
+import { notifySuccess, notifyError } from "@/utils/notify";
 import { fetchCustomFields } from "@/api/core";
 
 // ui imports
@@ -265,6 +392,97 @@ export default {
     const summary = ref(null);
     const customFieldsDefinitions = ref(null);
     const loading = ref(false);
+    const rdpConnecting = ref(false);
+    const showJoinAdDialog = ref(false);
+    const joinAdLoading = ref(false);
+    const joinAdForm = ref({
+      domain_name: "",
+      admin_user: "",
+      admin_password: "",
+      ou_path: "",
+      restart: false,
+    });
+
+    const adDomainInfo = computed(() => {
+      const mapEntry = (fleetDomainMap.value || {})[selectedAgent.value];
+      if (mapEntry) {
+        return {
+          inDomain: !!mapEntry.part_of_domain,
+          domainName: mapEntry.domain || (mapEntry.part_of_domain ? "AD" : "WORKGROUP"),
+        };
+      }
+      const compSys = summary.value?.wmi_detail?.comp_sys?.[0] || [];
+      let partOfDomain = false;
+      let domain = "";
+      let workgroup = "WORKGROUP";
+      if (Array.isArray(compSys)) {
+        for (const item of compSys) {
+          if (item && typeof item === "object") {
+            if ("PartOfDomain" in item) partOfDomain = !!item.PartOfDomain;
+            if ("Domain" in item && item.Domain) domain = String(item.Domain);
+            if ("Workgroup" in item && item.Workgroup) workgroup = String(item.Workgroup);
+          }
+        }
+      }
+      return {
+        inDomain: partOfDomain,
+        domainName: partOfDomain ? domain || "AD" : domain || workgroup,
+      };
+    });
+
+    async function connectNativeRDP() {
+      if (!summary.value) return;
+      rdpConnecting.value = true;
+      try {
+        await manageAgentRDP(selectedAgent.value, "enable_rdp", false);
+      } catch (e) {
+        // Proceed to download .rdp file even if remote command was skipped
+      } finally {
+        rdpConnecting.value = false;
+      }
+      const rawIps = String(summary.value.local_ips || "");
+      const firstIp =
+        rawIps
+          .split(",")[0]
+          .split("/")[0]
+          .trim() || summary.value.hostname;
+      downloadNativeRDPFile(summary.value.hostname, firstIp, 3389);
+      notifySuccess(`Conexão RDP (${firstIp}) habilitada e arquivo ${summary.value.hostname}.rdp baixado!`);
+    }
+
+    async function submitJoinAd() {
+      if (
+        !joinAdForm.value.domain_name.trim() ||
+        !joinAdForm.value.admin_user.trim() ||
+        !joinAdForm.value.admin_password
+      ) {
+        notifyError("Preencha o Domínio AD, Usuário Administrador e Senha.");
+        return;
+      }
+      joinAdLoading.value = true;
+      try {
+        const res = await joinAgentToADDomain(selectedAgent.value, {
+          domain: joinAdForm.value.domain_name.trim(),
+          username: joinAdForm.value.admin_user.trim(),
+          password: joinAdForm.value.admin_password,
+          ou_path: joinAdForm.value.ou_path.trim(),
+          restart: joinAdForm.value.restart,
+        });
+        if (res?.success) {
+          notifySuccess(res.output || `${summary.value.hostname} ingressado no domínio AD com sucesso!`);
+          showJoinAdDialog.value = false;
+          joinAdForm.value.admin_password = "";
+          await fetchFleetExecutiveSummary().catch(() => {});
+          await refreshSummary();
+        } else {
+          notifyError(res?.output || "Falha ao ingressar no domínio AD.");
+        }
+      } catch (e) {
+        notifyError(e?.response?.data?.error || "Erro ao ingressar o computador no domínio AD.");
+      } finally {
+        joinAdLoading.value = false;
+      }
+    }
 
     const serial_number = computed(() => {
       if (summary.value.plat === "windows") {
@@ -384,13 +602,21 @@ export default {
       serial_number,
       cpu,
       store,
+      rdpConnecting,
+      showJoinAdDialog,
+      joinAdLoading,
+      joinAdForm,
+      adDomainInfo,
 
       // methods
       getSummary,
       refreshSummary,
       diskBarColor,
       runTakeControl,
+      runRemoteBackground,
       openAgentWindow,
+      connectNativeRDP,
+      submitJoinAd,
     };
   },
 };

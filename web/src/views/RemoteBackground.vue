@@ -35,12 +35,6 @@
           <span class="q-ml-sm font">Registry</span>
         </div>
       </q-tab>
-      <q-tab name="telemetry" icon="speed" :label="t('tabs.telemetry')" />
-      <q-tab name="security" icon="security" :label="t('tabs.security')" />
-      <q-tab name="network" icon="lan" :label="t('tabs.network')" />
-      <q-tab name="selfheal" icon="auto_fix_high" :label="t('tabs.selfheal')" />
-      <q-tab name="rdpha" icon="desktop_windows" :label="t('tabs.rdpHa')" />
-      <q-tab name="itsupport" icon="support_agent" :label="t('tabs.itsupport')" />
       <q-space />
       <LanguageSwitcher />
     </q-tabs>
@@ -92,24 +86,6 @@
         class="q-pa-none"
       >
         <RegistryManager :agent_id="agent_id" />
-      </q-tab-panel>
-      <q-tab-panel name="telemetry" class="q-pa-none">
-        <TelemetryTab />
-      </q-tab-panel>
-      <q-tab-panel name="security" class="q-pa-none">
-        <SecurityEDRTab />
-      </q-tab-panel>
-      <q-tab-panel name="network" class="q-pa-none">
-        <NetworkToolsTab />
-      </q-tab-panel>
-      <q-tab-panel name="selfheal" class="q-pa-none">
-        <SelfHealWingetTab />
-      </q-tab-panel>
-      <q-tab-panel name="rdpha" class="q-pa-none">
-        <RDPHAConnectivityTab :agent-id="String(agent_id)" />
-      </q-tab-panel>
-      <q-tab-panel name="itsupport" class="q-pa-none">
-        <ITSupportHardwareTab :agent-id="String(agent_id)" />
       </q-tab-panel>
     </q-tab-panels>
     <FileBrowserManager
@@ -182,12 +158,6 @@ import EventLogManager from "@/components/agents/remotebg/EventLogManager.vue";
 import RegistryManager from "@/components/agents/remotebg/RegistryManager.vue";
 import registryIcon from "../assets/windows-registry.png";
 import TerminalManager from "@/components/agents/remotebg/TerminalManager.vue";
-import TelemetryTab from "@/components/agents/TelemetryTab.vue";
-import SecurityEDRTab from "@/components/agents/SecurityEDRTab.vue";
-import NetworkToolsTab from "@/components/agents/NetworkToolsTab.vue";
-import SelfHealWingetTab from "@/components/agents/SelfHealWingetTab.vue";
-import RDPHAConnectivityTab from "@/components/agents/RDPHAConnectivityTab.vue";
-import ITSupportHardwareTab from "@/components/agents/ITSupportHardwareTab.vue";
 import LanguageSwitcher from "@/components/LanguageSwitcher.vue";
 import { t } from "@/i18n";
 
@@ -204,12 +174,6 @@ export default {
     RegistryManager,
     FileBrowserManager,
     TerminalManager,
-    TelemetryTab,
-    SecurityEDRTab,
-    NetworkToolsTab,
-    SelfHealWingetTab,
-    RDPHAConnectivityTab,
-    ITSupportHardwareTab,
     LanguageSwitcher,
   },
   setup() {

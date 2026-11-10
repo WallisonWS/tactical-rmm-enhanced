@@ -104,14 +104,14 @@
           style="font-size: 16px"
         />
         <!-- Devices Chip -->
-        <q-chip class="cursor-pointer">
+        <q-chip class="cursor-pointer" data-no-translate="true">
           <q-avatar size="md" icon="devices" color="primary" />
           <q-tooltip :delay="600" anchor="top middle" self="top middle"
             >{{ t("nav.agentCount") }}</q-tooltip
           >
-          {{ serverCount + workstationCount }}
+          <span data-no-translate="true">{{ effectiveServerCount + effectiveWorkstationCount }}</span>
           <q-menu>
-            <q-list dense>
+            <q-list dense data-no-translate="true">
               <q-item-label header>{{ t("nav.servers") }}</q-item-label>
               <q-item>
                 <q-item-section avatar>
@@ -119,7 +119,7 @@
                 </q-item-section>
 
                 <q-item-section no-wrap>
-                  <q-item-label>{{ t("nav.total") }}: {{ serverCount }}</q-item-label>
+                  <q-item-label>{{ t("nav.total") }}: {{ effectiveServerCount }}</q-item-label>
                 </q-item-section>
               </q-item>
               <q-item>
@@ -132,7 +132,7 @@
                 </q-item-section>
 
                 <q-item-section no-wrap>
-                  <q-item-label>{{ t("nav.offline") }}: {{ serverOfflineCount }}</q-item-label>
+                  <q-item-label>{{ t("nav.offline") }}: {{ effectiveServerOfflineCount }}</q-item-label>
                 </q-item-section>
               </q-item>
               <q-item-label header>{{ t("nav.workstations") }}</q-item-label>
@@ -142,7 +142,7 @@
                 </q-item-section>
 
                 <q-item-section no-wrap>
-                  <q-item-label>{{ t("nav.total") }}: {{ workstationCount }}</q-item-label>
+                  <q-item-label>{{ t("nav.total") }}: {{ effectiveWorkstationCount }}</q-item-label>
                 </q-item-section>
               </q-item>
               <q-item>
@@ -156,7 +156,7 @@
 
                 <q-item-section no-wrap>
                   <q-item-label
-                    >{{ t("nav.offline") }}: {{ workstationOfflineCount }}</q-item-label
+                    >{{ t("nav.offline") }}: {{ effectiveWorkstationOfflineCount }}</q-item-label
                   >
                 </q-item-section>
               </q-item>
@@ -251,6 +251,30 @@ const {
   workstationOfflineCount,
   daysUntilCertExpires,
 } = storeToRefs(useDashboardStore());
+
+const effectiveServerCount = computed(() => {
+  if (serverCount.value + workstationCount.value > 0) return serverCount.value;
+  const agents = store.state.agents || [];
+  return agents.filter((a: any) => a.monitoring_type === "server").length;
+});
+
+const effectiveServerOfflineCount = computed(() => {
+  if (serverCount.value + workstationCount.value > 0) return serverOfflineCount.value;
+  const agents = store.state.agents || [];
+  return agents.filter((a: any) => a.monitoring_type === "server" && a.status !== "online").length;
+});
+
+const effectiveWorkstationCount = computed(() => {
+  if (serverCount.value + workstationCount.value > 0) return workstationCount.value;
+  const agents = store.state.agents || [];
+  return agents.filter((a: any) => a.monitoring_type === "workstation").length;
+});
+
+const effectiveWorkstationOfflineCount = computed(() => {
+  if (serverCount.value + workstationCount.value > 0) return workstationOfflineCount.value;
+  const agents = store.state.agents || [];
+  return agents.filter((a: any) => a.monitoring_type === "workstation" && a.status !== "online").length;
+});
 
 const { displayName } = storeToRefs(useAuthStore());
 

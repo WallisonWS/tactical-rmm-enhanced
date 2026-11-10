@@ -525,24 +525,18 @@ class AgentMeshCentral(APIView):
         )
         core = get_core_settings()
 
-        # Auto-heal mesh_node_id on-the-fly if missing or invalid when opening Take Control
-        if not agent.mesh_node_id or agent.hex_mesh_node_id == "error":
-            try:
-                health = asyncio.run(
-                    agent.nats_cmd({"func": "ha_link_health"}, timeout=8)
+        # Ensure Mesh Agent service is started on Windows if it was stopped
+        if agent.plat == AgentPlat.WINDOWS:
+            with suppress(Exception):
+                asyncio.run(
+                    agent.nats_cmd(
+                        {
+                            "func": "winsvcaction",
+                            "payload": {"name": "mesh agent", "action": "start"},
+                        },
+                        wait=False,
+                    )
                 )
-                if isinstance(health, dict):
-                    live_node = str(health.get("mesh_node_id") or "").strip()
-                    if (
-                        live_node
-                        and "not defined" not in live_node.lower()
-                        and "error" not in live_node.lower()
-                    ):
-                        agent.mesh_node_id = live_node
-                        agent.save(update_fields=["mesh_node_id"])
-                        sync_mesh_perms_task.delay()
-            except Exception:
-                pass
 
         user = (
             request.user.mesh_user_id
@@ -551,15 +545,10 @@ class AgentMeshCentral(APIView):
         )
         token = get_login_token(key=core.mesh_token, user=user)
         token_param = f"login={token}&"
-        node_target = (
-            agent.hex_mesh_node_id
-            if agent.hex_mesh_node_id != "error"
-            else agent.mesh_node_id
-        )
 
-        control = f"{core.mesh_site}/?{token_param}gotonode={node_target}&viewmode=11&hide=31"
-        terminal = f"{core.mesh_site}/?{token_param}gotonode={node_target}&viewmode=12&hide=31"
-        file = f"{core.mesh_site}/?{token_param}gotonode={node_target}&viewmode=13&hide=31"
+        control = f"{core.mesh_site}/?{token_param}gotonode={agent.mesh_node_id}&viewmode=11&hide=31"
+        terminal = f"{core.mesh_site}/?{token_param}gotonode={agent.mesh_node_id}&viewmode=12&hide=31"
+        file = f"{core.mesh_site}/?{token_param}gotonode={agent.mesh_node_id}&viewmode=13&hide=31"
 
         AuditLog.audit_mesh_session(
             username=request.user.username,
@@ -585,21 +574,6 @@ class AgentMeshCentral(APIView):
         r = asyncio.run(agent.nats_cmd(data, timeout=90))
         if r != "ok":
             return notify_error("Unable to contact the agent")
-
-        try:
-            health = asyncio.run(agent.nats_cmd({"func": "ha_link_health"}, timeout=10))
-            if isinstance(health, dict):
-                live_node = str(health.get("mesh_node_id") or "").strip()
-                if (
-                    live_node
-                    and "not defined" not in live_node.lower()
-                    and "error" not in live_node.lower()
-                    and agent.mesh_node_id != live_node
-                ):
-                    agent.mesh_node_id = live_node
-                    agent.save(update_fields=["mesh_node_id"])
-        except Exception:
-            pass
 
         sync_mesh_perms_task.delay()
         return Response(f"Repaired mesh agent on {agent.hostname}")

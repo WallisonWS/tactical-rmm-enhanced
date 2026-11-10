@@ -272,69 +272,19 @@
           <q-td key="site_name" :props="props">{{ props.row.site_name }}</q-td>
           <q-td key="hostname" :props="props">
             <div class="row no-wrap items-center">
-              <span class="text-weight-medium">{{ props.row.hostname }}</span>
+              <span>{{ props.row.hostname }}</span>
               <q-badge
-                v-if="domainInfoFor(props.row.agent_id)?.part_of_domain === true"
-                outline
-                color="positive"
-                class="q-ml-xs"
-                style="font-size: 9px; padding: 1px 4px"
-              >
-                AD
-                <q-tooltip>
-                  No Domínio AD: {{ domainInfoFor(props.row.agent_id)?.domain || "Active Directory" }}
-                </q-tooltip>
-              </q-badge>
-              <q-badge
-                v-else-if="domainInfoFor(props.row.agent_id)?.part_of_domain === false"
-                outline
+                v-if="domainInfoFor(props.row.agent_id)?.part_of_domain === false"
                 color="amber-9"
+                text-color="white"
                 class="q-ml-xs"
-                style="font-size: 9px; padding: 1px 4px"
+                style="font-size: 10px; padding: 2px 5px"
               >
                 Fora do AD
                 <q-tooltip>
-                  Fora do Active Directory ({{ domainInfoFor(props.row.agent_id)?.domain || "WORKGROUP" }}) — Clique na aba "Suporte TI &amp; Hardware" para ingressar no AD
+                  Fora do Active Directory ({{ domainInfoFor(props.row.agent_id)?.domain || "WORKGROUP" }})
                 </q-tooltip>
               </q-badge>
-            </div>
-          </q-td>
-          <q-td key="quick_actions" :props="props" auto-width @click.stop>
-            <div class="row no-wrap items-center q-gutter-x-xs">
-              <q-btn
-                dense
-                flat
-                round
-                size="sm"
-                color="primary"
-                icon="desktop_windows"
-                @click.stop="quickTakeControl(props.row.agent_id)"
-              >
-                <q-tooltip>{{ t("menu.takeControl") }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                dense
-                flat
-                round
-                size="sm"
-                color="teal-5"
-                icon="terminal"
-                @click.stop="quickRemoteBg(props.row.agent_id, props.row.plat)"
-              >
-                <q-tooltip>{{ t("menu.remoteBg") }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                dense
-                flat
-                round
-                size="sm"
-                color="amber-7"
-                icon="healing"
-                :loading="repairingAgentId === props.row.agent_id"
-                @click.stop="quickRepairMesh(props.row)"
-              >
-                <q-tooltip>{{ t("dash.repairMeshQuick") }}</q-tooltip>
-              </q-btn>
             </div>
           </q-td>
           <q-td key="description" :props="props">{{
@@ -428,7 +378,7 @@ import PendingActions from "@/components/logs/PendingActions.vue";
 import AgentActionMenu from "@/components/agents/AgentActionMenu.vue";
 import { runURLAction } from "@/api/core";
 import { runTakeControl, runRemoteBackground } from "@/api/agents";
-import { repairAgentHALink, fleetDomainMap } from "@/api/enhanced";
+import { fleetDomainMap } from "@/api/enhanced";
 import { t } from "@/i18n";
 import { capitalize } from "@vue/shared";
 
@@ -442,7 +392,6 @@ export default {
   mixins: [mixins],
   data() {
     return {
-      repairingAgentId: null,
       pagination: {
         rowsPerPage: 0,
         sortBy: "hostname",
@@ -458,27 +407,6 @@ export default {
     domainInfoFor(agent_id) {
       const map = fleetDomainMap.value || {};
       return map[agent_id] || null;
-    },
-    quickTakeControl(agent_id) {
-      this.$store.commit("setActiveRow", agent_id);
-      runTakeControl(agent_id);
-    },
-    quickRemoteBg(agent_id, plat) {
-      this.$store.commit("setActiveRow", agent_id);
-      this.$store.commit("setAgentPlatform", plat);
-      runRemoteBackground(agent_id, plat);
-    },
-    async quickRepairMesh(agent) {
-      this.repairingAgentId = agent.agent_id;
-      try {
-        await repairAgentHALink(agent.agent_id);
-        this.notifySuccess(`${agent.hostname}: Mesh & Link sincronizados sem conflito`);
-        this.refreshDashboard();
-      } catch (e) {
-        this.notifyError(`Falha ao reparar Mesh em ${agent.hostname}`);
-      } finally {
-        this.repairingAgentId = null;
-      }
     },
     filterTable(rows, terms, cols, cellValue) {
       const hiddenFields = [

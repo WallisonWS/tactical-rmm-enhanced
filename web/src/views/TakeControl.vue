@@ -130,9 +130,10 @@ export default {
 
       try {
         await sendAgentServiceAction(params.agent_id, "mesh agent", data);
-        setTimeout(() => {
-          notifySuccess("Mesh agent service was restarted");
-        }, 500);
+        control.value = "";
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await getMeshURLs();
+        notifySuccess("Mesh agent service was restarted");
       } catch (e) {
         console.error(e);
       }

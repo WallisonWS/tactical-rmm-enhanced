@@ -82,19 +82,35 @@ class GetEditActionService(APIView):
 
             if errormsg == "timeout" or natserror:
                 return notify_error("Unable to contact the agent")
+
+            # Always proceed to start even if stop returned an error because the service was already stopped
+            data["payload"]["action"] = "start"
+            r = asyncio.run(agent.nats_cmd(data, timeout=32))
+            success, natserror, errormsg = process_nats_response(r)
+
+            if errormsg == "timeout" or natserror:
+                return notify_error("Unable to contact the agent")
             elif not success and errormsg:
+                ps_fix = (
+                    f"Set-Service -Name '{svcname}' -StartupType Automatic -ErrorAction SilentlyContinue; "
+                    f"Start-Service -Name '{svcname}' -ErrorAction SilentlyContinue; "
+                    f"if ((Get-Service -Name '{svcname}' -ErrorAction SilentlyContinue).Status -eq 'Running') {{ Write-Output 'STARTED_OK' }}"
+                )
+                raw_r = asyncio.run(
+                    agent.nats_cmd(
+                        {
+                            "func": "rawcmd",
+                            "timeout": 25,
+                            "payload": {"command": ps_fix, "shell": "powershell"},
+                        },
+                        timeout=30,
+                    )
+                )
+                if isinstance(raw_r, str) and "STARTED_OK" in raw_r:
+                    return Response("The service was restarted successfully")
                 return notify_error(errormsg)
             elif success:
-                data["payload"]["action"] = "start"
-                r = asyncio.run(agent.nats_cmd(data, timeout=32))
-                success, natserror, errormsg = process_nats_response(r)
-
-                if errormsg == "timeout" or natserror:
-                    return notify_error("Unable to contact the agent")
-                elif not success and errormsg:
-                    return notify_error(errormsg)
-                elif success:
-                    return Response("The service was restarted successfully")
+                return Response("The service was restarted successfully")
         else:
             data["payload"]["action"] = action
             r = asyncio.run(agent.nats_cmd(data, timeout=32))
