@@ -553,6 +553,9 @@ EOF
 fi
 
 # update from Tactical RMM Enhanced repo
+if [ -f "$local_settings" ]; then
+  cp "$local_settings" ~/local_settings.py.bak
+fi
 cd /rmm
 git config user.email "admin@example.com"
 git config user.name "Bob"
@@ -560,6 +563,9 @@ git remote set-url origin https://github.com/WallisonWS/tactical-rmm-enhanced.gi
 git fetch origin
 git checkout -B main origin/main
 git reset --hard origin/main
+if [ ! -f "$local_settings" ] && [ -f ~/local_settings.py.bak ]; then
+  cp ~/local_settings.py.bak "$local_settings"
+fi
 
 # update from community-scripts repo
 if [[ ! -d ${SCRIPTS_DIR} ]]; then
@@ -702,8 +708,9 @@ sudo mkdir -p /var/www/rmm/dist
 if [ -d /rmm/web ] && [ -f /rmm/web/package.json ]; then
   printf >&2 "${GREEN}Building Tactical RMM Enhanced Frontend (PT-BR / EN-US / ES-ES)...${NC}\n"
   cd /rmm/web
+  export NODE_OPTIONS="--max-old-space-size=4096"
   npm install --legacy-peer-deps || npm install
-  npm run build || npx quasar build || true
+  npx quasar build || npm run build || true
   if [ -f /rmm/web/dist/index.html ]; then
     sudo rm -rf /var/www/rmm/dist/*
     sudo cp -a /rmm/web/dist/. /var/www/rmm/dist/
