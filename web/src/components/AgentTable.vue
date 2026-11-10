@@ -287,6 +287,53 @@
               </q-badge>
             </div>
           </q-td>
+          <q-td key="quick_actions" :props="props">
+            <div class="row no-wrap items-center q-gutter-x-xs">
+              <q-btn
+                dense
+                flat
+                round
+                size="sm"
+                color="primary"
+                icon="computer"
+                @click.stop="
+                  agentRowSelected(props.row.agent_id, props.row.plat);
+                  runTakeControl(props.row.agent_id);
+                "
+              >
+                <q-tooltip>{{ t("agentMenu.takeControl") }}</q-tooltip>
+              </q-btn>
+              <q-btn
+                dense
+                flat
+                round
+                size="sm"
+                color="teal-5"
+                icon="terminal"
+                @click.stop="
+                  agentRowSelected(props.row.agent_id, props.row.plat);
+                  runRemoteBackground(props.row.agent_id, props.row.plat);
+                "
+              >
+                <q-tooltip>{{ t("agentMenu.remoteBackground") }}</q-tooltip>
+              </q-btn>
+              <q-btn
+                v-if="props.row.plat === 'windows'"
+                dense
+                flat
+                round
+                size="sm"
+                color="indigo-4"
+                icon="desktop_windows"
+                @click.stop="
+                  agentRowSelected(props.row.agent_id, props.row.plat);
+                  quickConnectRDP(props.row);
+                "
+              >
+                <q-tooltip>Conectar RDP (.rdp)</q-tooltip>
+              </q-btn>
+            </div>
+          </q-td>
           <q-td key="description" :props="props">{{
             props.row.description
           }}</q-td>
@@ -377,8 +424,9 @@ import EditAgent from "@/components/modals/agents/EditAgent.vue";
 import PendingActions from "@/components/logs/PendingActions.vue";
 import AgentActionMenu from "@/components/agents/AgentActionMenu.vue";
 import { runURLAction } from "@/api/core";
-import { runTakeControl, runRemoteBackground } from "@/api/agents";
-import { fleetDomainMap } from "@/api/enhanced";
+import { runTakeControl, runRemoteBackground, fetchAgent } from "@/api/agents";
+import { fleetDomainMap, manageAgentRDP, downloadNativeRDPFile } from "@/api/enhanced";
+import { notifySuccess } from "@/utils/notify";
 import { t } from "@/i18n";
 import { capitalize } from "@vue/shared";
 
@@ -404,6 +452,40 @@ export default {
   },
   methods: {
     t,
+    runTakeControl,
+    runRemoteBackground,
+    async quickConnectRDP(row) {
+      try {
+        await manageAgentRDP(row.agent_id, { action: "enable" });
+      } catch (e) {
+        // Proceed to download RDP file even if NATS call times out
+      }
+      let targetHost = "";
+      const rawRowIps = String(row.local_ips || row.local_ip || "");
+      targetHost =
+        rawRowIps
+          .split(",")
+          .map((s) => s.trim())
+          .find((ip) => ip && !ip.startsWith("127.")) || "";
+      if (!targetHost) {
+        try {
+          const detail = await fetchAgent(row.agent_id);
+          const detailIps = String(detail?.local_ips || detail?.local_ip || "");
+          targetHost =
+            detailIps
+              .split(",")
+              .map((s) => s.trim())
+              .find((ip) => ip && !ip.startsWith("127.")) || "";
+        } catch (e) {
+          // fallback to hostname
+        }
+      }
+      if (!targetHost) {
+        targetHost = row.hostname;
+      }
+      downloadNativeRDPFile(row.hostname, targetHost, 3389);
+      notifySuccess(`Conexão RDP (${targetHost}) habilitada e arquivo ${row.hostname}.rdp baixado!`);
+    },
     domainInfoFor(agent_id) {
       const map = fleetDomainMap.value || {};
       return map[agent_id] || null;

@@ -654,6 +654,13 @@ export default {
           align: "left",
         },
         {
+          name: "quick_actions",
+          label: "Quick Actions",
+          field: "agent_id",
+          sortable: false,
+          align: "left",
+        },
+        {
           name: "description",
           label: "Description",
           field: "description",
@@ -728,6 +735,7 @@ export default {
         "client_name",
         "site_name",
         "hostname",
+        "quick_actions",
         "description",
         "user",
         "patchespending",

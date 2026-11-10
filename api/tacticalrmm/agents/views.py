@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 import datetime as dt
 import json
 import random
@@ -527,7 +528,7 @@ class AgentMeshCentral(APIView):
 
         # Ensure Mesh Agent service is started on Windows if it was stopped
         if agent.plat == AgentPlat.WINDOWS:
-            with suppress(Exception):
+            try:
                 asyncio.run(
                     agent.nats_cmd(
                         {
@@ -537,6 +538,8 @@ class AgentMeshCentral(APIView):
                         wait=False,
                     )
                 )
+            except Exception:
+                pass
 
         user = (
             request.user.mesh_user_id
@@ -550,11 +553,14 @@ class AgentMeshCentral(APIView):
         terminal = f"{core.mesh_site}/?{token_param}gotonode={agent.mesh_node_id}&viewmode=12&hide=31"
         file = f"{core.mesh_site}/?{token_param}gotonode={agent.mesh_node_id}&viewmode=13&hide=31"
 
-        AuditLog.audit_mesh_session(
-            username=request.user.username,
-            agent=agent,
-            debug_info={"ip": request._client_ip},
-        )
+        try:
+            AuditLog.audit_mesh_session(
+                username=request.user.username,
+                agent=agent,
+                debug_info={"ip": getattr(request, "_client_ip", "")},
+            )
+        except Exception:
+            pass
 
         ret = {
             "hostname": agent.hostname,

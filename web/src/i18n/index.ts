@@ -187,10 +187,13 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     "dash.quickAll": "Todos",
     "dash.quickOnline": "Online",
     "dash.quickOffline": "Offline",
+    "dash.overdue": "Vencidos",
     "dash.quickFailing": "Com Falhas",
     "dash.quickPatches": "Patches",
     "dash.quickReboot": "Reboot",
     "dash.repairMeshQuick": "Reparar e Sincronizar Mesh & Link (Zero Conflito)",
+    "agentMenu.takeControl": "Controle Remoto (Take Control)",
+    "agentMenu.remoteBackground": "Segundo Plano Remoto (Terminal / Serviços)",
 
     // Context Menu (AgentActionMenu)
     "menu.edit": "Editar",
@@ -441,10 +444,13 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     "dash.quickAll": "All",
     "dash.quickOnline": "Online",
     "dash.quickOffline": "Offline",
+    "dash.overdue": "Overdue",
     "dash.quickFailing": "Failing",
     "dash.quickPatches": "Patches",
     "dash.quickReboot": "Reboot",
     "dash.repairMeshQuick": "Repair & Sync Mesh & Link (Zero Conflict)",
+    "agentMenu.takeControl": "Take Control",
+    "agentMenu.remoteBackground": "Remote Background",
 
     // Context Menu (AgentActionMenu)
     "menu.edit": "Edit",
@@ -695,10 +701,13 @@ const messages: Record<SupportedLocale, Record<string, string>> = {
     "dash.quickAll": "Todos",
     "dash.quickOnline": "En Línea",
     "dash.quickOffline": "Desconectados",
+    "dash.overdue": "Vencidos",
     "dash.quickFailing": "Con Fallos",
     "dash.quickPatches": "Parches",
     "dash.quickReboot": "Reinicio",
     "dash.repairMeshQuick": "Reparar y Sincronizar Mesh y Enlace (Cero Conflicto)",
+    "agentMenu.takeControl": "Control Remoto (Take Control)",
+    "agentMenu.remoteBackground": "Segundo Plano Remoto (Terminal / Servicios)",
 
     // Context Menu (AgentActionMenu)
     "menu.edit": "Editar",

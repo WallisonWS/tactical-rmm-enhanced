@@ -90,9 +90,9 @@ export default function () {
         state.tokenExpired = action;
       },
       SET_SPLITTER(state, val) {
-        // top toolbar is 50px. Filebar is 36px and agent filter tabs are 44px
+        // top toolbar is 50px. Filebar is 40px and agent filter + pagination bars are 78px
         const kpiOffset = state.showKpiBar ? 92 : 0;
-        const availTable = Math.max(160, Screen.height - 50 - 36 - 52 - kpiOffset - val);
+        const availTable = Math.max(160, Screen.height - 50 - 40 - 78 - kpiOffset - val);
         state.tableHeight = `${availTable}px`;
 
         // q-tabs are 37px

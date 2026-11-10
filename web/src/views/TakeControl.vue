@@ -8,6 +8,15 @@
       <q-space />
       <q-btn
         class="q-mr-md"
+        color="indigo-6"
+        size="sm"
+        label="Conectar RDP (.rdp)"
+        icon="desktop_windows"
+        :loading="rdpConnecting"
+        @click="connectNativeRDP"
+      />
+      <q-btn
+        class="q-mr-md"
         color="primary"
         size="sm"
         label="Restart Connection"
@@ -41,10 +50,11 @@ import { ref, computed, onMounted } from "vue";
 import { useStore } from "vuex";
 import { useRoute } from "vue-router";
 import { useMeta, useQuasar } from "quasar";
-import { fetchAgentMeshCentralURLs, sendAgentRecoverMesh } from "@/api/agents";
+import { fetchAgentMeshCentralURLs, sendAgentRecoverMesh, fetchAgent } from "@/api/agents";
 import { fetchDashboardInfo } from "@/api/core";
 import { sendAgentServiceAction } from "@/api/services";
-import { notifySuccess } from "@/utils/notify";
+import { manageAgentRDP, downloadNativeRDPFile } from "@/api/enhanced";
+import { notifySuccess, notifyError } from "@/utils/notify";
 
 export default {
   name: "TakeControl",
@@ -69,6 +79,8 @@ export default {
     // take control setup
     const control = ref("");
     const status = ref(null);
+    const agentHostname = ref("");
+    const rdpConnecting = ref(false);
 
     const statusColor = computed(() => {
       switch (status.value) {
@@ -92,6 +104,7 @@ export default {
         const data = await fetchAgentMeshCentralURLs(params.agent_id);
         control.value = data.control;
         status.value = data.status;
+        agentHostname.value = data.hostname || "";
         useMeta({
           title: `${data.hostname} - ${data.client} - ${data.site} | Take Control`,
         });
@@ -141,16 +154,49 @@ export default {
       $q.loading.hide();
     }
 
+    async function connectNativeRDP() {
+      rdpConnecting.value = true;
+      try {
+        await manageAgentRDP(params.agent_id, { action: "enable" });
+      } catch (e) {
+        // Proceed to download RDP file even if agent NATS call times out
+      }
+      try {
+        const agentData = await fetchAgent(params.agent_id);
+        const rawIps = String(agentData?.local_ips || agentData?.local_ip || "");
+        const firstIp =
+          rawIps
+            .split(",")
+            .map((s) => s.trim())
+            .find((ip) => ip && !ip.startsWith("127.")) ||
+          agentData?.hostname ||
+          agentHostname.value;
+        const hostLabel = agentData?.hostname || agentHostname.value || "workstation";
+        downloadNativeRDPFile(hostLabel, firstIp, 3389);
+        notifySuccess(`Conexão RDP (${firstIp}) habilitada e arquivo ${hostLabel}.rdp baixado!`);
+      } catch (e) {
+        if (agentHostname.value) {
+          downloadNativeRDPFile(agentHostname.value, agentHostname.value, 3389);
+        } else {
+          notifyError("Não foi possível obter o IP do computador para conexão RDP.");
+        }
+      } finally {
+        rdpConnecting.value = false;
+      }
+    }
+
     return {
       // reactive data
       control,
       status,
       statusColor,
       dash_negative_color,
+      rdpConnecting,
 
       // methods
       repairMeshCentral,
       restartMeshService,
+      connectNativeRDP,
     };
   },
 };
