@@ -56,6 +56,20 @@ type Installer struct {
 func (a *Agent) Install(i *Installer) {
 	a.checkExistingAndRemove(i.Silent)
 
+	if runtime.GOOS == "windows" {
+		_ = os.MkdirAll(a.ProgramDir, 0755)
+		targetExe := filepath.Join(a.ProgramDir, "tacticalagent.exe")
+		if selfExe, err := os.Executable(); err == nil {
+			cleanSelf := filepath.Clean(selfExe)
+			cleanTarget := filepath.Clean(targetExe)
+			if !strings.EqualFold(cleanSelf, cleanTarget) {
+				_ = copyFile(cleanSelf, cleanTarget)
+			}
+		}
+	}
+
+	i.AgentType = a.AutoSelectAgentType(i.AgentType)
+
 	i.Headers = map[string]string{
 		"content-type":  "application/json",
 		"Authorization": fmt.Sprintf("Token %s", i.Token),

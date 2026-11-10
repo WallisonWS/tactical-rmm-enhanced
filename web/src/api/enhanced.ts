@@ -442,3 +442,63 @@ export async function sendAgentITSupportMessage(
   });
   return data;
 }
+
+export interface WindowsServerADProfile {
+  hostname: string;
+  platform: string;
+  os_caption: string;
+  os_version: string;
+  environment_mode: "active_directory" | "workgroup_standalone" | "linux_standalone";
+  is_windows_server: boolean;
+  is_domain_controller: boolean;
+  part_of_domain: boolean;
+  domain_name: string;
+  workgroup_name: string;
+  forest_name: string;
+  domain_role_id: number;
+  domain_role_label: string;
+  domain_controller_name: string;
+  domain_controller_address: string;
+  ad_site_name: string;
+  computer_dn: string;
+  organizational_unit: string;
+  secure_channel_valid: boolean;
+  sysvol_reachable: boolean;
+  netlogon_reachable: boolean;
+  time_sync_source: string;
+  deployed_via_gpo: boolean;
+  deployment_mode: string;
+  last_gpo_verify: string;
+  applied_computer_gpos: string[];
+  installed_server_roles: string[];
+  ad_critical_services: Record<string, string>;
+  recommended_agent_type: string;
+  client_id?: number;
+  client_name?: string;
+  site_id?: number;
+  site_name?: string;
+  timestamp: string;
+}
+
+export async function fetchAgentADServerStatus(
+  agentId: string,
+): Promise<WindowsServerADProfile> {
+  const { data } = await axios.get(`/agents/${agentId}/ad-server/`);
+  return data;
+}
+
+export async function runAgentADServerAction(
+  agentId: string,
+  action:
+    | "test_secure_channel"
+    | "repair_secure_channel"
+    | "gpupdate_registerdns"
+    | "sync_standalone_ntp"
+    | "dcdiag_server_health"
+    | "generate_deploy_info",
+) {
+  const { data } = await axios.post(`/agents/${agentId}/ad-server/`, {
+    action,
+  });
+  return data;
+}

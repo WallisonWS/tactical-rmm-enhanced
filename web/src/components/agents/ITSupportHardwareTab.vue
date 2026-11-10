@@ -130,6 +130,150 @@
         </div>
       </div>
 
+      <!-- Active Directory (GPO) & Non-AD (Workgroup / Standalone Windows Server) Section -->
+      <q-card flat bordered class="q-mb-md" v-if="adProfile">
+        <q-card-section class="q-pa-sm">
+          <div class="row items-center justify-between q-mb-sm">
+            <div class="row items-center q-gutter-xs">
+              <q-icon name="domain" color="primary" size="sm" />
+              <span class="text-subtitle2 text-weight-bold">
+                Compatibilidade Híbrida (Golang): Active Directory (GPO) &amp; Unidades Sem AD (Workgroup / Windows Server)
+              </span>
+              <q-badge :color="adProfile.part_of_domain ? 'positive' : 'blue-grey-7'">
+                {{ adProfile.part_of_domain ? `Com AD: ${adProfile.domain_name}` : `Unidade Sem AD (${adProfile.workgroup_name || "WORKGROUP"})` }}
+              </q-badge>
+              <q-badge :color="adProfile.is_windows_server ? 'deep-purple' : 'teal'">
+                {{ adProfile.domain_role_label }}
+              </q-badge>
+            </div>
+
+            <div class="row q-gutter-xs">
+              <q-btn
+                dense
+                outline
+                size="sm"
+                color="primary"
+                icon="verified_user"
+                label="Testar Canal AD / Status Local"
+                :loading="adActionLoading"
+                @click="onADAction('test_secure_channel')"
+              />
+              <q-btn
+                dense
+                outline
+                size="sm"
+                color="positive"
+                icon="build_circle"
+                label="Reparar Trust AD / W32Time"
+                :loading="adActionLoading"
+                @click="onADAction('repair_secure_channel')"
+              />
+              <q-btn
+                dense
+                outline
+                size="sm"
+                color="indigo"
+                icon="sync"
+                label="GPO / LGPO + DNS"
+                :loading="adActionLoading"
+                @click="onADAction('gpupdate_registerdns')"
+              />
+              <q-btn
+                dense
+                outline
+                size="sm"
+                color="teal"
+                icon="access_time"
+                label="NTP Unidade Sem AD"
+                :loading="adActionLoading"
+                @click="onADAction('sync_standalone_ntp')"
+              />
+              <q-btn
+                dense
+                outline
+                size="sm"
+                color="deep-purple"
+                icon="dns"
+                label="Diag Windows Server"
+                :loading="adActionLoading"
+                @click="onADAction('dcdiag_server_health')"
+              />
+              <q-btn
+                dense
+                color="secondary"
+                size="sm"
+                icon="terminal"
+                label="Modo Instalação GPO / Sem AD"
+                :loading="adActionLoading"
+                @click="onADAction('generate_deploy_info')"
+              />
+            </div>
+          </div>
+
+          <div class="row q-col-gutter-sm">
+            <div class="col-12 col-md-4">
+              <div class="text-caption text-grey">Controlador de Domínio / Grupo de Trabalho</div>
+              <div class="text-body2 text-weight-medium" v-if="adProfile.part_of_domain">
+                DC: {{ adProfile.domain_controller_name || "Auto" }}
+                <span v-if="adProfile.domain_controller_address">({{ adProfile.domain_controller_address }})</span>
+              </div>
+              <div class="text-body2 text-weight-medium" v-else>
+                Workgroup: {{ adProfile.workgroup_name || "WORKGROUP" }} (Modo Standalone)
+              </div>
+              <div class="text-caption text-grey">
+                OU / Local: {{ adProfile.organizational_unit || adProfile.site_name || "Padrão" }}
+              </div>
+            </div>
+
+            <div class="col-12 col-md-4">
+              <div class="text-caption text-grey">Saúde de Domínio / Sincronismo de Horário</div>
+              <div class="row q-gutter-xs q-mt-xs">
+                <q-badge v-if="adProfile.part_of_domain" :color="adProfile.secure_channel_valid ? 'positive' : 'negative'">
+                  Trust AD: {{ adProfile.secure_channel_valid ? "OK" : "Verificar" }}
+                </q-badge>
+                <q-badge v-if="adProfile.part_of_domain" :color="adProfile.sysvol_reachable ? 'positive' : 'warning'">
+                  SYSVOL: {{ adProfile.sysvol_reachable ? "OK" : "Indisponível" }}
+                </q-badge>
+                <q-badge color="blue-grey">
+                  NTP: {{ adProfile.time_sync_source || "Local" }}
+                </q-badge>
+              </div>
+            </div>
+
+            <div class="col-12 col-md-4">
+              <div class="text-caption text-grey">GPOs Aplicadas / Roles Windows Server</div>
+              <div class="text-caption">
+                <span v-if="adProfile.installed_server_roles?.length">
+                  Roles Server: <b>{{ adProfile.installed_server_roles.join(", ") }}</b>
+                </span>
+                <span v-else-if="adProfile.applied_computer_gpos?.length">
+                  GPOs ({{ adProfile.applied_computer_gpos.length }}): {{ adProfile.applied_computer_gpos.slice(0, 3).join(", ") }}
+                </span>
+                <span v-else>
+                  Tipo Recomendado Go: <b>{{ adProfile.recommended_agent_type }}</b> ({{ adProfile.deployment_mode || "Padrão" }})
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="deployInfo" class="q-mt-sm q-pa-sm bg-grey-10 text-white rounded-borders">
+            <div class="text-caption text-weight-bold text-amber q-mb-xs">
+              Parâmetros Nativos do Agente em Golang ({{ deployInfo.client_name }} / {{ deployInfo.site_name }}):
+            </div>
+            <div class="text-caption font-monospace q-mb-xs">
+              <b>Unidades COM Active Directory (GPO):</b> tacticalagent.exe {{ deployInfo.go_ad_gpo_args }}
+            </div>
+            <div class="text-caption font-monospace">
+              <b>Unidades SEM Active Directory (Standalone / Workgroup):</b> tacticalagent.exe {{ deployInfo.go_standalone_args }}
+            </div>
+          </div>
+
+          <div v-if="adActionOutput" class="q-mt-sm q-pa-sm bg-blue-grey-10 text-white rounded-borders">
+            <pre class="q-ma-none text-caption" style="white-space: pre-wrap">{{ adActionOutput }}</pre>
+          </div>
+        </q-card-section>
+      </q-card>
+
       <!-- On-Screen IT Helpdesk Broadcast & System Restore Checkpoint Row -->
       <div class="row q-col-gutter-md q-mb-md">
         <!-- IT Helpdesk Broadcast -->
@@ -291,9 +435,12 @@ import {
   fetchAgentRestorePoints,
   createAgentRestorePoint,
   sendAgentITSupportMessage,
+  fetchAgentADServerStatus,
+  runAgentADServerAction,
   type HardwareDomainInventory,
   type PrinterInfo,
   type RestorePointInfo,
+  type WindowsServerADProfile,
 } from "@/api/enhanced";
 import { notifySuccess, notifyError } from "@/utils/notify";
 
@@ -310,10 +457,14 @@ const selectedAgentId = computed<string>(
 
 const loading = ref(false);
 const adminActionLoading = ref(false);
+const adActionLoading = ref(false);
 const sendingMsg = ref(false);
 const creatingRestore = ref(false);
 
 const hwInventory = ref<HardwareDomainInventory | null>(null);
+const adProfile = ref<WindowsServerADProfile | null>(null);
+const adActionOutput = ref("");
+const deployInfo = ref<any | null>(null);
 const printers = ref<PrinterInfo[]>([]);
 const restorePoints = ref<RestorePointInfo[]>([]);
 
@@ -341,18 +492,50 @@ async function loadAll() {
   if (!selectedAgentId.value) return;
   loading.value = true;
   try {
-    const [hw, prn, rp] = await Promise.all([
+    const [hw, prn, rp, ad] = await Promise.all([
       fetchAgentHardwareInventory(selectedAgentId.value),
       fetchAgentPrinters(selectedAgentId.value),
       fetchAgentRestorePoints(selectedAgentId.value),
+      fetchAgentADServerStatus(selectedAgentId.value),
     ]);
     hwInventory.value = hw;
     printers.value = Array.isArray(prn) ? prn : [];
     restorePoints.value = rp?.restore_points || [];
+    adProfile.value = ad;
   } catch (e: any) {
     notifyError(e?.response?.data?.error || "Falha ao carregar dados de suporte e hardware");
   } finally {
     loading.value = false;
+  }
+}
+
+async function onADAction(
+  action:
+    | "test_secure_channel"
+    | "repair_secure_channel"
+    | "gpupdate_registerdns"
+    | "sync_standalone_ntp"
+    | "dcdiag_server_health"
+    | "generate_deploy_info",
+) {
+  if (!selectedAgentId.value) return;
+  adActionLoading.value = true;
+  try {
+    const res = await runAgentADServerAction(selectedAgentId.value, action);
+    if (action === "generate_deploy_info") {
+      deployInfo.value = res;
+      notifySuccess("Parâmetros de instalação Golang (AD GPO e Unidade Sem AD) gerados!");
+      return;
+    }
+    if (res?.ad_profile) {
+      adProfile.value = res.ad_profile;
+    }
+    adActionOutput.value = res?.output || (res?.steps || []).join("\n");
+    notifySuccess(res?.steps?.[0] || `Operação (${action}) executada com sucesso!`);
+  } catch (e: any) {
+    notifyError(e?.response?.data?.error || `Erro ao executar ${action}`);
+  } finally {
+    adActionLoading.value = false;
   }
 }
 

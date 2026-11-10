@@ -53,6 +53,7 @@ func main() {
 	meshNodeID := flag.String("meshnodeid", "", "Mesh Node ID")
 	cert := flag.String("cert", "", "Path to domain CA .pem")
 	silent := flag.Bool("silent", false, "Do not popup any message boxes during installation")
+	gpo := flag.Bool("gpo", false, "Idempotent Active Directory GPO silent installation & self-healing mode")
 	proxy := flag.String("proxy", "", "Use a http proxy")
 	insecure := flag.Bool("insecure", false, "Insecure for testing only")
 	natsport := flag.String("natsport", "", "nats standard port")
@@ -74,7 +75,11 @@ func main() {
 	}
 
 	setupLogging(logLevel, logTo)
-	defer logFile.Close()
+	defer func() {
+		if logFile != nil {
+			_ = logFile.Close()
+		}
+	}()
 
 	a := *agent.New(log, version)
 
@@ -138,11 +143,40 @@ func main() {
 		fmt.Printf("%+v\n", a.RunNetworkDiagnostics("1.1.1.1"))
 	case "wingetupgrade":
 		fmt.Printf("%+v\n", a.UpgradeAllPackages("all"))
+	case "adstatus":
+		fmt.Printf("%+v\n", a.GetADAndWindowsServerStatus())
 	case "taskrunner":
 		if len(os.Args) < 5 || *taskPK == 0 {
 			return
 		}
 		a.RunTask(*taskPK, true)
+	case "gpoinstall":
+		if *api == "" || *clientID == 0 || *siteID == 0 || *token == "" {
+			return
+		}
+		res := a.EnsureGPOInstallAndSelfHeal(&agent.Installer{
+			RMM:              *api,
+			ClientID:         *clientID,
+			SiteID:           *siteID,
+			Description:      *desc,
+			AgentType:        *atype,
+			Power:            *power,
+			RDP:              *rdp,
+			Ping:             *ping,
+			Token:            *token,
+			LocalMesh:        *localMesh,
+			Cert:             *cert,
+			Proxy:            *proxy,
+			Timeout:          *timeout,
+			Silent:           true,
+			NoMesh:           *noMesh,
+			MeshDir:          *meshDir,
+			MeshNodeID:       *meshNodeID,
+			Insecure:         *insecure,
+			NatsStandardPort: *natsport,
+			TmpDir:           *tmpDir,
+		})
+		fmt.Printf("%+v\n", res)
 	case "install":
 		if runtime.GOOS != "windows" {
 			u, err := user.Current()
@@ -157,7 +191,7 @@ func main() {
 		if *api == "" || *clientID == 0 || *siteID == 0 || *token == "" {
 			return
 		}
-		a.Install(&agent.Installer{
+		instCfg := &agent.Installer{
 			RMM:              *api,
 			ClientID:         *clientID,
 			SiteID:           *siteID,
@@ -171,14 +205,20 @@ func main() {
 			Cert:             *cert,
 			Proxy:            *proxy,
 			Timeout:          *timeout,
-			Silent:           *silent,
+			Silent:           *silent || *gpo,
 			NoMesh:           *noMesh,
 			MeshDir:          *meshDir,
 			MeshNodeID:       *meshNodeID,
 			Insecure:         *insecure,
 			NatsStandardPort: *natsport,
 			TmpDir:           *tmpDir,
-		})
+		}
+		if *gpo {
+			res := a.EnsureGPOInstallAndSelfHeal(instCfg)
+			fmt.Printf("%+v\n", res)
+		} else {
+			a.Install(instCfg)
+		}
 	default:
 		agent.ShowStatus(version)
 	}
@@ -196,10 +236,16 @@ func setupLogging(level, to *string) {
 	} else {
 		switch runtime.GOOS {
 		case "windows":
-			logFile, _ = os.OpenFile(filepath.Join(os.Getenv("ProgramFiles"), "TacticalAgent", "agent.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0664)
+			progDir := filepath.Join(os.Getenv("ProgramFiles"), "TacticalAgent")
+			_ = os.MkdirAll(progDir, 0755)
+			logFile, _ = os.OpenFile(filepath.Join(progDir, "agent.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0664)
 		default:
 			logFile, _ = os.OpenFile(filepath.Join("/var/log/", "tacticalagent.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0664)
 		}
-		log.SetOutput(logFile)
+		if logFile != nil {
+			log.SetOutput(logFile)
+		} else {
+			log.SetOutput(os.Stdout)
+		}
 	}
 }

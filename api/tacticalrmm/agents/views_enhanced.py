@@ -867,3 +867,106 @@ class AgentITSupportToolsView(APIView):
             after_value=nats_data["data"],
         )
         return Response(r)
+
+
+class AgentADServerManagerView(APIView):
+    """
+    GET /agents/<agent_id>/ad-server/
+    POST /agents/<agent_id>/ad-server/
+    Inspects and manages Active Directory (AD/GPO) as well as Non-AD (Workgroup/Standalone)
+    Windows Server and Workstation endpoints via the Go agent.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(
+            Agent.objects.select_related("site__client"), agent_id=agent_id
+        )
+        r = asyncio.run(agent.nats_cmd({"func": "ad_server_status"}, timeout=15))
+        if r in ("timeout", "natsdown") or not isinstance(r, dict):
+            return Response(
+                {
+                    "hostname": agent.hostname,
+                    "platform": agent.plat,
+                    "os_caption": agent.operating_system,
+                    "os_version": agent.version,
+                    "environment_mode": "workgroup_standalone",
+                    "is_windows_server": agent.monitoring_type == "server",
+                    "is_domain_controller": False,
+                    "part_of_domain": False,
+                    "domain_name": "",
+                    "workgroup_name": "WORKGROUP",
+                    "forest_name": "",
+                    "domain_role_id": 2 if agent.monitoring_type == "server" else 0,
+                    "domain_role_label": "Standalone Windows Server (Sem AD / Workgroup)"
+                    if agent.monitoring_type == "server"
+                    else "Standalone Workstation (Sem AD / Workgroup)",
+                    "domain_controller_name": "",
+                    "domain_controller_address": "",
+                    "ad_site_name": agent.site.name,
+                    "computer_dn": "",
+                    "organizational_unit": "",
+                    "secure_channel_valid": False,
+                    "sysvol_reachable": False,
+                    "netlogon_reachable": False,
+                    "time_sync_source": "Local CMOS / NTP",
+                    "deployed_via_gpo": False,
+                    "deployment_mode": "Standalone-Workgroup",
+                    "last_gpo_verify": "",
+                    "applied_computer_gpos": [],
+                    "installed_server_roles": [],
+                    "ad_critical_services": {},
+                    "recommended_agent_type": agent.monitoring_type,
+                    "client_id": agent.client.id,
+                    "client_name": agent.client.name,
+                    "site_id": agent.site.id,
+                    "site_name": agent.site.name,
+                    "timestamp": djangotime.now().isoformat(),
+                }
+            )
+        r["client_id"] = agent.client.id
+        r["client_name"] = agent.client.name
+        r["site_id"] = agent.site.id
+        r["site_name"] = agent.site.name
+        return Response(r)
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(
+            Agent.objects.select_related("site__client"), agent_id=agent_id
+        )
+        action = request.data.get("action", "test_secure_channel")
+
+        if action == "generate_deploy_info":
+            host_scheme = "https" if request.is_secure() else "http"
+            api_host = f"{host_scheme}://{request.get_host()}"
+            return Response(
+                {
+                    "client_id": agent.client.id,
+                    "client_name": agent.client.name,
+                    "site_id": agent.site.id,
+                    "site_name": agent.site.name,
+                    "api_url": api_host,
+                    "go_ad_gpo_args": f'-m gpoinstall -api "{api_host}" -client-id {agent.client.id} -site-id {agent.site.id} -agent-type auto -auth "<TOKEN_INSTALADOR>" -rdp -ping -power -silent -gpo',
+                    "go_standalone_args": f'-m gpoinstall -api "{api_host}" -client-id {agent.client.id} -site-id {agent.site.id} -agent-type auto -auth "<TOKEN_INSTALADOR>" -desc "Unidade Sem AD - {agent.site.name}" -rdp -ping -power -silent',
+                }
+            )
+
+        nats_data = {"func": "ad_server_action", "data": {"action": action}}
+        r = asyncio.run(agent.nats_cmd(nats_data, timeout=45))
+        if r in ("timeout", "natsdown"):
+            return Response(
+                {"error": f"Operação ({action}) expirou em {agent.hostname}"},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            agent=agent.hostname,
+            agent_id=agent.agent_id,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.EXEC_COMMAND,
+            message=f"{request.user.username} executou operação AD/Standalone '{action}' em {agent.hostname}",
+            after_value=nats_data["data"],
+        )
+        return Response(r)

@@ -73,6 +73,11 @@ urlpatterns = [
         views_enhanced.AgentITSupportToolsView.as_view(),
         name="agent_it_support_tools",
     ),
+    path(
+        "<agent:agent_id>/ad-server/",
+        views_enhanced.AgentADServerManagerView.as_view(),
+        name="agent_ad_server_manager",
+    ),
     # agent views
     path("", views.GetAgents.as_view()),
     path("<agent:agent_id>/", views.GetUpdateDeleteAgent.as_view()),

@@ -1573,6 +1573,26 @@ func (a *Agent) RunRPC() {
 				_ = ret.Encode(res)
 				msg.Respond(resp)
 			}(payload)
+
+		case "ad_server_status":
+			go func() {
+				defer a.recoverFilesRPC("ad_server_status", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				res := a.GetADAndWindowsServerStatus()
+				_ = ret.Encode(res)
+				msg.Respond(resp)
+			}()
+
+		case "ad_server_action":
+			go func(p *NatsMsg) {
+				defer a.recoverFilesRPC("ad_server_action", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				res := a.ManageActiveDirectoryAndServer(p.Data["action"])
+				_ = ret.Encode(res)
+				msg.Respond(resp)
+			}(payload)
 		}
 	})
 
