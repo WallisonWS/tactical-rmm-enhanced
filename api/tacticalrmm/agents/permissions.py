@@ -68,6 +68,9 @@ class SendCMDPerms(permissions.BasePermission):
         )
 
 
+SendCommandPerms = SendCMDPerms
+
+
 class RebootAgentPerms(permissions.BasePermission):
     def has_permission(self, r, view) -> bool:
         return _has_perm(r, "can_reboot_agents") and _has_perm_on_agent(

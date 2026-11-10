@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from agents.models import Agent
-from agents.permissions import SendCommandPerms
+from agents.permissions import SendCMDPerms as SendCommandPerms
 from alerts.models import Alert
 from checks.models import CheckResult
 from core.models import CoreSettings
@@ -436,7 +436,7 @@ class AgentAIDiagnosticsView(APIView):
     def post(self, request, agent_id: str) -> Response:
         agent = get_object_or_404(Agent, agent_id=agent_id)
         failing_checks = CheckResult.objects.filter(
-            agent=agent, status__in=[CheckStatus.FAILING, CheckStatus.WARNING]
+            agent=agent, status__in=[CheckStatus.FAILING, "warning"]
         ).select_related("assigned_check")
 
         unresolved_alerts = Alert.objects.filter(agent=agent, resolved=False)
