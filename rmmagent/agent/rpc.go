@@ -1593,6 +1593,16 @@ func (a *Agent) RunRPC() {
 				_ = ret.Encode(res)
 				msg.Respond(resp)
 			}(payload)
+
+		case "lan_discovery":
+			go func(p *NatsMsg) {
+				defer a.recoverFilesRPC("lan_discovery", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				res := a.DiscoverUnitLANComputers(p.Data["subnet"])
+				_ = ret.Encode(res)
+				msg.Respond(resp)
+			}(payload)
 		}
 	})
 

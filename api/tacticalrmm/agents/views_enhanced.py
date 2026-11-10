@@ -970,3 +970,78 @@ class AgentADServerManagerView(APIView):
             after_value=nats_data["data"],
         )
         return Response(r)
+
+
+class AgentLANDiscoveryView(APIView):
+    """
+    POST /agents/<agent_id>/lan-discovery/
+    Uses any installed server/agent in a non-AD unit as a LAN Discovery Probe
+    (SMB sessions, DHCP leases, ARP cache, and Go LAN scanner) and cross-references
+    discovered computers against the Tactical RMM database.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, agent_id: str) -> Response:
+        agent = get_object_or_404(
+            Agent.objects.select_related("site__client"), agent_id=agent_id
+        )
+        subnet = str(request.data.get("subnet", "")).strip()
+        nats_data = {"func": "lan_discovery", "data": {"subnet": subnet}}
+        r = asyncio.run(agent.nats_cmd(nats_data, timeout=45))
+        if r in ("timeout", "natsdown") or not isinstance(r, dict):
+            return Response(
+                {
+                    "error": f"Levantamento LAN expirou ou agente offline em {agent.hostname}"
+                },
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+
+        # Build lookup maps of all agents registered in Tactical RMM (by hostname and by local IP)
+        hostname_map: dict[str, dict[str, str]] = {}
+        ip_map: dict[str, dict[str, str]] = {}
+
+        for existing in Agent.objects.only("agent_id", "hostname", "wmi_detail"):
+            short_name = (existing.hostname or "").split(".")[0].strip().lower()
+            info = {"agent_id": existing.agent_id, "hostname": existing.hostname}
+            if short_name:
+                hostname_map[short_name] = info
+            wmi = existing.wmi_detail or {}
+            if isinstance(wmi, dict):
+                local_ips = wmi.get("local_ips") or []
+                if isinstance(local_ips, list):
+                    for raw_ip in local_ips:
+                        clean_ip = str(raw_ip).split("/")[0].strip()
+                        if clean_ip:
+                            ip_map[clean_ip] = info
+
+        hosts = r.get("hosts") or []
+        registered_count = 0
+        unregistered_count = 0
+
+        for h in hosts:
+            if not isinstance(h, dict):
+                continue
+            ip_addr = str(h.get("ip_address") or "").strip()
+            raw_host = str(h.get("hostname") or "").split(".")[0].strip().lower()
+            matched = ip_map.get(ip_addr) or (
+                hostname_map.get(raw_host) if raw_host else None
+            )
+            if matched:
+                h["registered_in_rmm"] = True
+                h["rmm_agent_id"] = matched["agent_id"]
+                h["rmm_hostname"] = matched["hostname"]
+                if not h.get("hostname"):
+                    h["hostname"] = matched["hostname"]
+                registered_count += 1
+            else:
+                h["registered_in_rmm"] = False
+                h["rmm_agent_id"] = ""
+                h["rmm_hostname"] = ""
+                unregistered_count += 1
+
+        r["registered_count"] = registered_count
+        r["unregistered_count"] = unregistered_count
+        r["client_name"] = agent.client.name
+        r["site_name"] = agent.site.name
+        return Response(r)

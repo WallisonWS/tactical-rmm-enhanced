@@ -274,6 +274,91 @@
         </q-card-section>
       </q-card>
 
+      <!-- LAN Computer Discovery for Non-AD Units (Levantamento de Computadores via Servidor Local) -->
+      <q-card flat bordered class="q-mb-md">
+        <q-card-section class="q-pa-sm">
+          <div class="row items-center justify-between q-mb-sm">
+            <div>
+              <div class="text-subtitle2 text-weight-bold flex items-center">
+                <q-icon name="radar" color="teal" size="sm" class="q-mr-xs" />
+                Levantamento de Computadores da Unidade (Via Servidor Local / Sem AD)
+              </div>
+              <div class="text-caption text-grey">
+                Usa o agente Go instalado no servidor da unidade para descobrir todas as máquinas na rede local (Sessões SMB/ pastas compartilhadas, DHCP Leases, Tabela ARP e Scanner LAN Go) e comparar quem já tem o Tactical RMM instalado.
+              </div>
+            </div>
+
+            <div class="row items-center q-gutter-xs">
+              <q-input
+                v-model="customDiscoverySubnet"
+                dense
+                outlined
+                placeholder="Sub-rede opcional (ex: 192.168.1.0)"
+                style="min-width: 220px"
+              />
+              <q-btn
+                dense
+                color="teal"
+                icon="travel_explore"
+                label="Executar Levantamento da Unidade"
+                :loading="lanDiscoveryLoading"
+                @click="onRunLANDiscovery"
+              />
+            </div>
+          </div>
+
+          <div v-if="lanDiscoveryReport" class="row q-gutter-sm q-mb-sm items-center">
+            <q-badge color="primary" class="q-pa-xs">
+              Sub-redes: {{ lanDiscoveryReport.local_subnets?.join(", ") || "Auto" }}
+            </q-badge>
+            <q-badge color="blue-grey-8" class="q-pa-xs">
+              Total na Rede: {{ lanDiscoveryReport.total_found }}
+            </q-badge>
+            <q-badge color="teal-8" class="q-pa-xs">
+              Computadores Identificados: {{ lanDiscoveryReport.computers_count }}
+            </q-badge>
+            <q-badge color="positive" class="q-pa-xs">
+              Já Cadastrados no RMM: {{ lanDiscoveryReport.registered_count || 0 }}
+            </q-badge>
+            <q-badge color="warning" text-color="black" class="q-pa-xs">
+              Faltando Instalar Agente: {{ lanDiscoveryReport.unregistered_count || 0 }}
+            </q-badge>
+          </div>
+
+          <q-table
+            v-if="lanDiscoveryReport"
+            dense
+            flat
+            :rows="lanDiscoveryReport.hosts || []"
+            :columns="lanDiscoveryColumns"
+            row-key="ip_address"
+            :pagination="{ rowsPerPage: 10 }"
+            no-data-label="Nenhum host encontrado na sub-rede"
+          >
+            <template v-slot:body-cell-rmm_status="props">
+              <q-td :props="props">
+                <q-badge v-if="props.row.registered_in_rmm" color="positive">
+                  Instalado ({{ props.row.rmm_hostname || "Ativo" }})
+                </q-badge>
+                <q-badge v-else color="warning" text-color="black">
+                  Pendente no RMM
+                </q-badge>
+              </q-td>
+            </template>
+            <template v-slot:body-cell-discovery_source="props">
+              <q-td :props="props">
+                {{ (props.row.discovery_source || []).join(" + ") }}
+              </q-td>
+            </template>
+            <template v-slot:body-cell-open_services="props">
+              <q-td :props="props">
+                {{ (props.row.open_services || []).join(", ") || "-" }}
+              </q-td>
+            </template>
+          </q-table>
+        </q-card-section>
+      </q-card>
+
       <!-- On-Screen IT Helpdesk Broadcast & System Restore Checkpoint Row -->
       <div class="row q-col-gutter-md q-mb-md">
         <!-- IT Helpdesk Broadcast -->
@@ -437,10 +522,12 @@ import {
   sendAgentITSupportMessage,
   fetchAgentADServerStatus,
   runAgentADServerAction,
+  runAgentLANDiscovery,
   type HardwareDomainInventory,
   type PrinterInfo,
   type RestorePointInfo,
   type WindowsServerADProfile,
+  type UnitLANDiscoveryReport,
 } from "@/api/enhanced";
 import { notifySuccess, notifyError } from "@/utils/notify";
 
@@ -465,8 +552,22 @@ const hwInventory = ref<HardwareDomainInventory | null>(null);
 const adProfile = ref<WindowsServerADProfile | null>(null);
 const adActionOutput = ref("");
 const deployInfo = ref<any | null>(null);
+const lanDiscoveryLoading = ref(false);
+const customDiscoverySubnet = ref("");
+const lanDiscoveryReport = ref<UnitLANDiscoveryReport | null>(null);
 const printers = ref<PrinterInfo[]>([]);
 const restorePoints = ref<RestorePointInfo[]>([]);
+
+const lanDiscoveryColumns = [
+  { name: "ip_address", label: "Endereço IP", field: "ip_address", align: "left" as const, sortable: true },
+  { name: "hostname", label: "Hostname / Nome na Rede", field: "hostname", align: "left" as const, sortable: true },
+  { name: "estimated_type", label: "Tipo Identificado", field: "estimated_type", align: "left" as const, sortable: true },
+  { name: "smb_user", label: "Usuário Conectado (SMB)", field: "smb_user", align: "left" as const },
+  { name: "mac_address", label: "Endereço MAC", field: "mac_address", align: "left" as const },
+  { name: "discovery_source", label: "Origem da Descoberta", field: "discovery_source", align: "left" as const },
+  { name: "open_services", label: "Serviços Detectados", field: "open_services", align: "left" as const },
+  { name: "rmm_status", label: "Status no Tactical RMM", field: "registered_in_rmm", align: "center" as const, sortable: true },
+];
 
 const msgTitle = ref("Suporte de TI");
 const msgBody = ref("Olá! A equipe de TI está realizando uma manutenção rápida no seu computador.");
@@ -536,6 +637,27 @@ async function onADAction(
     notifyError(e?.response?.data?.error || `Erro ao executar ${action}`);
   } finally {
     adActionLoading.value = false;
+  }
+}
+
+async function onRunLANDiscovery() {
+  if (!selectedAgentId.value) return;
+  lanDiscoveryLoading.value = true;
+  try {
+    const res = await runAgentLANDiscovery(
+      selectedAgentId.value,
+      customDiscoverySubnet.value.trim(),
+    );
+    lanDiscoveryReport.value = res;
+    notifySuccess(
+      `Levantamento concluído: ${res.total_found} dispositivos encontrados (${res.unregistered_count || 0} pendentes no RMM).`,
+    );
+  } catch (e: any) {
+    notifyError(
+      e?.response?.data?.error || "Falha ao executar levantamento LAN na unidade",
+    );
+  } finally {
+    lanDiscoveryLoading.value = false;
   }
 }
 

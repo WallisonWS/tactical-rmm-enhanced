@@ -145,6 +145,8 @@ func main() {
 		fmt.Printf("%+v\n", a.UpgradeAllPackages("all"))
 	case "adstatus":
 		fmt.Printf("%+v\n", a.GetADAndWindowsServerStatus())
+	case "landiscovery":
+		fmt.Printf("%+v\n", a.DiscoverUnitLANComputers(""))
 	case "taskrunner":
 		if len(os.Args) < 5 || *taskPK == 0 {
 			return

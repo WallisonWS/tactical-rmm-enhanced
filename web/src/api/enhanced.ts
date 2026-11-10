@@ -502,3 +502,42 @@ export async function runAgentADServerAction(
   });
   return data;
 }
+
+export interface DiscoveredLANHost {
+  ip_address: string;
+  hostname: string;
+  mac_address: string;
+  discovery_source: string[];
+  open_services: string[];
+  estimated_type: string;
+  smb_user: string;
+  reachable: boolean;
+  registered_in_rmm?: boolean;
+  rmm_agent_id?: string;
+  rmm_hostname?: string;
+}
+
+export interface UnitLANDiscoveryReport {
+  server_hostname: string;
+  server_platform: string;
+  local_subnets: string[];
+  total_found: number;
+  computers_count: number;
+  registered_count?: number;
+  unregistered_count?: number;
+  client_name?: string;
+  site_name?: string;
+  hosts: DiscoveredLANHost[];
+  duration_ms: number;
+  timestamp: string;
+}
+
+export async function runAgentLANDiscovery(
+  agentId: string,
+  subnet = "",
+): Promise<UnitLANDiscoveryReport> {
+  const { data } = await axios.post(`/agents/${agentId}/lan-discovery/`, {
+    subnet,
+  });
+  return data;
+}
