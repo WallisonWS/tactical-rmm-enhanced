@@ -305,13 +305,13 @@
             v-model="joinAdForm.domain_name"
             dense
             outlined
-            label="Domínio Active Directory (ex: crd.med.br)"
+            label="Domínio Active Directory (ex: corp.local)"
           />
           <q-input
             v-model="joinAdForm.admin_user"
             dense
             outlined
-            label="Usuário Administrador do Domínio (ex: CRD\administrador)"
+            label="Usuário Administrador do Domínio (ex: DOMINIO\administrador)"
           />
           <q-input
             v-model="joinAdForm.admin_password"
@@ -324,7 +324,7 @@
             v-model="joinAdForm.ou_path"
             dense
             outlined
-            label="Caminho da OU (Opcional — ex: OU=Computadores,DC=crd,DC=med,DC=br)"
+            label="Caminho da OU (Opcional — ex: OU=Computadores,DC=corp,DC=local)"
           />
           <q-checkbox
             v-model="joinAdForm.restart"

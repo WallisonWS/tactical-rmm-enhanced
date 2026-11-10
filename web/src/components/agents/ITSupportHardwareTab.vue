@@ -707,8 +707,8 @@
               v-model="joinAdForm.domain"
               dense
               outlined
-              label="Domínio Active Directory (ex: crd.med.br ou crd.local) *"
-              placeholder="crd.med.br"
+              label="Domínio Active Directory (ex: corp.local ou empresa.com.br) *"
+              placeholder="corp.local"
             />
 
             <div class="row q-col-gutter-sm">
@@ -718,7 +718,7 @@
                   dense
                   outlined
                   label="Usuário Administrador do AD *"
-                  placeholder="administrador ou CRD\administrador"
+                  placeholder="administrador ou DOMINIO\administrador"
                 />
               </div>
               <div class="col-12 col-sm-6">
@@ -768,7 +768,7 @@
               dense
               outlined
               label="Caminho da OU no AD (Opcional)"
-              placeholder="Ex: OU=Estacoes,DC=crd,DC=med,DC=br"
+              placeholder="Ex: OU=Estacoes,DC=corp,DC=local"
             />
 
             <q-checkbox
