@@ -31,6 +31,7 @@ type NatsMsg struct {
 	Func                   string            `json:"func"`
 	Timeout                int               `json:"timeout"`
 	Data                   map[string]string `json:"payload"`
+	AltData                map[string]string `json:"data"`
 	ScriptArgs             []string          `json:"script_args"`
 	ProcPID                int32             `json:"procpid"`
 	TaskPK                 int               `json:"taskpk"`
@@ -97,6 +98,9 @@ func (a *Agent) RunRPC() {
 		if err := dec.Decode(&payload); err != nil {
 			a.Logger.Errorln(err)
 			return
+		}
+		if payload != nil && len(payload.Data) == 0 && len(payload.AltData) > 0 {
+			payload.Data = payload.AltData
 		}
 
 		switch payload.Func {

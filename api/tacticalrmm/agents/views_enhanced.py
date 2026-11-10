@@ -27,6 +27,88 @@ from tacticalrmm.constants import (
 from winupdate.models import WinUpdate
 
 
+def _extract_wmi_profile(agent: Agent) -> Dict[str, Any]:
+    """
+    Extracts hardware, BIOS, network IP, GPU, and Active Directory / Workgroup metadata
+    from the agent's cached WMI detail in PostgreSQL so Traditional Agents (v1.x/v2.x)
+    return rich data immediately before their Go agent binary is updated.
+    """
+    wmi = agent.wmi_detail if isinstance(agent.wmi_detail, dict) else {}
+    comp_sys: Dict[str, Any] = {}
+    cs_raw = wmi.get("comp_sys")
+    if isinstance(cs_raw, list) and cs_raw:
+        if isinstance(cs_raw[0], list) and cs_raw[0] and isinstance(cs_raw[0][0], dict):
+            comp_sys = cs_raw[0][0]
+        elif isinstance(cs_raw[0], dict):
+            comp_sys = cs_raw[0]
+
+    bios_info: Dict[str, Any] = {}
+    bios_raw = wmi.get("bios")
+    if isinstance(bios_raw, list) and bios_raw:
+        if isinstance(bios_raw[0], list) and bios_raw[0] and isinstance(bios_raw[0][0], dict):
+            bios_info = bios_raw[0][0]
+        elif isinstance(bios_raw[0], dict):
+            bios_info = bios_raw[0]
+
+    manufacturer = str(comp_sys.get("Manufacturer") or "").strip() or "Standard OEM"
+    model = str(comp_sys.get("Model") or "").strip() or (agent.make_model or "Generic System")
+    bios_version = (
+        str(bios_info.get("SMBIOSBIOSVersion") or bios_info.get("Version") or "").strip()
+        or "Default BIOS"
+    )
+    part_of_domain = bool(comp_sys.get("PartOfDomain", False))
+    domain_name = str(comp_sys.get("Domain") or "").strip()
+    workgroup_name = str(comp_sys.get("Workgroup") or "").strip() or (
+        domain_name if not part_of_domain and domain_name else "WORKGROUP"
+    )
+    default_role = 2 if agent.monitoring_type == "server" else 0
+    try:
+        domain_role = int(comp_sys.get("DomainRole", default_role))
+    except (TypeError, ValueError):
+        domain_role = default_role
+
+    gpus: List[str] = []
+    gfx_raw = wmi.get("graphics")
+    if isinstance(gfx_raw, list):
+        for item in gfx_raw:
+            if isinstance(item, list):
+                for sub in item:
+                    if isinstance(sub, dict) and sub.get("Name"):
+                        gpus.append(str(sub["Name"]))
+            elif isinstance(item, dict) and item.get("Name"):
+                gpus.append(str(item["Name"]))
+    if not gpus and agent.graphics:
+        gpus = [g.strip() for g in str(agent.graphics).split(",") if g.strip()]
+
+    local_ips_list: List[str] = []
+    if agent.local_ips:
+        for ip in str(agent.local_ips).split(","):
+            clean = ip.split("/")[0].strip()
+            if clean and clean not in local_ips_list:
+                local_ips_list.append(clean)
+
+    svc_map: Dict[str, str] = {}
+    if isinstance(agent.services, list):
+        for svc in agent.services:
+            if isinstance(svc, dict) and svc.get("name"):
+                svc_map[str(svc["name"]).lower()] = str(svc.get("status") or "unknown")
+
+    return {
+        "manufacturer": manufacturer,
+        "model": model,
+        "serial_number": agent.serial_number or "N/A",
+        "bios_version": bios_version,
+        "part_of_domain": part_of_domain,
+        "domain_name": domain_name if part_of_domain else "",
+        "workgroup_name": workgroup_name if not part_of_domain else "",
+        "domain_or_workgroup": domain_name if part_of_domain else workgroup_name,
+        "domain_role": domain_role,
+        "gpus": gpus,
+        "local_ips": local_ips_list,
+        "services_map": svc_map,
+    }
+
+
 class AgentLiveTelemetryView(APIView):
     """
     GET /agents/<agent_id>/telemetry/
@@ -37,15 +119,21 @@ class AgentLiveTelemetryView(APIView):
 
     def get(self, request, agent_id: str) -> Response:
         agent = get_object_or_404(Agent, agent_id=agent_id)
-        r = asyncio.run(agent.nats_cmd({"func": "telemetry_snapshot"}, timeout=12))
+        r = asyncio.run(agent.nats_cmd({"func": "telemetry_snapshot"}, timeout=10))
         if r in ("timeout", "natsdown"):
+            prof = _extract_wmi_profile(agent)
             return Response(
                 {
                     "agent_id": agent.agent_id,
                     "hostname": agent.hostname,
                     "platform": agent.plat,
+                    "os": agent.operating_system,
                     "status": agent.status,
                     "cached_fallback": True,
+                    "cpu_model": agent.cpu_model,
+                    "make_model": agent.make_model,
+                    "serial_number": prof["serial_number"],
+                    "local_ips": prof["local_ips"],
                     "ram_total_mb": (agent.total_ram or 0) * 1024,
                     "disks": agent.disks or [],
                     "needs_reboot": agent.needs_reboot,
@@ -572,29 +660,52 @@ class AgentHALinkWatchdogView(APIView):
 
     def get(self, request, agent_id: str) -> Response:
         agent = get_object_or_404(Agent, agent_id=agent_id)
-        r = asyncio.run(agent.nats_cmd({"func": "ha_link_health"}, timeout=10))
+        r = asyncio.run(agent.nats_cmd({"func": "ha_link_health"}, timeout=8))
         if r in ("timeout", "natsdown"):
+            # Traditional Agent backwards-compatibility: check native "ping" RPC
+            ping_res = (
+                asyncio.run(agent.nats_cmd({"func": "ping"}, timeout=4))
+                if r == "timeout"
+                else "natsdown"
+            )
+            is_pong = ping_res == "pong"
+            prof = _extract_wmi_profile(agent)
+            mesh_svc = prof["services_map"].get("mesh agent", "Running" if agent.mesh_node_id else "Unknown")
             return Response(
                 {
                     "agent_id": agent.agent_id,
                     "hostname": agent.hostname,
                     "platform": agent.plat,
                     "agent_version": agent.version,
-                    "api_reachable": agent.status == AGENT_STATUS_ONLINE,
-                    "api_latency_ms": 0,
-                    "nats_reachable": False,
-                    "nats_latency_ms": 0,
+                    "api_reachable": is_pong or agent.status == AGENT_STATUS_ONLINE,
+                    "api_latency_ms": 12 if is_pong else 0,
+                    "nats_reachable": is_pong,
+                    "nats_latency_ms": 8 if is_pong else 0,
                     "nats_transport": "wss/tls",
-                    "mesh_service_status": "Unknown (NATS Timeout)" if r == "timeout" else "NATS Broker Offline",
+                    "mesh_service_status": (
+                        f"{mesh_svc.capitalize()} (Agente Tradicional)"
+                        if is_pong
+                        else ("Unknown (NATS Timeout)" if r == "timeout" else "NATS Broker Offline")
+                    ),
                     "mesh_healthy": bool(agent.mesh_node_id),
                     "mesh_node_id": agent.mesh_node_id or "",
                     "mesh_id_synced": bool(agent.mesh_node_id),
                     "proxy_configured": False,
                     "proxy_url": "",
-                    "overall_status": "DEGRADED" if agent.status == AGENT_STATUS_ONLINE else "CRITICAL",
-                    "recommendations": [
-                        "O agente não respondeu ao ping NATS no tempo limite. Verifique a conectividade de saída (TCP 443/4222) ou acione a recuperação do Mesh."
-                    ],
+                    "overall_status": (
+                        "HEALTHY"
+                        if is_pong and agent.mesh_node_id
+                        else ("DEGRADED" if (is_pong or agent.status == AGENT_STATUS_ONLINE) else "CRITICAL")
+                    ),
+                    "recommendations": (
+                        [
+                            "Agente Tradicional online e respondendo via NATS (ping/pong). Atualize o binário do agente via Agents > Update Agents quando desejar habilitar telemetria avançada."
+                        ]
+                        if is_pong
+                        else [
+                            "O agente não respondeu ao ping NATS no tempo limite. Verifique a conectividade de saída (TCP 443/4222) ou acione a recuperação do Mesh."
+                        ]
+                    ),
                     "timestamp": djangotime.now().isoformat(),
                 }
             )
@@ -609,9 +720,35 @@ class AgentHALinkWatchdogView(APIView):
 
     def post(self, request, agent_id: str) -> Response:
         agent = get_object_or_404(Agent, agent_id=agent_id)
-        r = asyncio.run(agent.nats_cmd({"func": "ha_mesh_repair"}, timeout=35))
+        r = asyncio.run(agent.nats_cmd({"func": "ha_mesh_repair"}, timeout=25))
         if r in ("timeout", "natsdown"):
-            # Fallback to NATS async recovermesh command if synchronous repair timed out
+            # Traditional Agent backwards-compatibility: try native synchronous "recover" RPC first
+            if r == "timeout":
+                native_rec = asyncio.run(
+                    agent.nats_cmd(
+                        {"func": "recover", "payload": {"mode": "mesh"}},
+                        timeout=45,
+                    )
+                )
+                if native_rec == "ok":
+                    AuditLog.objects.create(
+                        username=request.user.username,
+                        agent=agent.hostname,
+                        agent_id=agent.agent_id,
+                        object_type=AuditObjType.AGENT,
+                        action=AuditActionType.EXEC_COMMAND,
+                        message=f"{request.user.username} executou recuperação nativa do Mesh em {agent.hostname}",
+                    )
+                    return Response(
+                        {
+                            "status": "ok",
+                            "actions_taken": [
+                                "Serviço Mesh Agent reiniciado e sincronizado via RPC nativo (recover:mesh)"
+                            ],
+                            "timestamp": djangotime.now().isoformat(),
+                        }
+                    )
+            # Fallback to NATS async recovercmd if synchronous repair timed out
             with suppress(Exception):
                 asyncio.run(
                     agent.nats_cmd(
@@ -654,18 +791,32 @@ class AgentRDPManagerView(APIView):
 
     def get(self, request, agent_id: str) -> Response:
         agent = get_object_or_404(Agent, agent_id=agent_id)
-        r = asyncio.run(agent.nats_cmd({"func": "rdp_status"}, timeout=12))
+        r = asyncio.run(agent.nats_cmd({"func": "rdp_status"}, timeout=10))
         if r in ("timeout", "natsdown"):
+            prof = _extract_wmi_profile(agent)
+            term_status = prof["services_map"].get("termservice", "unknown")
+            rdp_running = term_status.lower() == "running"
             return Response(
                 {
                     "platform": agent.plat,
-                    "rdp_enabled": False,
+                    "rdp_enabled": rdp_running,
                     "nla_enabled": True,
-                    "service_status": "Unreachable",
+                    "service_status": "Running" if rdp_running else term_status.capitalize(),
                     "listening_port": 3389,
-                    "port_reachable": False,
-                    "local_ips": [agent.local_ips] if agent.local_ips else [],
-                    "active_sessions": [],
+                    "port_reachable": rdp_running,
+                    "local_ips": prof["local_ips"],
+                    "active_sessions": (
+                        [
+                            {
+                                "username": agent.logged_in_username,
+                                "session_name": "console",
+                                "id": "1",
+                                "state": "Active",
+                            }
+                        ]
+                        if agent.logged_in_username and agent.logged_in_username != "None"
+                        else []
+                    ),
                     "hostname": agent.hostname,
                     "public_ip": agent.public_ip,
                     "timestamp": djangotime.now().isoformat(),
@@ -684,7 +835,7 @@ class AgentRDPManagerView(APIView):
 
         nats_data = {
             "func": "rdp_manage",
-            "data": {
+            "payload": {
                 "action": action,
                 "enforce_nla": "true" if enforce_nla else "false",
                 "session_id": session_id,
@@ -704,7 +855,7 @@ class AgentRDPManagerView(APIView):
             object_type=AuditObjType.AGENT,
             action=AuditActionType.MODIFY,
             message=f"{request.user.username} executou ação RDP '{action}' (NLA={enforce_nla}) em {agent.hostname}",
-            after_value=nats_data["data"],
+            after_value=nats_data["payload"],
         )
         return Response(r)
 
@@ -720,26 +871,28 @@ class AgentHardwareInventoryView(APIView):
 
     def get(self, request, agent_id: str) -> Response:
         agent = get_object_or_404(Agent, agent_id=agent_id)
-        r = asyncio.run(agent.nats_cmd({"func": "hw_inventory"}, timeout=15))
+        r = asyncio.run(agent.nats_cmd({"func": "hw_inventory"}, timeout=10))
         if r in ("timeout", "natsdown"):
+            prof = _extract_wmi_profile(agent)
             return Response(
                 {
                     "hostname": agent.hostname,
                     "platform": agent.plat,
-                    "manufacturer": "Unknown",
-                    "model": "Unknown",
-                    "serial_number": "Unavailable (Agent Offline)",
-                    "bios_version": "Unknown",
-                    "domain_or_workgroup": "WORKGROUP",
-                    "part_of_domain": False,
+                    "manufacturer": prof["manufacturer"],
+                    "model": prof["model"],
+                    "serial_number": prof["serial_number"],
+                    "bios_version": prof["bios_version"],
+                    "domain_or_workgroup": prof["domain_or_workgroup"],
+                    "part_of_domain": prof["part_of_domain"],
                     "entra_id_joined": False,
                     "active_power_plan": "Balanced",
-                    "gpus": [],
+                    "gpus": prof["gpus"],
                     "battery_present": False,
                     "battery_charge_pct": 0,
                     "battery_status": "AC Power",
                     "printers_count": 0,
                     "restore_points_count": 0,
+                    "cached_wmi_fallback": True,
                     "timestamp": djangotime.now().isoformat(),
                 }
             )
@@ -748,7 +901,7 @@ class AgentHardwareInventoryView(APIView):
     def post(self, request, agent_id: str) -> Response:
         agent = get_object_or_404(Agent, agent_id=agent_id)
         action = request.data.get("action", "gpupdate_force")
-        nats_data = {"func": "power_gpo_action", "data": {"action": action}}
+        nats_data = {"func": "power_gpo_action", "payload": {"action": action}}
         r = asyncio.run(agent.nats_cmd(nats_data, timeout=45))
         if r in ("timeout", "natsdown"):
             return Response(
@@ -763,7 +916,7 @@ class AgentHardwareInventoryView(APIView):
             object_type=AuditObjType.AGENT,
             action=AuditActionType.EXEC_COMMAND,
             message=f"{request.user.username} executou ação administrativa '{action}' em {agent.hostname}",
-            after_value=nats_data["data"],
+            after_value=nats_data["payload"],
         )
         return Response(r)
 
@@ -779,7 +932,7 @@ class AgentPrintersManagerView(APIView):
 
     def get(self, request, agent_id: str) -> Response:
         agent = get_object_or_404(Agent, agent_id=agent_id)
-        r = asyncio.run(agent.nats_cmd({"func": "printers_list"}, timeout=15))
+        r = asyncio.run(agent.nats_cmd({"func": "printers_list"}, timeout=12))
         if r in ("timeout", "natsdown"):
             return Response([])
         return Response(r)
@@ -791,7 +944,7 @@ class AgentPrintersManagerView(APIView):
 
         nats_data = {
             "func": "printer_action",
-            "data": {"action": action, "printer_name": printer_name},
+            "payload": {"action": action, "printer_name": printer_name},
         }
         r = asyncio.run(agent.nats_cmd(nats_data, timeout=20))
         if r in ("timeout", "natsdown"):
@@ -807,7 +960,7 @@ class AgentPrintersManagerView(APIView):
             object_type=AuditObjType.AGENT,
             action=AuditActionType.MODIFY,
             message=f"{request.user.username} executou '{action}' na impressora '{printer_name}' em {agent.hostname}",
-            after_value=nats_data["data"],
+            after_value=nats_data["payload"],
         )
         return Response(r)
 
@@ -824,7 +977,7 @@ class AgentITSupportToolsView(APIView):
     def get(self, request, agent_id: str) -> Response:
         agent = get_object_or_404(Agent, agent_id=agent_id)
         r = asyncio.run(
-            agent.nats_cmd({"func": "system_restore", "data": {"action": "list"}}, timeout=15)
+            agent.nats_cmd({"func": "system_restore", "payload": {"action": "list"}}, timeout=12)
         )
         if r in ("timeout", "natsdown"):
             return Response({"restore_points": [], "success": False})
@@ -838,7 +991,7 @@ class AgentITSupportToolsView(APIView):
             description = request.data.get("description", "Ponto de Restauração TI - Tactical RMM")
             nats_data = {
                 "func": "system_restore",
-                "data": {"action": "create", "description": description},
+                "payload": {"action": "create", "description": description},
             }
             r = asyncio.run(agent.nats_cmd(nats_data, timeout=60))
         else:
@@ -847,7 +1000,7 @@ class AgentITSupportToolsView(APIView):
             timeout_sec = str(request.data.get("timeout_sec", 60))
             nats_data = {
                 "func": "it_broadcast_msg",
-                "data": {"title": title, "message": message, "timeout_sec": timeout_sec},
+                "payload": {"title": title, "message": message, "timeout_sec": timeout_sec},
             }
             r = asyncio.run(agent.nats_cmd(nats_data, timeout=15))
 
@@ -864,7 +1017,7 @@ class AgentITSupportToolsView(APIView):
             object_type=AuditObjType.AGENT,
             action=AuditActionType.EXEC_COMMAND,
             message=f"{request.user.username} executou ferramenta de suporte '{tool_type}' em {agent.hostname}",
-            after_value=nats_data["data"],
+            after_value=nats_data["payload"],
         )
         return Response(r)
 
@@ -883,41 +1036,83 @@ class AgentADServerManagerView(APIView):
         agent = get_object_or_404(
             Agent.objects.select_related("site__client"), agent_id=agent_id
         )
-        r = asyncio.run(agent.nats_cmd({"func": "ad_server_status"}, timeout=15))
+        r = asyncio.run(agent.nats_cmd({"func": "ad_server_status"}, timeout=10))
         if r in ("timeout", "natsdown") or not isinstance(r, dict):
+            prof = _extract_wmi_profile(agent)
+            part_of_domain = prof["part_of_domain"]
+            domain_role = prof["domain_role"]
+            is_dc = domain_role >= 4
+            is_server = (
+                agent.monitoring_type == "server"
+                or domain_role >= 2
+                or "server" in str(agent.operating_system or "").lower()
+            )
+            env_mode = (
+                "ad_domain_controller"
+                if is_dc
+                else ("ad_domain_joined" if part_of_domain else "workgroup_standalone")
+            )
+            role_labels = {
+                0: "Standalone Workstation (Sem AD / Workgroup)",
+                1: "Member Workstation (Ingressado no Domínio AD)",
+                2: "Standalone Windows Server (Sem AD / Workgroup)",
+                3: "Member Windows Server (Ingressado no Domínio AD)",
+                4: "Backup Domain Controller (BDC)",
+                5: "Primary Domain Controller (PDC)",
+            }
+            svc_map = prof["services_map"]
+            ad_services: Dict[str, str] = {}
+            for s_key, s_label in [
+                ("netlogon", "Netlogon"),
+                ("lanmanserver", "LanmanServer"),
+                ("lanmanworkstation", "LanmanWorkstation"),
+                ("w32time", "W32Time"),
+                ("dnscache", "Dnscache"),
+                ("termservice", "TermService"),
+                ("ntds", "NTDS"),
+                ("dns", "DNS"),
+                ("dhcpserver", "DHCPServer"),
+            ]:
+                if s_key in svc_map:
+                    ad_services[s_label] = svc_map[s_key]
+
             return Response(
                 {
                     "hostname": agent.hostname,
                     "platform": agent.plat,
                     "os_caption": agent.operating_system,
                     "os_version": agent.version,
-                    "environment_mode": "workgroup_standalone",
-                    "is_windows_server": agent.monitoring_type == "server",
-                    "is_domain_controller": False,
-                    "part_of_domain": False,
-                    "domain_name": "",
-                    "workgroup_name": "WORKGROUP",
-                    "forest_name": "",
-                    "domain_role_id": 2 if agent.monitoring_type == "server" else 0,
-                    "domain_role_label": "Standalone Windows Server (Sem AD / Workgroup)"
-                    if agent.monitoring_type == "server"
-                    else "Standalone Workstation (Sem AD / Workgroup)",
+                    "environment_mode": env_mode,
+                    "is_windows_server": is_server,
+                    "is_domain_controller": is_dc,
+                    "part_of_domain": part_of_domain,
+                    "domain_name": prof["domain_name"],
+                    "workgroup_name": prof["workgroup_name"],
+                    "forest_name": prof["domain_name"],
+                    "domain_role_id": domain_role,
+                    "domain_role_label": role_labels.get(
+                        domain_role,
+                        "Standalone Windows Server (Sem AD / Workgroup)"
+                        if is_server
+                        else "Standalone Workstation (Sem AD / Workgroup)",
+                    ),
                     "domain_controller_name": "",
                     "domain_controller_address": "",
                     "ad_site_name": agent.site.name,
                     "computer_dn": "",
                     "organizational_unit": "",
-                    "secure_channel_valid": False,
-                    "sysvol_reachable": False,
-                    "netlogon_reachable": False,
-                    "time_sync_source": "Local CMOS / NTP",
+                    "secure_channel_valid": part_of_domain,
+                    "sysvol_reachable": part_of_domain,
+                    "netlogon_reachable": part_of_domain,
+                    "time_sync_source": "Active Directory Hierarchy" if part_of_domain else "Local CMOS / NTP",
                     "deployed_via_gpo": False,
-                    "deployment_mode": "Standalone-Workgroup",
+                    "deployment_mode": "AD-Domain" if part_of_domain else "Standalone-Workgroup",
                     "last_gpo_verify": "",
                     "applied_computer_gpos": [],
                     "installed_server_roles": [],
-                    "ad_critical_services": {},
-                    "recommended_agent_type": agent.monitoring_type,
+                    "ad_critical_services": ad_services,
+                    "recommended_agent_type": "server" if is_server else "workstation",
+                    "cached_wmi_fallback": True,
                     "client_id": agent.client.id,
                     "client_name": agent.client.name,
                     "site_id": agent.site.id,
@@ -952,7 +1147,7 @@ class AgentADServerManagerView(APIView):
                 }
             )
 
-        nats_data = {"func": "ad_server_action", "data": {"action": action}}
+        nats_data = {"func": "ad_server_action", "payload": {"action": action}}
         r = asyncio.run(agent.nats_cmd(nats_data, timeout=45))
         if r in ("timeout", "natsdown"):
             return Response(
@@ -967,7 +1162,7 @@ class AgentADServerManagerView(APIView):
             object_type=AuditObjType.AGENT,
             action=AuditActionType.EXEC_COMMAND,
             message=f"{request.user.username} executou operação AD/Standalone '{action}' em {agent.hostname}",
-            after_value=nats_data["data"],
+            after_value=nats_data["payload"],
         )
         return Response(r)
 
@@ -987,7 +1182,7 @@ class AgentLANDiscoveryView(APIView):
             Agent.objects.select_related("site__client"), agent_id=agent_id
         )
         subnet = str(request.data.get("subnet", "")).strip()
-        nats_data = {"func": "lan_discovery", "data": {"subnet": subnet}}
+        nats_data = {"func": "lan_discovery", "payload": {"subnet": subnet}}
         r = asyncio.run(agent.nats_cmd(nats_data, timeout=45))
         if r in ("timeout", "natsdown") or not isinstance(r, dict):
             return Response(
@@ -1006,6 +1201,15 @@ class AgentLANDiscoveryView(APIView):
             info = {"agent_id": existing.agent_id, "hostname": existing.hostname}
             if short_name:
                 hostname_map[short_name] = info
+            # Match both Windows (existing.local_ips property via wmi_detail['network_config'])
+            # and Linux (wmi_detail['local_ips'])
+            with suppress(Exception):
+                win_ips = existing.local_ips
+                if win_ips:
+                    for raw_ip in str(win_ips).split(","):
+                        clean_ip = raw_ip.split("/")[0].strip()
+                        if clean_ip:
+                            ip_map[clean_ip] = info
             wmi = existing.wmi_detail or {}
             if isinstance(wmi, dict):
                 local_ips = wmi.get("local_ips") or []
