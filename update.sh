@@ -703,9 +703,22 @@ if [ -d /rmm/web ] && [ -f /rmm/web/package.json ]; then
   printf >&2 "${GREEN}Building Tactical RMM Enhanced Frontend (PT-BR / EN-US / ES-ES)...${NC}\n"
   cd /rmm/web
   npm install --legacy-peer-deps || npm install
-  npm run build
-  sudo rm -rf /var/www/rmm/dist/*
-  sudo cp -a /rmm/web/dist/. /var/www/rmm/dist/
+  npm run build || npx quasar build || true
+  if [ -f /rmm/web/dist/index.html ]; then
+    sudo rm -rf /var/www/rmm/dist/*
+    sudo cp -a /rmm/web/dist/. /var/www/rmm/dist/
+  elif [ -f /rmm/web/dist/spa/index.html ]; then
+    sudo rm -rf /var/www/rmm/dist/*
+    sudo cp -a /rmm/web/dist/spa/. /var/www/rmm/dist/
+  else
+    printf >&2 "${YELLOW}Warning: Local frontend build did not produce index.html; preserving existing dist or fallback tar.${NC}\n"
+    if [ ! -f /var/www/rmm/dist/index.html ]; then
+      webtar="trmm-web-v${WEB_VERSION}.tar.gz"
+      wget -q ${WEBTAR_URL} -O /tmp/${webtar}
+      sudo tar -xzf /tmp/${webtar} -C /var/www/rmm
+      rm -f /tmp/${webtar}
+    fi
+  fi
 else
   webtar="trmm-web-v${WEB_VERSION}.tar.gz"
   wget -q ${WEBTAR_URL} -O /tmp/${webtar}

@@ -456,25 +456,33 @@ class Agent(BaseAuditModel):
 
         with suppress(Exception):
             comp_sys = self.wmi_detail["comp_sys"][0]
-            comp_sys_prod = self.wmi_detail["comp_sys_prod"][0]
-            make = [x["Vendor"] for x in comp_sys_prod if "Vendor" in x][0]
-            model = [x["Model"] for x in comp_sys if "Model" in x][0]
+            make = ""
+            with suppress(Exception):
+                comp_sys_prod = self.wmi_detail["comp_sys_prod"][0]
+                make = [x["Vendor"] for x in comp_sys_prod if "Vendor" in x and x["Vendor"]][0]
+            if not make:
+                with suppress(Exception):
+                    make = [x["Manufacturer"] for x in comp_sys if "Manufacturer" in x and x["Manufacturer"]][0]
+            model = [x["Model"] for x in comp_sys if "Model" in x and x["Model"]][0]
 
-            if "to be filled" in model.lower():
-                mobo = self.wmi_detail["base_board"][0]
-                make = [x["Manufacturer"] for x in mobo if "Manufacturer" in x][0]
-                model = [x["Product"] for x in mobo if "Product" in x][0]
+            if "to be filled" in str(model).lower():
+                with suppress(Exception):
+                    mobo = self.wmi_detail["base_board"][0]
+                    make = [x["Manufacturer"] for x in mobo if "Manufacturer" in x and x["Manufacturer"]][0]
+                    model = [x["Product"] for x in mobo if "Product" in x and x["Product"]][0]
 
-            if make.lower() == "lenovo":
-                sysfam = [x["SystemFamily"] for x in comp_sys if "SystemFamily" in x][0]
-                if "to be filled" not in sysfam.lower():
-                    model = sysfam
+            if str(make).lower() == "lenovo":
+                with suppress(Exception):
+                    sysfam = [x["SystemFamily"] for x in comp_sys if "SystemFamily" in x and x["SystemFamily"]][0]
+                    if sysfam and "to be filled" not in str(sysfam).lower():
+                        model = sysfam
 
-            return f"{make} {model}"
+            if make or model:
+                return f"{make} {model}".strip()
 
         with suppress(Exception):
             comp_sys_prod = self.wmi_detail["comp_sys_prod"][0]
-            return cast(str, [x["Version"] for x in comp_sys_prod if "Version" in x][0])
+            return cast(str, [x["Version"] for x in comp_sys_prod if "Version" in x and x["Version"]][0])
 
         return "unknown make/model"
 

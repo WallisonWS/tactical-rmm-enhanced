@@ -27,33 +27,71 @@ from tacticalrmm.constants import (
 from winupdate.models import WinUpdate
 
 
+def _flatten_wmi_section(section: Any) -> Dict[str, Any]:
+    """
+    Flattens Tactical RMM's WMI format (which stores each WMI instance as a list
+    of single-key dicts, e.g. wmi_detail['comp_sys'][0] = [{'Domain': ...}, {'Model': ...}])
+    into a single dictionary.
+    """
+    flat: Dict[str, Any] = {}
+    if isinstance(section, dict):
+        return dict(section)
+    if isinstance(section, list) and section:
+        first = section[0]
+        if isinstance(first, dict):
+            for item in section:
+                if isinstance(item, dict):
+                    flat.update(item)
+        elif isinstance(first, list):
+            for item in first:
+                if isinstance(item, dict):
+                    flat.update(item)
+    return flat
+
+
 def _extract_wmi_profile(agent: Agent) -> Dict[str, Any]:
     """
     Extracts hardware, BIOS, network IP, GPU, and Active Directory / Workgroup metadata
-    from the agent's cached WMI detail in PostgreSQL so Traditional Agents (v1.x/v2.x)
+    from the agent's cached WMI detail in PostgreSQL so Traditional Agents (v1.x/v2.12.0)
     return rich data immediately before their Go agent binary is updated.
     """
     wmi = agent.wmi_detail if isinstance(agent.wmi_detail, dict) else {}
-    comp_sys: Dict[str, Any] = {}
-    cs_raw = wmi.get("comp_sys")
-    if isinstance(cs_raw, list) and cs_raw:
-        if isinstance(cs_raw[0], list) and cs_raw[0] and isinstance(cs_raw[0][0], dict):
-            comp_sys = cs_raw[0][0]
-        elif isinstance(cs_raw[0], dict):
-            comp_sys = cs_raw[0]
+    comp_sys = _flatten_wmi_section(wmi.get("comp_sys"))
+    comp_sys_prod = _flatten_wmi_section(wmi.get("comp_sys_prod"))
+    base_board = _flatten_wmi_section(wmi.get("base_board"))
+    bios_info = _flatten_wmi_section(wmi.get("bios"))
 
-    bios_info: Dict[str, Any] = {}
-    bios_raw = wmi.get("bios")
-    if isinstance(bios_raw, list) and bios_raw:
-        if isinstance(bios_raw[0], list) and bios_raw[0] and isinstance(bios_raw[0][0], dict):
-            bios_info = bios_raw[0][0]
-        elif isinstance(bios_raw[0], dict):
-            bios_info = bios_raw[0]
-
-    manufacturer = str(comp_sys.get("Manufacturer") or "").strip() or "Standard OEM"
-    model = str(comp_sys.get("Model") or "").strip() or (agent.make_model or "Generic System")
+    manufacturer = (
+        str(
+            comp_sys_prod.get("Vendor")
+            or comp_sys.get("Manufacturer")
+            or base_board.get("Manufacturer")
+            or ""
+        ).strip()
+        or "Standard OEM"
+    )
+    model = (
+        str(
+            comp_sys.get("SystemFamily")
+            if str(manufacturer).lower() == "lenovo"
+            and comp_sys.get("SystemFamily")
+            and "to be filled" not in str(comp_sys.get("SystemFamily")).lower()
+            else (
+                comp_sys.get("Model")
+                or base_board.get("Product")
+                or comp_sys_prod.get("Version")
+                or ""
+            )
+        ).strip()
+        or (agent.make_model if agent.make_model != "unknown make/model" else "Generic System")
+    )
     bios_version = (
-        str(bios_info.get("SMBIOSBIOSVersion") or bios_info.get("Version") or "").strip()
+        str(
+            bios_info.get("SMBIOSBIOSVersion")
+            or bios_info.get("Version")
+            or bios_info.get("Caption")
+            or ""
+        ).strip()
         or "Default BIOS"
     )
     part_of_domain = bool(comp_sys.get("PartOfDomain", False))
@@ -71,17 +109,15 @@ def _extract_wmi_profile(agent: Agent) -> Dict[str, Any]:
     gfx_raw = wmi.get("graphics")
     if isinstance(gfx_raw, list):
         for item in gfx_raw:
-            if isinstance(item, list):
-                for sub in item:
-                    if isinstance(sub, dict) and sub.get("Name"):
-                        gpus.append(str(sub["Name"]))
-            elif isinstance(item, dict) and item.get("Name"):
-                gpus.append(str(item["Name"]))
-    if not gpus and agent.graphics:
+            flat_gfx = _flatten_wmi_section(item)
+            gfx_name = flat_gfx.get("Name") or flat_gfx.get("Caption")
+            if gfx_name and str(gfx_name) not in gpus:
+                gpus.append(str(gfx_name))
+    if not gpus and agent.graphics and "requires agent" not in str(agent.graphics).lower():
         gpus = [g.strip() for g in str(agent.graphics).split(",") if g.strip()]
 
     local_ips_list: List[str] = []
-    if agent.local_ips:
+    if agent.local_ips and "error" not in str(agent.local_ips).lower():
         for ip in str(agent.local_ips).split(","):
             clean = ip.split("/")[0].strip()
             if clean and clean not in local_ips_list:
@@ -96,7 +132,7 @@ def _extract_wmi_profile(agent: Agent) -> Dict[str, Any]:
     return {
         "manufacturer": manufacturer,
         "model": model,
-        "serial_number": agent.serial_number or "N/A",
+        "serial_number": agent.serial_number or str(bios_info.get("SerialNumber") or "N/A"),
         "bios_version": bios_version,
         "part_of_domain": part_of_domain,
         "domain_name": domain_name if part_of_domain else "",
