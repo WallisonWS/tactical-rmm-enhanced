@@ -150,6 +150,23 @@
             <div class="row q-gutter-xs">
               <q-btn
                 dense
+                size="sm"
+                color="amber-9"
+                icon="domain_add"
+                :label="adProfile.part_of_domain ? 'Reingressar / Trocar Domínio AD' : 'Ingressar Esta Máquina no AD'"
+                @click="openJoinAdModal(selectedAgentId, adProfile.hostname)"
+              />
+              <q-btn
+                dense
+                size="sm"
+                color="deep-orange"
+                icon="fact_check"
+                label="Listar Máquinas Fora do AD (Frota)"
+                :loading="fleetAdAuditLoading"
+                @click="onRunFleetADAudit"
+              />
+              <q-btn
+                dense
                 outline
                 size="sm"
                 color="primary"
@@ -209,6 +226,36 @@
               />
             </div>
           </div>
+
+          <!-- Highlight banner when current computer is Outside AD -->
+          <q-banner
+            v-if="!adProfile.part_of_domain"
+            dense
+            rounded
+            class="bg-amber-9 text-white q-mb-sm"
+          >
+            <template v-slot:avatar>
+              <q-icon name="domain_disabled" color="white" />
+            </template>
+            <div class="row items-center justify-between">
+              <div>
+                <b>Máquina Fora do Active Directory Identificada:</b> O computador
+                <b>{{ adProfile.hostname }}</b> está atualmente em grupo de trabalho
+                (<b>{{ adProfile.workgroup_name || "WORKGROUP" }}</b>). A equipe de TI pode ingressá-lo
+                remotamente no domínio AD sem precisar ir até a máquina.
+              </div>
+              <q-btn
+                dense
+                unelevated
+                color="white"
+                text-color="black"
+                icon="domain_add"
+                label="Adicionar ao AD Agora"
+                class="q-ml-sm"
+                @click="openJoinAdModal(selectedAgentId, adProfile.hostname)"
+              />
+            </div>
+          </q-banner>
 
           <div class="row q-col-gutter-sm">
             <div class="col-12 col-md-4">
@@ -271,6 +318,138 @@
           <div v-if="adActionOutput" class="q-mt-sm q-pa-sm bg-blue-grey-10 text-white rounded-borders">
             <pre class="q-ma-none text-caption" style="white-space: pre-wrap">{{ adActionOutput }}</pre>
           </div>
+        </q-card-section>
+      </q-card>
+
+      <!-- Fleet-Wide Audit of Computers Outside Active Directory (Máquinas Fora do AD) -->
+      <q-card flat bordered class="q-mb-md" v-if="fleetAdAudit">
+        <q-card-section class="q-pa-sm">
+          <div class="row items-center justify-between q-mb-sm">
+            <div>
+              <div class="text-subtitle2 text-weight-bold flex items-center">
+                <q-icon name="domain_disabled" color="amber-9" size="sm" class="q-mr-xs" />
+                Relatório de Máquinas Fora do Active Directory (Auditoria de Frota TI)
+              </div>
+              <div class="text-caption text-grey">
+                Identifica automaticamente todos os computadores com Tactical RMM que estão fora do domínio (WORKGROUP) para que a equipe de TI possa adicioná-los ao AD em 1 clique.
+              </div>
+            </div>
+            <div class="row items-center q-gutter-xs">
+              <q-btn-toggle
+                v-model="fleetAdFilterMode"
+                dense
+                unelevated
+                toggle-color="primary"
+                color="grey-8"
+                text-color="white"
+                size="sm"
+                :options="[
+                  { label: `Fora do AD (${fleetAdAudit.outside_ad_count})`, value: 'outside' },
+                  { label: `No Domínio AD (${fleetAdAudit.inside_ad_count})`, value: 'inside' },
+                  { label: `Todas (${fleetAdAudit.total_agents})`, value: 'all' },
+                ]"
+              />
+              <q-input
+                v-model="fleetAdSearch"
+                dense
+                outlined
+                placeholder="Buscar hostname, IP, usuário..."
+                style="min-width: 200px"
+              >
+                <template v-slot:prepend>
+                  <q-icon name="search" size="xs" />
+                </template>
+              </q-input>
+              <q-btn
+                dense
+                flat
+                round
+                icon="close"
+                @click="fleetAdAudit = null"
+              />
+            </div>
+          </div>
+
+          <div class="row q-gutter-sm q-mb-sm items-center">
+            <q-badge color="blue-grey-8" class="q-pa-xs">
+              Total Analisado: {{ fleetAdAudit.total_agents }}
+            </q-badge>
+            <q-badge color="amber-9" class="q-pa-xs">
+              Fora do AD (Workgroup): {{ fleetAdAudit.outside_ad_count }}
+            </q-badge>
+            <q-badge color="positive" class="q-pa-xs">
+              Ingressadas no AD: {{ fleetAdAudit.inside_ad_count }}
+            </q-badge>
+            <q-badge
+              v-if="fleetAdAudit.detected_domains?.length"
+              color="indigo"
+              class="q-pa-xs"
+            >
+              Domínio(s) AD na Frota: {{ fleetAdAudit.detected_domains.join(", ") }}
+            </q-badge>
+          </div>
+
+          <q-table
+            dense
+            flat
+            :rows="filteredFleetAdRows"
+            :columns="fleetAdAuditColumns"
+            row-key="agent_id"
+            :filter="fleetAdSearch"
+            :pagination="{ rowsPerPage: 10 }"
+            no-data-label="Nenhuma máquina encontrada neste filtro"
+          >
+            <template v-slot:body-cell-part_of_domain="props">
+              <q-td :props="props">
+                <q-badge v-if="props.row.part_of_domain" color="positive">
+                  No AD ({{ props.row.domain_name || props.row.domain_or_workgroup }})
+                </q-badge>
+                <q-badge v-else color="amber-9">
+                  Fora do AD ({{ props.row.workgroup_name || "WORKGROUP" }})
+                </q-badge>
+              </q-td>
+            </template>
+            <template v-slot:body-cell-status="props">
+              <q-td :props="props">
+                <q-badge :color="props.row.status === 'online' ? 'positive' : 'grey-7'">
+                  {{ props.row.status === "online" ? "Online" : props.row.status }}
+                </q-badge>
+              </q-td>
+            </template>
+            <template v-slot:body-cell-actions="props">
+              <q-td :props="props" class="q-gutter-xs">
+                <q-btn
+                  v-if="!props.row.part_of_domain"
+                  dense
+                  unelevated
+                  size="sm"
+                  color="amber-9"
+                  icon="domain_add"
+                  label="Ingressar no AD"
+                  @click="openJoinAdModal(props.row.agent_id, props.row.hostname)"
+                />
+                <q-btn
+                  v-else
+                  dense
+                  outline
+                  size="sm"
+                  color="indigo"
+                  icon="domain"
+                  label="Trocar / Reingressar"
+                  @click="openJoinAdModal(props.row.agent_id, props.row.hostname)"
+                />
+                <q-btn
+                  dense
+                  flat
+                  size="sm"
+                  color="primary"
+                  icon="open_in_new"
+                  label="Selecionar"
+                  @click="selectFleetAgent(props.row.agent_id)"
+                />
+              </q-td>
+            </template>
+          </q-table>
         </q-card-section>
       </q-card>
 
@@ -504,6 +683,114 @@
           />
         </q-card-section>
       </q-card>
+
+      <!-- Modal: Ingressar Computador Remotamente no Domínio Active Directory (Add-Computer) -->
+      <q-dialog v-model="showJoinAdModal" persistent>
+        <q-card style="min-width: 480px; max-width: 620px">
+          <q-card-section class="row items-center justify-between bg-primary text-white q-py-sm">
+            <div class="text-subtitle1 text-weight-bold flex items-center">
+              <q-icon name="domain_add" size="sm" class="q-mr-sm" />
+              Ingressar Computador no Domínio Active Directory
+            </div>
+            <q-btn icon="close" flat round dense v-close-popup />
+          </q-card-section>
+
+          <q-card-section class="q-gutter-sm">
+            <q-banner dense rounded class="bg-blue-grey-9 text-white">
+              Computador Alvo: <b>{{ joinAdTargetHostname }}</b>
+              <div class="text-caption">
+                Executa <code>Add-Computer</code> remotamente via agente RMM (compatível com agentes v2.12.0 já instalados e agentes Go novos).
+              </div>
+            </q-banner>
+
+            <q-input
+              v-model="joinAdForm.domain"
+              dense
+              outlined
+              label="Domínio Active Directory (ex: crd.med.br ou crd.local) *"
+              placeholder="crd.med.br"
+            />
+
+            <div class="row q-col-gutter-sm">
+              <div class="col-12 col-sm-6">
+                <q-input
+                  v-model="joinAdForm.username"
+                  dense
+                  outlined
+                  label="Usuário Administrador do AD *"
+                  placeholder="administrador ou CRD\administrador"
+                />
+              </div>
+              <div class="col-12 col-sm-6">
+                <q-input
+                  v-model="joinAdForm.password"
+                  dense
+                  outlined
+                  :type="showJoinAdPassword ? 'text' : 'password'"
+                  label="Senha do Administrador do AD *"
+                >
+                  <template v-slot:append>
+                    <q-icon
+                      :name="showJoinAdPassword ? 'visibility_off' : 'visibility'"
+                      class="cursor-pointer"
+                      @click="showJoinAdPassword = !showJoinAdPassword"
+                    />
+                  </template>
+                </q-input>
+              </div>
+            </div>
+
+            <div class="row q-col-gutter-sm">
+              <div class="col-12 col-sm-6">
+                <q-input
+                  v-model="joinAdForm.dns_server"
+                  dense
+                  outlined
+                  label="IP DNS do Controlador AD (Opcional)"
+                  placeholder="Ex: 10.0.20.1"
+                  hint="Configura o DNS da placa de rede antes de ingressar"
+                />
+              </div>
+              <div class="col-12 col-sm-6">
+                <q-input
+                  v-model="joinAdForm.new_hostname"
+                  dense
+                  outlined
+                  label="Padronizar Hostname (Opcional)"
+                  :placeholder="joinAdTargetHostname"
+                  hint="Deixe em branco para manter o nome atual"
+                />
+              </div>
+            </div>
+
+            <q-input
+              v-model="joinAdForm.ou_path"
+              dense
+              outlined
+              label="Caminho da OU no AD (Opcional)"
+              placeholder="Ex: OU=Estacoes,DC=crd,DC=med,DC=br"
+            />
+
+            <q-checkbox
+              v-model="joinAdForm.restart"
+              color="primary"
+              label="Reiniciar computador automaticamente (em 10 segundos) após ingressar no AD"
+            />
+          </q-card-section>
+
+          <q-card-actions align="right" class="q-px-md q-pb-md">
+            <q-btn flat label="Cancelar" v-close-popup :disable="joiningAdLoading" />
+            <q-btn
+              unelevated
+              color="amber-9"
+              icon="domain_add"
+              label="Ingressar no Domínio AD Agora"
+              :loading="joiningAdLoading"
+              @click="onSubmitJoinAD"
+            />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
     </div>
   </div>
 </template>
@@ -523,11 +810,16 @@ import {
   fetchAgentADServerStatus,
   runAgentADServerAction,
   runAgentLANDiscovery,
+  fetchFleetOutsideADAudit,
+  joinAgentToADDomain,
+  fetchFleetExecutiveSummary,
   type HardwareDomainInventory,
   type PrinterInfo,
   type RestorePointInfo,
   type WindowsServerADProfile,
   type UnitLANDiscoveryReport,
+  type FleetOutsideADAuditReport,
+  type FleetADAuditAgentItem,
 } from "@/api/enhanced";
 import { notifySuccess, notifyError } from "@/utils/notify";
 
@@ -555,6 +847,51 @@ const deployInfo = ref<any | null>(null);
 const lanDiscoveryLoading = ref(false);
 const customDiscoverySubnet = ref("");
 const lanDiscoveryReport = ref<UnitLANDiscoveryReport | null>(null);
+const fleetAdAuditLoading = ref(false);
+const fleetAdAudit = ref<FleetOutsideADAuditReport | null>(null);
+const fleetAdFilterMode = ref<"outside" | "inside" | "all">("outside");
+const fleetAdSearch = ref("");
+
+const showJoinAdModal = ref(false);
+const showJoinAdPassword = ref(false);
+const joiningAdLoading = ref(false);
+const joinAdTargetAgentId = ref("");
+const joinAdTargetHostname = ref("");
+const joinAdForm = ref({
+  domain: "",
+  username: "",
+  password: "",
+  dns_server: "",
+  ou_path: "",
+  new_hostname: "",
+  restart: true,
+});
+
+const filteredFleetAdRows = computed<FleetADAuditAgentItem[]>(() => {
+  if (!fleetAdAudit.value) return [];
+  if (fleetAdFilterMode.value === "outside") {
+    return fleetAdAudit.value.outside_ad_agents || [];
+  }
+  if (fleetAdFilterMode.value === "inside") {
+    return fleetAdAudit.value.inside_ad_agents || [];
+  }
+  return [
+    ...(fleetAdAudit.value.outside_ad_agents || []),
+    ...(fleetAdAudit.value.inside_ad_agents || []),
+  ];
+});
+
+const fleetAdAuditColumns = [
+  { name: "hostname", label: "Computador (Hostname)", field: "hostname", align: "left" as const, sortable: true },
+  { name: "client_name", label: "Cliente", field: "client_name", align: "left" as const, sortable: true },
+  { name: "site_name", label: "Unidade / Site", field: "site_name", align: "left" as const, sortable: true },
+  { name: "part_of_domain", label: "Status AD / Workgroup", field: "part_of_domain", align: "left" as const, sortable: true },
+  { name: "local_ips", label: "IP Local (LAN)", field: "local_ips", align: "left" as const },
+  { name: "logged_in_username", label: "Usuário Logado", field: "logged_in_username", align: "left" as const, sortable: true },
+  { name: "operating_system", label: "Sistema Operacional", field: "operating_system", align: "left" as const },
+  { name: "status", label: "Status RMM", field: "status", align: "center" as const, sortable: true },
+  { name: "actions", label: "Ação da TI (Ingressar no AD)", field: "actions", align: "right" as const },
+];
 const printers = ref<PrinterInfo[]>([]);
 const restorePoints = ref<RestorePointInfo[]>([]);
 
@@ -658,6 +995,86 @@ async function onRunLANDiscovery() {
     );
   } finally {
     lanDiscoveryLoading.value = false;
+  }
+}
+
+async function onRunFleetADAudit() {
+  if (!selectedAgentId.value) return;
+  fleetAdAuditLoading.value = true;
+  try {
+    const res = await fetchFleetOutsideADAudit(selectedAgentId.value);
+    fleetAdAudit.value = res;
+    if (res.detected_domains?.length && !joinAdForm.value.domain) {
+      joinAdForm.value.domain = res.detected_domains[0];
+    }
+    notifySuccess(
+      `Auditoria AD concluída: ${res.outside_ad_count} máquinas fora do AD e ${res.inside_ad_count} máquinas no domínio.`,
+    );
+  } catch (e: any) {
+    notifyError(
+      e?.response?.data?.error || "Falha ao auditar máquinas fora do AD na frota",
+    );
+  } finally {
+    fleetAdAuditLoading.value = false;
+  }
+}
+
+function openJoinAdModal(targetAgentId: string, targetHostname: string) {
+  joinAdTargetAgentId.value = targetAgentId || selectedAgentId.value;
+  joinAdTargetHostname.value = targetHostname || adProfile.value?.hostname || "";
+  if (!joinAdForm.value.domain) {
+    if (adProfile.value?.domain_name) {
+      joinAdForm.value.domain = adProfile.value.domain_name;
+    } else if (fleetAdAudit.value?.detected_domains?.length) {
+      joinAdForm.value.domain = fleetAdAudit.value.detected_domains[0];
+    }
+  }
+  joinAdForm.value.new_hostname = "";
+  showJoinAdModal.value = true;
+}
+
+function selectFleetAgent(agentId: string) {
+  store.commit("setActiveRow", agentId);
+}
+
+async function onSubmitJoinAD() {
+  if (!selectedAgentId.value) return;
+  if (!joinAdForm.value.domain.trim() || !joinAdForm.value.username.trim() || !joinAdForm.value.password) {
+    notifyError("Preencha o Domínio AD, o Usuário Administrador do AD e a Senha.");
+    return;
+  }
+  joiningAdLoading.value = true;
+  try {
+    const res = await joinAgentToADDomain(selectedAgentId.value, {
+      target_agent_id: joinAdTargetAgentId.value || selectedAgentId.value,
+      domain: joinAdForm.value.domain.trim(),
+      username: joinAdForm.value.username.trim(),
+      password: joinAdForm.value.password,
+      dns_server: joinAdForm.value.dns_server.trim(),
+      ou_path: joinAdForm.value.ou_path.trim(),
+      new_hostname: joinAdForm.value.new_hostname.trim(),
+      restart: joinAdForm.value.restart,
+    });
+    adActionOutput.value = res?.output || (res?.steps || []).join("\n");
+    notifySuccess(
+      res?.steps?.[0] ||
+        `Computador ${joinAdTargetHostname.value} ingressado com sucesso no domínio ${joinAdForm.value.domain}!`,
+    );
+    showJoinAdModal.value = false;
+    joinAdForm.value.password = "";
+    await fetchFleetExecutiveSummary().catch(() => {});
+    await loadAll();
+    if (fleetAdAudit.value) {
+      await onRunFleetADAudit();
+    }
+  } catch (e: any) {
+    notifyError(
+      e?.response?.data?.error ||
+        e?.response?.data?.output ||
+        "Falha ao ingressar o computador no domínio Active Directory",
+    );
+  } finally {
+    joiningAdLoading.value = false;
   }
 }
 

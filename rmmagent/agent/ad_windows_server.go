@@ -603,3 +603,135 @@ $report -join "` + "\n" + `"
 		"timestamp":  time.Now().UTC().Format(time.RFC3339),
 	}
 }
+
+// JoinActiveDirectoryDomain remotely joins a standalone/workgroup computer into an Active Directory
+// domain, optionally configuring the primary DNS server IP, target Organizational Unit (OU),
+// standardized hostname, and post-join reboot.
+func (a *Agent) JoinActiveDirectoryDomain(domainName, adminUser, adminPassword, ouPath, dnsServer, newHostname string, restart bool) map[string]interface{} {
+	domainName = strings.TrimSpace(domainName)
+	adminUser = strings.TrimSpace(adminUser)
+	ouPath = strings.TrimSpace(ouPath)
+	dnsServer = strings.TrimSpace(dnsServer)
+	newHostname = strings.TrimSpace(newHostname)
+	steps := []string{}
+
+	if domainName == "" || adminUser == "" || adminPassword == "" {
+		return map[string]interface{}{
+			"success":   false,
+			"output":    "Domínio AD, usuário administrador e senha são obrigatórios para ingressar no domínio.",
+			"steps":     steps,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+	}
+
+	if runtime.GOOS != "windows" {
+		return map[string]interface{}{
+			"success":   false,
+			"output":    "Ingresso automático via Add-Computer disponível para estações e servidores Windows.",
+			"steps":     steps,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+	}
+
+	psScript := `
+$ErrorActionPreference = 'Stop'
+$dom = $env:TRMM_AD_DOMAIN
+$usr = $env:TRMM_AD_USER
+$pwdPlain = $env:TRMM_AD_PASS
+$ou = $env:TRMM_AD_OU
+$dns = $env:TRMM_AD_DNS
+$newName = $env:TRMM_AD_NEWNAME
+$doRestart = ($env:TRMM_AD_RESTART -eq 'true')
+
+$log = @()
+
+if ($dns -ne "") {
+  try {
+    $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
+    foreach ($nic in $adapters) {
+      Set-DnsClientServerAddress -InterfaceIndex $nic.ifIndex -ServerAddresses ($dns -split ',') -ErrorAction SilentlyContinue
+    }
+    ipconfig /flushdns | Out-Null
+    $log += "DNS da interface de rede configurado para: $dns"
+  } catch {
+    $log += "Aviso ao configurar DNS: $($_.Exception.Message)"
+  }
+}
+
+if ($usr -notmatch '\\' -and $usr -notmatch '@') {
+  $usr = "$dom\$usr"
+}
+
+$secPass = ConvertTo-SecureString -String $pwdPlain -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential($usr, $secPass)
+
+$addParams = @{
+  DomainName = $dom
+  Credential = $cred
+  Force      = $true
+  ErrorAction = 'Stop'
+}
+if ($ou -ne "") {
+  $addParams['OUPath'] = $ou
+}
+if ($newName -ne "" -and $newName -ne $env:COMPUTERNAME) {
+  $addParams['NewName'] = $newName
+}
+
+Add-Computer @addParams
+$log += "Computador ingressado com sucesso no domínio Active Directory: $dom"
+
+if ($doRestart) {
+  $log += "Reinicialização agendada para 10 segundos para aplicar o ingresso no AD."
+  Start-Process -FilePath "shutdown.exe" -ArgumentList "/r /t 10 /c `"Tactical RMM: Ingresso no Dominio Active Directory ($dom) concluido`"" -NoNewWindow
+}
+
+$log -join "` + "\n" + `"
+`
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	restartStr := "false"
+	if restart {
+		restartStr = "true"
+	}
+	cmd.Env = append(os.Environ(),
+		"TRMM_AD_DOMAIN="+domainName,
+		"TRMM_AD_USER="+adminUser,
+		"TRMM_AD_PASS="+adminPassword,
+		"TRMM_AD_OU="+ouPath,
+		"TRMM_AD_DNS="+dnsServer,
+		"TRMM_AD_NEWNAME="+newHostname,
+		"TRMM_AD_RESTART="+restartStr,
+	)
+
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err != nil {
+		return map[string]interface{}{
+			"success":         false,
+			"domain":          domainName,
+			"reboot_required": false,
+			"output":          fmt.Sprintf("Falha ao ingressar no domínio %s: %s", domainName, output),
+			"steps":           []string{fmt.Sprintf("Erro ao executar Add-Computer para %s", domainName)},
+			"ad_profile":      a.GetADAndWindowsServerStatus(),
+			"timestamp":       time.Now().UTC().Format(time.RFC3339),
+		}
+	}
+
+	steps = append(steps, fmt.Sprintf("Computador ingressado com sucesso no domínio %s", domainName))
+	if restart {
+		steps = append(steps, "Reinicialização automática iniciada (10s)")
+	} else {
+		steps = append(steps, "Reinicialização pendente para concluir a aplicação do domínio AD")
+	}
+
+	return map[string]interface{}{
+		"success":         true,
+		"domain":          domainName,
+		"reboot_required": !restart,
+		"restarting":      restart,
+		"output":          output,
+		"steps":           steps,
+		"ad_profile":      a.GetADAndWindowsServerStatus(),
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+	}
+}

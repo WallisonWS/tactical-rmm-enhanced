@@ -1,4 +1,5 @@
 import asyncio
+import base64
 from contextlib import suppress
 from typing import Any, Dict, List
 
@@ -587,9 +588,20 @@ class FleetExecutiveSummaryView(APIView):
         overdue_count = 0
         reboot_needed_count = 0
         maintenance_count = 0
+        ad_joined_count = 0
+        outside_ad_count = 0
+        outside_ad_agent_ids: List[str] = []
+        ad_joined_agent_ids: List[str] = []
+        domain_map: Dict[str, Dict[str, Any]] = {}
 
         for ag in agents_qs.only(
-            "last_seen", "offline_time", "overdue_time", "needs_reboot", "maintenance_mode"
+            "agent_id",
+            "last_seen",
+            "offline_time",
+            "overdue_time",
+            "needs_reboot",
+            "maintenance_mode",
+            "wmi_detail",
         ):
             st = ag.status
             if st == AGENT_STATUS_ONLINE:
@@ -602,6 +614,28 @@ class FleetExecutiveSummaryView(APIView):
                 reboot_needed_count += 1
             if ag.maintenance_mode:
                 maintenance_count += 1
+
+            wmi = ag.wmi_detail if isinstance(ag.wmi_detail, dict) else {}
+            comp_sys = _flatten_wmi_section(wmi.get("comp_sys"))
+            in_domain = bool(comp_sys.get("PartOfDomain", False))
+            dom_name = str(comp_sys.get("Domain") or "").strip()
+            wg_name = str(comp_sys.get("Workgroup") or "").strip() or (
+                dom_name if not in_domain and dom_name else "WORKGROUP"
+            )
+            if in_domain:
+                ad_joined_count += 1
+                ad_joined_agent_ids.append(ag.agent_id)
+                domain_map[ag.agent_id] = {
+                    "part_of_domain": True,
+                    "domain": dom_name or "AD",
+                }
+            else:
+                outside_ad_count += 1
+                outside_ad_agent_ids.append(ag.agent_id)
+                domain_map[ag.agent_id] = {
+                    "part_of_domain": False,
+                    "domain": wg_name,
+                }
 
         unresolved_alerts = Alert.objects.filter_by_role(request.user).filter(resolved=False)
         critical_alerts = unresolved_alerts.filter(severity=AlertSeverity.ERROR).count()
@@ -659,6 +693,11 @@ class FleetExecutiveSummaryView(APIView):
                 },
                 "failing_checks_count": failing_checks,
                 "agents_with_pending_patches": pending_patches,
+                "ad_joined_agents": ad_joined_count,
+                "outside_ad_agents": outside_ad_count,
+                "outside_ad_agent_ids": outside_ad_agent_ids,
+                "ad_joined_agent_ids": ad_joined_agent_ids,
+                "domain_map": domain_map,
                 "timestamp": djangotime.now().isoformat(),
             }
         )
@@ -1185,8 +1224,279 @@ class AgentADServerManagerView(APIView):
                 }
             )
 
+        if action == "fleet_outside_ad_audit":
+            all_agents = (
+                Agent.objects.filter_by_role(request.user)
+                .select_related("site__client")
+                .only(
+                    "agent_id",
+                    "hostname",
+                    "monitoring_type",
+                    "operating_system",
+                    "plat",
+                    "logged_in_username",
+                    "last_seen",
+                    "offline_time",
+                    "overdue_time",
+                    "wmi_detail",
+                    "site__name",
+                    "site__client__name",
+                )
+            )
+            outside_ad_list: List[Dict[str, Any]] = []
+            inside_ad_list: List[Dict[str, Any]] = []
+            detected_domains: List[str] = []
+
+            for ag in all_agents:
+                prof = _extract_wmi_profile(ag)
+                item = {
+                    "agent_id": ag.agent_id,
+                    "hostname": ag.hostname,
+                    "client_name": ag.site.client.name,
+                    "site_name": ag.site.name,
+                    "monitoring_type": ag.monitoring_type,
+                    "operating_system": ag.operating_system or ag.plat,
+                    "logged_in_username": ag.logged_in_username or "-",
+                    "local_ips": ", ".join(prof["local_ips"]) if prof["local_ips"] else "-",
+                    "part_of_domain": prof["part_of_domain"],
+                    "domain_or_workgroup": prof["domain_or_workgroup"],
+                    "domain_name": prof["domain_name"],
+                    "workgroup_name": prof["workgroup_name"],
+                    "status": ag.status,
+                }
+                if prof["part_of_domain"]:
+                    inside_ad_list.append(item)
+                    if (
+                        prof["domain_name"]
+                        and prof["domain_name"].lower() != "workgroup"
+                        and prof["domain_name"] not in detected_domains
+                    ):
+                        detected_domains.append(prof["domain_name"])
+                else:
+                    outside_ad_list.append(item)
+
+            return Response(
+                {
+                    "total_agents": len(outside_ad_list) + len(inside_ad_list),
+                    "outside_ad_count": len(outside_ad_list),
+                    "inside_ad_count": len(inside_ad_list),
+                    "detected_domains": detected_domains,
+                    "outside_ad_agents": outside_ad_list,
+                    "inside_ad_agents": inside_ad_list,
+                    "timestamp": djangotime.now().isoformat(),
+                }
+            )
+
+        if action == "join_ad_domain":
+            target_id = str(request.data.get("target_agent_id") or agent_id).strip()
+            target_agent = get_object_or_404(
+                Agent.objects.select_related("site__client"), agent_id=target_id
+            )
+            domain = str(request.data.get("domain") or "").strip()
+            username = str(request.data.get("username") or "").strip()
+            password = str(request.data.get("password") or "")
+            ou_path = str(request.data.get("ou_path") or "").strip()
+            dns_server = str(request.data.get("dns_server") or "").strip()
+            new_hostname = str(request.data.get("new_hostname") or "").strip()
+            restart = bool(request.data.get("restart", False))
+
+            if not domain or not username or not password:
+                return Response(
+                    {
+                        "error": "Domínio AD, usuário administrador do AD e senha são obrigatórios."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            join_payload = {
+                "domain": domain,
+                "username": username,
+                "password": password,
+                "ou_path": ou_path,
+                "dns_server": dns_server,
+                "new_hostname": new_hostname,
+                "restart": "true" if restart else "false",
+            }
+            r = asyncio.run(
+                target_agent.nats_cmd(
+                    {"func": "ad_join_domain", "payload": join_payload}, timeout=45
+                )
+            )
+
+            # Backwards-compatibility fallback for Traditional Agent v2.12.0 via native rawcmd
+            if r == "timeout":
+                b64_dom = base64.b64encode(domain.encode("utf-8")).decode("ascii")
+                b64_usr = base64.b64encode(username.encode("utf-8")).decode("ascii")
+                b64_pwd = base64.b64encode(password.encode("utf-8")).decode("ascii")
+                b64_ou = base64.b64encode(ou_path.encode("utf-8")).decode("ascii")
+                b64_dns = base64.b64encode(dns_server.encode("utf-8")).decode("ascii")
+                b64_new = base64.b64encode(new_hostname.encode("utf-8")).decode("ascii")
+                do_restart_str = "$true" if restart else "$false"
+
+                ps_join = f"""
+$ErrorActionPreference = 'Stop'
+$dom = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{b64_dom}'))
+$usr = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{b64_usr}'))
+$pwdPlain = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{b64_pwd}'))
+$ou = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{b64_ou}'))
+$dns = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{b64_dns}'))
+$newName = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{b64_new}'))
+$doRestart = {do_restart_str}
+
+if ($dns -ne '') {{
+  try {{
+    $adapters = Get-NetAdapter | Where-Object {{ $_.Status -eq 'Up' }}
+    foreach ($nic in $adapters) {{
+      Set-DnsClientServerAddress -InterfaceIndex $nic.ifIndex -ServerAddresses ($dns -split ',') -ErrorAction SilentlyContinue
+    }}
+    ipconfig /flushdns | Out-Null
+    Write-Output "DNS configurado para: $dns"
+  }} catch {{}}
+}}
+
+if ($usr -notmatch '\\\\' -and $usr -notmatch '@') {{
+  $usr = "$dom\\$usr"
+}}
+
+$secPass = ConvertTo-SecureString -String $pwdPlain -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential($usr, $secPass)
+
+$addParams = @{{
+  DomainName = $dom
+  Credential = $cred
+  Force      = $true
+  ErrorAction = 'Stop'
+}}
+if ($ou -ne '') {{ $addParams['OUPath'] = $ou }}
+if ($newName -ne '' -and $newName -ne $env:COMPUTERNAME) {{ $addParams['NewName'] = $newName }}
+
+Add-Computer @addParams
+Write-Output "INGRESSO_AD_OK: Computador ingressado com sucesso no dominio $dom"
+if ($doRestart) {{
+  Start-Process -FilePath 'shutdown.exe' -ArgumentList '/r /t 10 /c "Tactical RMM: Ingresso no Dominio AD concluido"' -NoNewWindow
+  Write-Output "Reinicializacao automatica iniciada (10s)."
+}}
+"""
+                raw_out = asyncio.run(
+                    target_agent.nats_cmd(
+                        {
+                            "func": "rawcmd",
+                            "timeout": 55,
+                            "payload": {
+                                "command": ps_join,
+                                "shell": "powershell",
+                            },
+                        },
+                        timeout=60,
+                    )
+                )
+                if raw_out not in ("timeout", "natsdown") and isinstance(raw_out, str):
+                    joined_ok = "INGRESSO_AD_OK" in raw_out
+                    r = {
+                        "success": joined_ok,
+                        "domain": domain,
+                        "target_hostname": target_agent.hostname,
+                        "reboot_required": joined_ok and not restart,
+                        "restarting": joined_ok and restart,
+                        "output": raw_out.strip(),
+                        "steps": (
+                            [
+                                f"Computador {target_agent.hostname} ingressado com sucesso no domínio {domain}",
+                                "Reinicialização iniciada (10s)"
+                                if restart
+                                else "Reinicialização necessária para aplicar o domínio AD",
+                            ]
+                            if joined_ok
+                            else [f"Falha ao ingressar {target_agent.hostname} no domínio {domain}"]
+                        ),
+                    }
+
+            if r in ("timeout", "natsdown"):
+                return Response(
+                    {
+                        "error": f"Não foi possível contatar {target_agent.hostname} via NATS ({r}) para ingressar no domínio."
+                    },
+                    status=status.HTTP_504_GATEWAY_TIMEOUT,
+                )
+
+            if isinstance(r, dict) and r.get("success"):
+                # Update cached WMI comp_sys in PostgreSQL so UI reflects AD join immediately
+                with suppress(Exception):
+                    wmi = (
+                        dict(target_agent.wmi_detail)
+                        if isinstance(target_agent.wmi_detail, dict)
+                        else {}
+                    )
+                    wmi["comp_sys"] = [
+                        [
+                            {"PartOfDomain": True},
+                            {"Domain": domain},
+                            {"Workgroup": ""},
+                            {"DomainRole": 3 if target_agent.monitoring_type == "server" else 1},
+                        ]
+                    ]
+                    target_agent.wmi_detail = wmi
+                    target_agent.needs_reboot = not restart
+                    target_agent.save(update_fields=["wmi_detail", "needs_reboot"])
+
+            AuditLog.objects.create(
+                username=request.user.username,
+                agent=target_agent.hostname,
+                agent_id=target_agent.agent_id,
+                object_type=AuditObjType.AGENT,
+                action=AuditActionType.EXEC_COMMAND,
+                message=f"{request.user.username} executou ingresso no domínio AD '{domain}' em {target_agent.hostname}",
+                after_value={
+                    "domain": domain,
+                    "username": username,
+                    "ou_path": ou_path,
+                    "dns_server": dns_server,
+                    "new_hostname": new_hostname,
+                    "restart": restart,
+                    "success": r.get("success") if isinstance(r, dict) else False,
+                },
+            )
+            if isinstance(r, dict) and not r.get("success", True):
+                return Response(
+                    {"error": r.get("output") or f"Falha ao ingressar no domínio {domain}", **r},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(r)
+
         nats_data = {"func": "ad_server_action", "payload": {"action": action}}
-        r = asyncio.run(agent.nats_cmd(nats_data, timeout=45))
+        r = asyncio.run(agent.nats_cmd(nats_data, timeout=25))
+        if r == "timeout":
+            # Traditional Agent v2.12.0 fallback via native rawcmd PowerShell
+            fallback_cmds = {
+                "test_secure_channel": "Get-CimInstance Win32_ComputerSystem | Select-Object Name, PartOfDomain, Domain, Workgroup, DomainRole | Format-List; if ((Get-CimInstance Win32_ComputerSystem).PartOfDomain) { Test-ComputerSecureChannel -Verbose 4>&1 }",
+                "repair_secure_channel": "if ((Get-CimInstance Win32_ComputerSystem).PartOfDomain) { Test-ComputerSecureChannel -Repair; Restart-Service Netlogon -Force -ErrorAction SilentlyContinue }; w32tm /resync /force",
+                "gpupdate_registerdns": "ipconfig /flushdns; ipconfig /registerdns; gpupdate /force",
+                "sync_standalone_ntp": 'Start-Service w32time -ErrorAction SilentlyContinue; w32tm /config /manualpeerlist:"a.st1.ntp.br,b.st1.ntp.br,pool.ntp.org" /syncfromflags:manual /reliable:yes /update; w32tm /resync /force; w32tm /query /status',
+                "dcdiag_server_health": "Get-CimInstance Win32_ComputerSystem | Select-Object Name, PartOfDomain, Domain, Workgroup, DomainRole | Format-List; w32tm /query /status",
+            }
+            if action in fallback_cmds:
+                raw_res = asyncio.run(
+                    agent.nats_cmd(
+                        {
+                            "func": "rawcmd",
+                            "timeout": 35,
+                            "payload": {
+                                "command": fallback_cmds[action],
+                                "shell": "powershell",
+                            },
+                        },
+                        timeout=40,
+                    )
+                )
+                if raw_res not in ("timeout", "natsdown"):
+                    r = {
+                        "success": True,
+                        "action": action,
+                        "steps": [f"Operação '{action}' executada com sucesso em {agent.hostname}"],
+                        "output": str(raw_res).strip(),
+                        "timestamp": djangotime.now().isoformat(),
+                    }
+
         if r in ("timeout", "natsdown"):
             return Response(
                 {"error": f"Operação ({action}) expirou em {agent.hostname}"},

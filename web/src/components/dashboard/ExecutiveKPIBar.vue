@@ -92,13 +92,20 @@
         </q-card>
       </div>
 
-      <!-- Quick Fleet Actions -->
+      <!-- Quick Fleet Actions & AD Status -->
       <div class="col-12 col-md-3">
         <q-card flat bordered class="full-height">
           <q-card-section class="q-pa-sm flex items-center justify-between full-height">
             <div>
-              <div class="text-caption text-grey">Autonomous Operations</div>
-              <div class="text-subtitle2 text-weight-bold">RMM Pro Engine</div>
+              <div class="text-caption text-grey">Active Directory &amp; Workgroup</div>
+              <div class="row items-center q-gutter-x-xs q-mt-xs">
+                <q-badge color="positive" class="q-pa-xs">
+                  No AD: {{ summary.ad_joined_agents ?? 0 }}
+                </q-badge>
+                <q-badge color="amber-9" class="q-pa-xs">
+                  Fora do AD: {{ summary.outside_ad_agents ?? 0 }}
+                </q-badge>
+              </div>
             </div>
             <div class="row q-gutter-xs">
               <q-btn

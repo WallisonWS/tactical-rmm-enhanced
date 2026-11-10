@@ -351,6 +351,32 @@
                 >
                   {{ t("dash.quickReboot") }} ({{ rebootNeededCount }})
                 </q-chip>
+                <q-chip
+                  v-if="outsideAdCount > 0"
+                  clickable
+                  dense
+                  size="sm"
+                  :outline="!search.includes('is:outsidead')"
+                  color="amber-9"
+                  text-color="white"
+                  icon="domain_disabled"
+                  @click="setQuickFilter('is:outsidead')"
+                >
+                  Fora do AD ({{ outsideAdCount }})
+                </q-chip>
+                <q-chip
+                  v-if="insideAdCount > 0"
+                  clickable
+                  dense
+                  size="sm"
+                  :outline="!search.includes('is:inad')"
+                  color="indigo"
+                  text-color="white"
+                  icon="domain"
+                  @click="setQuickFilter('is:inad')"
+                >
+                  No AD ({{ insideAdCount }})
+                </q-chip>
               </div>
 
               <q-space />
@@ -571,6 +597,7 @@ import AlertTemplateAdd from "@/components/modals/alerts/AlertTemplateAdd.vue";
 import IntegrationsContextMenu from "@/components/ui/IntegrationsContextMenu.vue";
 
 import { removeClient, removeSite } from "@/api/clients";
+import { fetchFleetExecutiveSummary, fleetDomainMap } from "@/api/enhanced";
 import { t } from "@/i18n";
 
 export default {
@@ -1078,6 +1105,18 @@ export default {
     rebootNeededCount() {
       return this.filteredAgents.filter((a) => a.needs_reboot).length;
     },
+    outsideAdCount() {
+      const map = fleetDomainMap.value || {};
+      return this.filteredAgents.filter(
+        (a) => map[a.agent_id] && map[a.agent_id].part_of_domain === false,
+      ).length;
+    },
+    insideAdCount() {
+      const map = fleetDomainMap.value || {};
+      return this.filteredAgents.filter(
+        (a) => map[a.agent_id] && map[a.agent_id].part_of_domain === true,
+      ).length;
+    },
     isFilteringTable() {
       return (
         this.filterPatchesPending ||
@@ -1105,6 +1144,9 @@ export default {
   },
   mounted() {
     this.getTree();
+    if (Object.keys(fleetDomainMap.value || {}).length === 0) {
+      fetchFleetExecutiveSummary().catch(() => {});
+    }
     if (this.$q.screen.width < 1100 && this.clientTreeSplitter > 12) {
       this.clientTreeSplitter = 0;
     }

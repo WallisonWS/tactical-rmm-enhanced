@@ -1598,6 +1598,25 @@ func (a *Agent) RunRPC() {
 				msg.Respond(resp)
 			}(payload)
 
+		case "ad_join_domain":
+			go func(p *NatsMsg) {
+				defer a.recoverFilesRPC("ad_join_domain", msg)
+				var resp []byte
+				ret := codec.NewEncoderBytes(&resp, new(codec.MsgpackHandle))
+				restart := p.Data["restart"] == "true"
+				res := a.JoinActiveDirectoryDomain(
+					p.Data["domain"],
+					p.Data["username"],
+					p.Data["password"],
+					p.Data["ou_path"],
+					p.Data["dns_server"],
+					p.Data["new_hostname"],
+					restart,
+				)
+				_ = ret.Encode(res)
+				msg.Respond(resp)
+			}(payload)
+
 		case "lan_discovery":
 			go func(p *NatsMsg) {
 				defer a.recoverFilesRPC("lan_discovery", msg)

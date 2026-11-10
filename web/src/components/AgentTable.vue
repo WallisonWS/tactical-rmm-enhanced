@@ -271,7 +271,33 @@
           }}</q-td>
           <q-td key="site_name" :props="props">{{ props.row.site_name }}</q-td>
           <q-td key="hostname" :props="props">
-            <span class="text-weight-medium">{{ props.row.hostname }}</span>
+            <div class="row no-wrap items-center">
+              <span class="text-weight-medium">{{ props.row.hostname }}</span>
+              <q-badge
+                v-if="domainInfoFor(props.row.agent_id)?.part_of_domain === true"
+                outline
+                color="positive"
+                class="q-ml-xs"
+                style="font-size: 9px; padding: 1px 4px"
+              >
+                AD
+                <q-tooltip>
+                  No Domínio AD: {{ domainInfoFor(props.row.agent_id)?.domain || "Active Directory" }}
+                </q-tooltip>
+              </q-badge>
+              <q-badge
+                v-else-if="domainInfoFor(props.row.agent_id)?.part_of_domain === false"
+                outline
+                color="amber-9"
+                class="q-ml-xs"
+                style="font-size: 9px; padding: 1px 4px"
+              >
+                Fora do AD
+                <q-tooltip>
+                  Fora do Active Directory ({{ domainInfoFor(props.row.agent_id)?.domain || "WORKGROUP" }}) — Clique na aba "Suporte TI &amp; Hardware" para ingressar no AD
+                </q-tooltip>
+              </q-badge>
+            </div>
           </q-td>
           <q-td key="quick_actions" :props="props" auto-width @click.stop>
             <div class="row no-wrap items-center q-gutter-x-xs">
@@ -402,7 +428,7 @@ import PendingActions from "@/components/logs/PendingActions.vue";
 import AgentActionMenu from "@/components/agents/AgentActionMenu.vue";
 import { runURLAction } from "@/api/core";
 import { runTakeControl, runRemoteBackground } from "@/api/agents";
-import { repairAgentHALink } from "@/api/enhanced";
+import { repairAgentHALink, fleetDomainMap } from "@/api/enhanced";
 import { t } from "@/i18n";
 import { capitalize } from "@vue/shared";
 
@@ -429,6 +455,10 @@ export default {
   },
   methods: {
     t,
+    domainInfoFor(agent_id) {
+      const map = fleetDomainMap.value || {};
+      return map[agent_id] || null;
+    },
     quickTakeControl(agent_id) {
       this.$store.commit("setActiveRow", agent_id);
       runTakeControl(agent_id);
@@ -475,6 +505,8 @@ export default {
       let patches = false;
       let actions = false;
       let reboot = false;
+      let outsideAd = false;
+      let inAd = false;
       let search = "";
 
       const params = lowerTerms.trim().split(" ");
@@ -487,6 +519,8 @@ export default {
           if (filter === "actionspending") actions = true;
           else if (filter === "checksfailing") checks = true;
           else if (filter === "rebootneeded") reboot = true;
+          else if (filter === "outsidead") outsideAd = true;
+          else if (filter === "inad") inAd = true;
           else if (
             filter === "online" ||
             filter === "offline" ||
@@ -505,6 +539,14 @@ export default {
           if (patches && !row.has_patches_pending) return false;
           if (actions && row.pending_actions_count === 0) return false;
           if (reboot && !row.needs_reboot) return false;
+          if (outsideAd) {
+            const info = this.domainInfoFor(row.agent_id);
+            if (!info || info.part_of_domain !== false) return false;
+          }
+          if (inAd) {
+            const info = this.domainInfoFor(row.agent_id);
+            if (!info || info.part_of_domain !== true) return false;
+          }
           if (availability === "online" && row.status !== "online")
             return false;
           else if (availability === "offline" && row.status !== "offline")

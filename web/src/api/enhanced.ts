@@ -1,4 +1,9 @@
 import axios from "axios";
+import { ref } from "vue";
+
+export const fleetDomainMap = ref<Record<string, { part_of_domain: boolean; domain: string }>>({});
+export const fleetOutsideAdIds = ref<string[]>([]);
+export const fleetInsideAdIds = ref<string[]>([]);
 
 // ============================================================================
 // Enhanced Tactical RMM API Client (Telemetry, Security/EDR, Network, Self-Heal, Winget, AI & Fleet KPIs)
@@ -121,11 +126,25 @@ export interface FleetExecutiveSummary {
   };
   failing_checks_count: number;
   agents_with_pending_patches: number;
+  ad_joined_agents?: number;
+  outside_ad_agents?: number;
+  outside_ad_agent_ids?: string[];
+  ad_joined_agent_ids?: string[];
+  domain_map?: Record<string, { part_of_domain: boolean; domain: string }>;
   timestamp: string;
 }
 
 export async function fetchFleetExecutiveSummary(): Promise<FleetExecutiveSummary> {
   const { data } = await axios.get("/agents/executive-summary/");
+  if (data?.domain_map) {
+    fleetDomainMap.value = data.domain_map;
+  }
+  if (Array.isArray(data?.outside_ad_agent_ids)) {
+    fleetOutsideAdIds.value = data.outside_ad_agent_ids;
+  }
+  if (Array.isArray(data?.ad_joined_agent_ids)) {
+    fleetInsideAdIds.value = data.ad_joined_agent_ids;
+  }
   return data;
 }
 
@@ -499,6 +518,61 @@ export async function runAgentADServerAction(
 ) {
   const { data } = await axios.post(`/agents/${agentId}/ad-server/`, {
     action,
+  });
+  return data;
+}
+
+export interface FleetADAuditAgentItem {
+  agent_id: string;
+  hostname: string;
+  client_name: string;
+  site_name: string;
+  monitoring_type: string;
+  operating_system: string;
+  logged_in_username: string;
+  local_ips: string;
+  part_of_domain: boolean;
+  domain_or_workgroup: string;
+  domain_name: string;
+  workgroup_name: string;
+  status: string;
+}
+
+export interface FleetOutsideADAuditReport {
+  total_agents: number;
+  outside_ad_count: number;
+  inside_ad_count: number;
+  detected_domains: string[];
+  outside_ad_agents: FleetADAuditAgentItem[];
+  inside_ad_agents: FleetADAuditAgentItem[];
+  timestamp: string;
+}
+
+export async function fetchFleetOutsideADAudit(
+  agentId: string,
+): Promise<FleetOutsideADAuditReport> {
+  const { data } = await axios.post(`/agents/${agentId}/ad-server/`, {
+    action: "fleet_outside_ad_audit",
+  });
+  return data;
+}
+
+export async function joinAgentToADDomain(
+  agentId: string,
+  payload: {
+    target_agent_id?: string;
+    domain: string;
+    username: string;
+    password: string;
+    ou_path?: string;
+    dns_server?: string;
+    new_hostname?: string;
+    restart?: boolean;
+  },
+) {
+  const { data } = await axios.post(`/agents/${agentId}/ad-server/`, {
+    action: "join_ad_domain",
+    ...payload,
   });
   return data;
 }

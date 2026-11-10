@@ -228,6 +228,15 @@ const EXACT_PHRASES: Array<[string, string, string]> = [
   ["Reparar Netlogon / Hora", "Repair Netlogon / Time", "Reparar Netlogon / Hora"],
   ["Sincronizar NTP (Sem AD)", "Sync NTP (Non-AD)", "Sincronizar NTP (Sin AD)"],
   ["Diagnóstico Server / AD", "Server / AD Diagnostics", "Diagnóstico Servidor / AD"],
+  ["Outside AD", "Fora do AD", "Fuera de AD"],
+  ["Join This Machine to AD", "Ingressar Esta Máquina no AD", "Unir Esta Máquina a AD"],
+  ["Rejoin / Change AD Domain", "Reingressar / Trocar Domínio AD", "Reunir / Cambiar Dominio AD"],
+  ["List Machines Outside AD (Fleet)", "Listar Máquinas Fora do AD (Frota)", "Listar Máquinas Fuera de AD (Flota)"],
+  ["Add to AD Now", "Adicionar ao AD Agora", "Añadir a AD Ahora"],
+  ["Join AD", "Ingressar no AD", "Unir a AD"],
+  ["Join AD Domain Now", "Ingressar no Domínio AD Agora", "Unir al Dominio AD Ahora"],
+  ["Join Computer to Active Directory Domain", "Ingressar Computador no Domínio Active Directory", "Unir Computadora al Dominio Active Directory"],
+  ["Machines Outside Active Directory Report (IT Fleet Audit)", "Relatório de Máquinas Fora do Active Directory (Auditoria de Frota TI)", "Informe de Máquinas Fuera de Active Directory (Auditoría de Flota TI)"],
 ];
 
 // Build fast lookup maps for each target locale
@@ -371,6 +380,22 @@ function translateDynamicPatterns(raw: string, locale: SupportedLocale): string 
     const val = trimmed.slice("LAN IP:".length);
     if (locale === "pt-BR") return `IP Local (LAN):${val}`;
     if (locale === "es-ES") return `IP Local (LAN):${val}`;
+  }
+
+  // 7. Outside AD / In AD quick chips: "Fora do AD (12)", "No AD (83)"
+  const outsideAdMatch = trimmed.match(/^(Fora do AD|Outside AD|Fuera de AD)\s*\((\d+)\)$/i);
+  if (outsideAdMatch) {
+    const num = outsideAdMatch[2];
+    if (locale === "pt-BR") return `Fora do AD (${num})`;
+    if (locale === "en-US") return `Outside AD (${num})`;
+    if (locale === "es-ES") return `Fuera de AD (${num})`;
+  }
+  const inAdMatch = trimmed.match(/^(No AD|In AD|En AD)\s*\((\d+)\)$/i);
+  if (inAdMatch) {
+    const num = inAdMatch[2];
+    if (locale === "pt-BR") return `No AD (${num})`;
+    if (locale === "en-US") return `In AD (${num})`;
+    if (locale === "es-ES") return `En AD (${num})`;
   }
 
   return null;
