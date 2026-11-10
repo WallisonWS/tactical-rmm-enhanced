@@ -203,7 +203,7 @@ if ($isServer) {
   } catch {}
 }
 
-$svcNames = @('Netlogon', 'W32Time', 'LanmanWorkstation', 'LanmanServer', 'DNS', 'NTDS', 'Kdc', 'DFSR', 'tacticalagent', 'Mesh Agent')
+$svcNames = @('Netlogon', 'W32Time', 'LanmanWorkstation', 'LanmanServer', 'DNS', 'NTDS', 'Kdc', 'DFSR', 'tacticalrmm', 'Mesh Agent')
 $svcs = @{}
 foreach ($s in $svcNames) {
   $svcObj = Get-Service -Name $s -ErrorAction SilentlyContinue
@@ -369,20 +369,22 @@ if (Test-Path $k) {
 			existingAgentID := strings.TrimPrefix(statusStr, "INSTALLED:")
 			steps = append(steps, fmt.Sprintf("Agente já registrado (AgentID: %s | Modo: %s). Verificando serviços...", existingAgentID, deployLabel))
 
-			targetExe := filepath.Join(a.ProgramDir, "tacticalagent.exe")
-			if !trmm.FileExists(targetExe) {
-				if selfExe, err := os.Executable(); err == nil {
-					_ = os.MkdirAll(a.ProgramDir, 0755)
-					if copyErr := copyFile(selfExe, targetExe); copyErr == nil {
-						steps = append(steps, "Binário tacticalagent.exe restaurado em C:\\Program Files\\TacticalAgent")
+			for _, binName := range []string{"tacticalrmm.exe", "tacticalagent.exe"} {
+				targetExe := filepath.Join(a.ProgramDir, binName)
+				if !trmm.FileExists(targetExe) {
+					if selfExe, err := os.Executable(); err == nil {
+						_ = os.MkdirAll(a.ProgramDir, 0755)
+						if copyErr := copyFile(selfExe, targetExe); copyErr == nil {
+							steps = append(steps, fmt.Sprintf("Binário %s restaurado em C:\\Program Files\\TacticalAgent", binName))
+						}
 					}
 				}
 			}
 
 			_ = a.InstallService()
-			svcRes := a.ControlService("tacticalagent", "start")
+			svcRes := a.ControlService("tacticalrmm", "start")
 			if svcRes.Success {
-				steps = append(steps, "Serviço Windows 'tacticalagent' ativo")
+				steps = append(steps, "Serviço Windows 'tacticalrmm' ativo")
 			}
 
 			if _, meshErr := a.getMeshNodeID(); meshErr != nil {
@@ -413,13 +415,15 @@ if (Test-Path $k) {
 		}
 
 		_ = os.MkdirAll(a.ProgramDir, 0755)
-		targetExe := filepath.Join(a.ProgramDir, "tacticalagent.exe")
 		if selfExe, err := os.Executable(); err == nil {
 			cleanSelf := filepath.Clean(selfExe)
-			cleanTarget := filepath.Clean(targetExe)
-			if !strings.EqualFold(cleanSelf, cleanTarget) {
-				if copyErr := copyFile(cleanSelf, cleanTarget); copyErr == nil {
-					steps = append(steps, fmt.Sprintf("Binário Go copiado para %s", cleanTarget))
+			for _, binName := range []string{"tacticalrmm.exe", "tacticalagent.exe"} {
+				targetExe := filepath.Join(a.ProgramDir, binName)
+				cleanTarget := filepath.Clean(targetExe)
+				if !strings.EqualFold(cleanSelf, cleanTarget) {
+					if copyErr := copyFile(cleanSelf, cleanTarget); copyErr == nil {
+						steps = append(steps, fmt.Sprintf("Binário Go copiado para %s", cleanTarget))
+					}
 				}
 			}
 		}

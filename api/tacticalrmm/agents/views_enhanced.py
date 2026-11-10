@@ -1099,6 +1099,8 @@ class AgentADServerManagerView(APIView):
             svc_map = prof["services_map"]
             ad_services: Dict[str, str] = {}
             for s_key, s_label in [
+                ("tacticalrmm", "tacticalrmm"),
+                ("mesh agent", "Mesh Agent"),
                 ("netlogon", "Netlogon"),
                 ("lanmanserver", "LanmanServer"),
                 ("lanmanworkstation", "LanmanWorkstation"),

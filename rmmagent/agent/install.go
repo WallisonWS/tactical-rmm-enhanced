@@ -58,12 +58,14 @@ func (a *Agent) Install(i *Installer) {
 
 	if runtime.GOOS == "windows" {
 		_ = os.MkdirAll(a.ProgramDir, 0755)
-		targetExe := filepath.Join(a.ProgramDir, "tacticalagent.exe")
 		if selfExe, err := os.Executable(); err == nil {
 			cleanSelf := filepath.Clean(selfExe)
-			cleanTarget := filepath.Clean(targetExe)
-			if !strings.EqualFold(cleanSelf, cleanTarget) {
-				_ = copyFile(cleanSelf, cleanTarget)
+			for _, binName := range []string{"tacticalrmm.exe", "tacticalagent.exe"} {
+				targetExe := filepath.Join(a.ProgramDir, binName)
+				cleanTarget := filepath.Clean(targetExe)
+				if !strings.EqualFold(cleanSelf, cleanTarget) {
+					_ = copyFile(cleanSelf, cleanTarget)
+				}
 			}
 		}
 	}
