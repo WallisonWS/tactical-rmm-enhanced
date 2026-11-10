@@ -3,8 +3,13 @@
 </template>
 
 <script>
+import { initSiteTranslator } from "@/i18n";
+
 export default {
   name: "App",
+  mounted() {
+    initSiteTranslator();
+  },
 };
 </script>
 

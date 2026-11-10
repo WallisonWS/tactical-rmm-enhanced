@@ -5,8 +5,12 @@
         <q-card
           v-bind:style="$q.screen.lt.sm ? { width: '80%' } : { width: '30%' }"
         >
+          <q-card-section class="row items-center justify-between q-pb-none">
+            <div class="text-caption text-grey">Tactical RMM Enhanced</div>
+            <LanguageSwitcher />
+          </q-card-section>
           <q-card-section>
-            <div class="text-center q-pt-lg">
+            <div class="text-center q-pt-sm">
               <div class="col text-h4 ellipsis">Tactical RMM</div>
             </div>
           </q-card-section>
@@ -118,6 +122,7 @@ import { ref, reactive, onMounted } from "vue";
 import { type QForm, useQuasar } from "quasar";
 import { useAuthStore } from "@/stores/auth";
 import { useRouter } from "vue-router";
+import LanguageSwitcher from "@/components/LanguageSwitcher.vue";
 import {
   openSSOProviderRedirect,
   getSSOConfig,

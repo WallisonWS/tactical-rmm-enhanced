@@ -1,4 +1,5 @@
 import { ref, computed } from "vue";
+import { installSiteWideTranslator, translateDomSubtree } from "./domTranslator";
 
 export type SupportedLocale = "pt-BR" | "en-US" | "es-ES";
 
@@ -799,6 +800,13 @@ export function setLocale(locale: SupportedLocale) {
   if (typeof window !== "undefined" && window.localStorage) {
     window.localStorage.setItem(STORAGE_KEY, locale);
   }
+  if (typeof document !== "undefined" && document.body) {
+    translateDomSubtree(document.body, locale);
+  }
+}
+
+export function initSiteTranslator() {
+  installSiteWideTranslator(currentLocale);
 }
 
 export function t(key: string, fallback?: string): string {
@@ -807,6 +815,7 @@ export function t(key: string, fallback?: string): string {
 }
 
 export function useI18n() {
+  initSiteTranslator();
   const activeLocaleOption = computed(
     () => SUPPORTED_LOCALES.find((l) => l.code === currentLocale.value) || SUPPORTED_LOCALES[0],
   );
