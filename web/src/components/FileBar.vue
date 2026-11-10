@@ -149,45 +149,59 @@
             </q-list>
           </q-menu>
         </q-btn>
-        <!-- integrations -->
+        <!-- reports -->
         <q-btn size="md" dense no-caps flat :label="t('filebar.reporting')">
           <q-menu auto-close>
-            <q-list
-              v-if="
-                $integrations &&
-                $integrations.fileBarIntegrations &&
-                $integrations.fileBarIntegrations.length > 0
-              "
-              dense
-              style="min-width: 100px"
-            >
+            <q-list dense style="min-width: 240px">
               <q-item
-                v-for="integration in $integrations.fileBarIntegrations"
-                :key="integration.name"
-                @click="
-                  integration.type === 'dialog'
-                    ? $q.dialog({ component: integration.component })
-                    : undefined
-                "
-                :to="integration.type === 'route' ? integration.uri : undefined"
                 clickable
                 v-close-popup
+                @click="openFleetReports('all')"
               >
-                <q-item-section>{{ integration.name }}</q-item-section>
+                <q-item-section side>
+                  <q-icon name="assessment" size="xs" color="primary" />
+                </q-item-section>
+                <q-item-section>Central de Relatórios &amp; Inventário Geral</q-item-section>
               </q-item>
-            </q-list>
-            <q-list v-else dense style="min-width: 100px">
               <q-item
                 clickable
                 v-close-popup
-                @click="
-                  notifyWarning(
-                    'Reporting feature requires a Tier 2 or higher sponsorship. Please check the docs for more info.',
-                    10000,
-                  )
-                "
+                @click="openFleetReports('ad_compliance')"
               >
-                <q-item-section>Reporting Manager</q-item-section>
+                <q-item-section side>
+                  <q-icon name="domain" size="xs" color="teal-5" />
+                </q-item-section>
+                <q-item-section>Relatório Active Directory (AD vs. Workgroup)</q-item-section>
+              </q-item>
+              <q-item
+                clickable
+                v-close-popup
+                @click="openFleetReports('outside_ad')"
+              >
+                <q-item-section side>
+                  <q-icon name="domain_disabled" size="xs" color="amber-8" />
+                </q-item-section>
+                <q-item-section>Relatório Computadores Fora do AD</q-item-section>
+              </q-item>
+              <q-item
+                clickable
+                v-close-popup
+                @click="openFleetReports('patches_reboot')"
+              >
+                <q-item-section side>
+                  <q-icon name="system_update" size="xs" color="info" />
+                </q-item-section>
+                <q-item-section>Relatório Patches &amp; Reboot Pendente</q-item-section>
+              </q-item>
+              <q-item
+                clickable
+                v-close-popup
+                @click="openFleetReports('offline_audit')"
+              >
+                <q-item-section side>
+                  <q-icon name="cloud_off" size="xs" color="warning" />
+                </q-item-section>
+                <q-item-section>Relatório Computadores Offline / Vencidos</q-item-section>
               </q-item>
             </q-list>
           </q-menu>
@@ -251,6 +265,18 @@
       <q-dialog v-model="showCodeSign">
         <CodeSign @close="showCodeSign = false" />
       </q-dialog>
+      <!-- Fleet Reports Modal -->
+      <q-dialog
+        v-model="showFleetReportsModal"
+        maximized
+        transition-show="slide-up"
+        transition-hide="slide-down"
+      >
+        <FleetReportsModal
+          :initialReportType="fleetReportType"
+          @close="showFleetReportsModal = false"
+        />
+      </q-dialog>
     </q-bar>
   </div>
 </template>
@@ -276,6 +302,7 @@ import DeploymentTable from "@/components/clients/DeploymentTable.vue";
 import ServerMaintenance from "@/components/modals/core/ServerMaintenance.vue";
 import CodeSign from "@/components/modals/coresettings/CodeSign.vue";
 import PermissionsManager from "@/components/accounts/PermissionsManager.vue";
+import FleetReportsModal from "@/components/modals/reports/FleetReportsModal.vue";
 import { t } from "@/i18n";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -291,6 +318,7 @@ export default {
     AdminManager,
     ServerMaintenance,
     CodeSign,
+    FleetReportsModal,
   },
   data() {
     return {
@@ -300,6 +328,8 @@ export default {
       showAdminManager: false,
       showInstallAgent: false,
       showCodeSign: false,
+      showFleetReportsModal: false,
+      fleetReportType: "all",
     };
   },
   computed: {
@@ -309,6 +339,10 @@ export default {
   },
   methods: {
     t,
+    openFleetReports(reportType = "all") {
+      this.fleetReportType = reportType;
+      this.showFleetReportsModal = true;
+    },
     clearCache() {
       this.$axios
         .get("/core/clearcache/")

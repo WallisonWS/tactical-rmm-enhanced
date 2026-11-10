@@ -42,7 +42,7 @@
       <q-item-section>VNC</q-item-section>
     </q-item>
 
-    <q-item clickable v-ripple :disable="urlActions.length === 0">
+    <q-item clickable v-ripple>
       <q-item-section side>
         <q-icon size="xs" name="open_in_new" />
       </q-item-section>
@@ -51,7 +51,7 @@
         <q-icon name="keyboard_arrow_right" />
       </q-item-section>
       <q-menu auto-close anchor="top end" self="top start">
-        <q-list>
+        <q-list dense style="min-width: 220px">
           <q-item
             v-for="action in urlActions"
             :key="action.id"
@@ -63,6 +63,18 @@
             "
           >
             <q-item-section>{{ action.name }}</q-item-section>
+          </q-item>
+          <q-item
+            v-if="urlActions.length === 0"
+            dense
+            clickable
+            v-close-popup
+            @click="openGlobalSettingsModal"
+          >
+            <q-item-section side>
+              <q-icon size="xs" name="settings" color="primary" />
+            </q-item-section>
+            <q-item-section>Cadastrar Ações de URL (Configurações Globais)</q-item-section>
           </q-item>
         </q-list>
       </q-menu>
@@ -82,7 +94,7 @@
       <q-item-section>{{ t("menu.runScript") }}</q-item-section>
     </q-item>
 
-    <q-item clickable v-ripple :disable="favoriteScripts.length === 0">
+    <q-item clickable v-ripple>
       <q-item-section side>
         <q-icon size="xs" name="star" />
       </q-item-section>
@@ -91,7 +103,7 @@
         <q-icon name="keyboard_arrow_right" />
       </q-item-section>
       <q-menu auto-close anchor="top end" self="top start">
-        <q-list>
+        <q-list dense style="min-width: 220px">
           <q-item
             v-for="script in favoriteScripts"
             :key="script.value"
@@ -101,6 +113,18 @@
             @click="showRunScript(agent, script.value)"
           >
             <q-item-section>{{ script.label }}</q-item-section>
+          </q-item>
+          <q-item
+            v-if="favoriteScripts.length === 0"
+            dense
+            clickable
+            v-close-popup
+            @click="openScriptManagerModal"
+          >
+            <q-item-section side>
+              <q-icon size="xs" name="star" color="amber" />
+            </q-item-section>
+            <q-item-section>Marcar Scripts Favoritos (Gerenciador de Scripts)</q-item-section>
           </q-item>
         </q-list>
       </q-menu>
@@ -336,6 +360,9 @@ import RebootLater from "@/components/modals/agents/RebootLater.vue";
 import EditAgent from "@/components/modals/agents/EditAgent.vue";
 import SendCommand from "@/components/modals/agents/SendCommand.vue";
 import RunScript from "@/components/modals/agents/RunScript.vue";
+import ScriptManager from "@/components/scripts/ScriptManager.vue";
+import EditCoreSettings from "@/components/modals/coresettings/EditCoreSettings.vue";
+import DialogWrapper from "@/components/ui/DialogWrapper.vue";
 import IntegrationsContextMenu from "@/components/ui/IntegrationsContextMenu.vue";
 import ConfirmYesDialog from "@/components/agents/ConfirmYesDialog.vue";
 
@@ -403,6 +430,25 @@ export default {
           agent,
           script,
         },
+      });
+    }
+
+    function openScriptManagerModal() {
+      $q.dialog({
+        component: DialogWrapper,
+        componentProps: {
+          vuecomponent: ScriptManager,
+          dialogProps: {
+            fullWidth: true,
+            fullHeight: true,
+          },
+        },
+      });
+    }
+
+    function openGlobalSettingsModal() {
+      $q.dialog({
+        component: EditCoreSettings,
       });
     }
 
@@ -714,6 +760,8 @@ export default {
       runURLAction,
       showSendCommand,
       showRunScript,
+      openScriptManagerModal,
+      openGlobalSettingsModal,
       getFavoriteScripts,
       toggleMaintenance,
       runPatchStatusScan,
