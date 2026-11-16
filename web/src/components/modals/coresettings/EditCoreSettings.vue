@@ -1,96 +1,68 @@
 <template>
-  <q-card style="min-width: 60vw">
+  <q-card style="min-width: 68vw; max-width: 92vw; max-height: 92vh">
     <q-splitter v-model="splitterModel">
       <template v-slot:before>
         <q-tabs dense v-model="tab" vertical class="text-primary">
-          <q-tab name="general" label="General" />
-          <q-tab name="emailalerts" label="Email Alerts" />
-          <q-tab name="smsalerts" label="SMS Alerts" />
+          <q-tab name="general" label="Geral" />
+          <q-tab name="themes" label="Temas & Paletas" />
+          <q-tab name="emailalerts" label="Alertas por E-mail" />
+          <q-tab name="smsalerts" label="Alertas por SMS" />
           <q-tab name="meshcentral" label="MeshCentral" />
-          <q-tab name="customfields" label="Custom Fields" />
-          <q-tab name="keystore" label="Key Store" />
-          <q-tab name="urlactions" label="URL Actions" />
+          <q-tab name="customfields" label="Campos Personalizados" />
+          <q-tab name="keystore" label="Cofre de Chaves" />
+          <q-tab name="urlactions" label="Ações de URL" />
           <q-tab name="webhooks" label="Web Hooks" />
-          <q-tab name="retention" label="Retention" />
-          <q-tab name="apikeys" label="API Keys" />
+          <q-tab name="retention" label="Retenção de Dados" />
+          <q-tab name="apikeys" label="Chaves de API" />
           <q-tab name="sso" label="Single Sign-On (SSO)" />
-          <q-tab name="schedules" label="Schedules" />
-          <!-- <q-tab name="openai" label="Open AI" /> -->
+          <q-tab name="schedules" label="Agendamentos" />
+          <q-tab name="openai" label="Inteligência Artificial (IA)" />
         </q-tabs>
       </template>
       <template v-slot:after>
-        <q-form @submit.prevent="editSettings">
-          <q-card-section class="row items-center">
-            <div class="text-h6">Global Settings</div>
+        <q-form @submit.prevent="editSettings" @validation-error="onValidationError">
+          <q-card-section class="row items-center q-py-sm">
+            <div class="text-h6">Configurações Globais</div>
             <q-space />
             <q-btn icon="close" flat round dense v-close-popup />
           </q-card-section>
-          <q-scroll-area :thumb-style="thumbStyle" style="height: 60vh">
+          <q-scroll-area
+            :thumb-style="thumbStyle"
+            style="height: 68vh; max-height: calc(92vh - 136px); min-height: 360px"
+          >
             <q-tab-panels
               v-model="tab"
               animated
+              class="q-pb-md"
               transition-prev="jump-up"
               transition-next="jump-up"
             >
               <!-- general -->
               <q-tab-panel name="general">
-                <div class="text-subtitle2">General</div>
+                <div class="text-subtitle2">Configurações Gerais</div>
                 <q-separator />
                 <q-card-section class="row">
                   <q-checkbox
                     v-model="settings.agent_auto_update"
-                    label="Enable agent automatic self update"
+                    label="Habilitar atualização automática dos agentes"
                   >
-                    <q-tooltip> Runs at 35mins past every hour </q-tooltip>
+                    <q-tooltip> Executa automaticamente a cada hora </q-tooltip>
                   </q-checkbox>
-                </q-card-section>
-                <q-card-section v-if="!hosted" class="row">
-                  <q-checkbox
-                    v-model="settings.enable_server_scripts"
-                    label="Enable server side scripts"
-                  >
-                    <q-tooltip
-                      >Allow running scripts on TRMM server for alert
-                      failure/resolve actions</q-tooltip
-                    >
-                  </q-checkbox>
-                  <q-btn
-                    size="sm"
-                    round
-                    dense
-                    flat
-                    icon="warning"
-                    @click="
-                      openURL(
-                        'https://docs.tacticalrmm.com/functions/permissions/#permissions-with-extra-security-implications',
-                      )
-                    "
-                  >
-                  </q-btn>
-                </q-card-section>
-                <q-card-section v-if="!hosted" class="row">
-                  <q-checkbox
-                    v-model="settings.enable_server_webterminal"
-                    label="Enable web terminal"
-                  >
-                    <q-tooltip>Enable the web terminal</q-tooltip>
-                  </q-checkbox>
-                  <q-btn
-                    size="sm"
-                    roundenable_server_webterminal
-                    dense
-                    flat
-                    icon="warning"
-                    @click="
-                      openURL(
-                        'https://docs.tacticalrmm.com/functions/permissions/#permissions-with-extra-security-implications',
-                      )
-                    "
-                  >
-                  </q-btn>
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Default agent timezone:</div>
+                  <q-checkbox
+                    v-model="settings.enable_server_scripts"
+                    label="Habilitar execução de scripts no servidor (Server-Side Scripts)"
+                  />
+                </q-card-section>
+                <q-card-section class="row">
+                  <q-checkbox
+                    v-model="settings.enable_server_webterminal"
+                    label="Habilitar Terminal Web do Servidor e CLI em Massa (>_)"
+                  />
+                </q-card-section>
+                <q-card-section class="row">
+                  <div class="col-4">Fuso horário padrão dos agentes:</div>
                   <div class="col-2"></div>
                   <tactical-dropdown
                     filterable
@@ -103,7 +75,7 @@
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Default date format:</div>
+                  <div class="col-4">Formato de data padrão:</div>
                   <div class="col-2"></div>
                   <q-input
                     outlined
@@ -124,13 +96,13 @@
                           )
                         "
                       >
-                        <q-tooltip>Click to see formatting options</q-tooltip>
+                        <q-tooltip>Ver opções de formatação</q-tooltip>
                       </q-btn>
                     </template>
                   </q-input>
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Default server policy:</div>
+                  <div class="col-4">Política padrão para Servidores:</div>
                   <div class="col-2"></div>
                   <q-select
                     clearable
@@ -145,7 +117,7 @@
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Default workstation policy:</div>
+                  <div class="col-4">Política padrão para Estações de Trabalho:</div>
                   <div class="col-2"></div>
                   <q-select
                     clearable
@@ -160,7 +132,7 @@
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Default alert template:</div>
+                  <div class="col-4">Modelo de alerta padrão:</div>
                   <div class="col-2"></div>
                   <q-select
                     clearable
@@ -176,24 +148,24 @@
                 </q-card-section>
                 <q-card-section class="row">
                   <div class="col-4 flex items-center">
-                    Receive notifications on:
+                    Receber notificações em:
                   </div>
                   <div class="col-2"></div>
                   <q-checkbox
                     dense
                     v-model="settings.notify_on_info_alerts"
                     class="col-3"
-                    label="Informational Alerts"
+                    label="Alertas Informativos"
                   />
                   <q-checkbox
                     dense
                     v-model="settings.notify_on_warning_alerts"
                     class="col-3"
-                    label="Warning Alerts"
+                    label="Alertas de Aviso"
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Agent Debug Level:</div>
+                  <div class="col-4">Nível de Depuração do Agente:</div>
                   <div class="col-2"></div>
                   <q-select
                     emit-value
@@ -208,20 +180,21 @@
                 </q-card-section>
                 <q-card-section class="row">
                   <div class="col-4">
-                    Clear faults on agents that haven't checked in after (days):
+                    Limpar falhas de agentes sem resposta após (dias):
                   </div>
                   <div class="col-2"></div>
                   <q-input
-                    hint="Setting this value to 0 disables this feature"
+                    hint="Definir como 0 desativa esta função"
                     outlined
                     dense
+                    type="number"
                     v-model.number="settings.clear_faults_days"
                     class="col-6"
-                    :rules="[(val) => val >= 0 || 'Minimum is 0']"
+                    :rules="[(val) => (val !== null && val !== '' && Number(val) >= 0) || 'Mínimo é 0']"
                   />
                 </q-card-section>
                 <q-card-section class="row items-start content-between">
-                  <div class="col-6">Terminal Experience</div>
+                  <div class="col-6">Experiência do Terminal</div>
                   <div class="col-6">
                     <q-option-group
                       class="q-gutter-lg"
@@ -234,7 +207,7 @@
                   </div>
                 </q-card-section>
                 <q-card-section class="row items-start content-between">
-                  <div class="col-6">File Browser Experience</div>
+                  <div class="col-6">Experiência do Gerenciador de Arquivos</div>
                   <div class="col-6">
                     <q-option-group
                       class="q-gutter-lg"
@@ -247,7 +220,7 @@
                   </div>
                 </q-card-section>
                 <q-card-section class="row items-start content-between">
-                  <div class="col-6">Windows Default Terminal</div>
+                  <div class="col-6">Terminal Padrão do Windows</div>
                   <div class="col-6">
                     <q-option-group
                       class="q-gutter-lg"
@@ -263,20 +236,19 @@
                       class="q-mt-md"
                       dense
                       outlined
-                      placeholder="Enter custom shell path"
+                      placeholder="Informe o caminho do shell personalizado"
                       bottom-slots
                     >
                       <template v-slot:hint>
                         <span style="font-size: 1.2em">
-                          Enter custom shell path (e.g. C:\Program
-                          Files\PowerShell\7\pwsh.exe)
+                          Ex.: C:\Program Files\PowerShell\7\pwsh.exe
                         </span>
                       </template>
                     </q-input>
                   </div>
                 </q-card-section>
                 <q-card-section class="row items-start content-between">
-                  <div class="col-6">Linux Default Terminal</div>
+                  <div class="col-6">Terminal Padrão do Linux</div>
                   <div class="col-6">
                     <q-option-group
                       class="q-gutter-lg"
@@ -292,12 +264,12 @@
                       class="q-mt-md"
                       dense
                       outlined
-                      placeholder="Enter custom shell path (e.g. /usr/bin/fish)"
+                      placeholder="Informe o caminho do shell (ex.: /usr/bin/fish)"
                     />
                   </div>
                 </q-card-section>
                 <q-card-section class="row items-start content-between">
-                  <div class="col-6">macOS Default Terminal</div>
+                  <div class="col-6">Terminal Padrão do macOS</div>
                   <div class="col-6">
                     <q-option-group
                       class="q-gutter-lg"
@@ -313,16 +285,16 @@
                       class="q-mt-md"
                       dense
                       outlined
-                      placeholder="Enter custom shell path (e.g. /bin/zsh)"
+                      placeholder="Informe o caminho do shell (ex.: /bin/zsh)"
                     />
                   </div>
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Reset Patch Policy on Agents:</div>
+                  <div class="col-4">Redefinir Política de Patches nos Agentes:</div>
                   <div class="col-2"></div>
                   <q-btn
                     color="negative"
-                    label="Reset"
+                    label="Redefinir"
                     @click="showResetPatchPolicy"
                   />
                 </q-card-section>
@@ -377,21 +349,21 @@
                   </div>
                 </q-card-section>
                 <!-- smtp -->
-                <div class="text-subtitle2">SMTP Settings</div>
+                <div class="text-subtitle2">Configurações SMTP</div>
                 <q-separator />
                 <q-card-section class="row">
-                  <div class="col-2">From email:</div>
+                  <div class="col-2">E-mail remetente:</div>
                   <div class="col-4"></div>
                   <q-input
                     outlined
                     dense
                     v-model="settings.smtp_from_email"
                     class="col-6 q-pa-none"
-                    :rules="[(val) => isValidEmail(val) || 'Invalid email']"
+                    :rules="[(val) => !val || isValidEmail(val) || 'E-mail inválido']"
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-2">From name:</div>
+                  <div class="col-2">Nome remetente:</div>
                   <div class="col-4"></div>
                   <q-input
                     outlined
@@ -401,7 +373,7 @@
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-2">Host:</div>
+                  <div class="col-2">Servidor (Host):</div>
                   <div class="col-4"></div>
                   <q-input
                     outlined
@@ -411,7 +383,7 @@
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-2">Port:</div>
+                  <div class="col-2">Porta:</div>
                   <div class="col-4"></div>
                   <q-input
                     dense
@@ -420,7 +392,7 @@
                     filled
                     class="q-pa-none"
                     :rules="[
-                      (val) => (val > 0 && val <= 65535) || 'Invalid Port',
+                      (val) => !val || (Number(val) > 0 && Number(val) <= 65535) || 'Porta inválida',
                     ]"
                   />
                 </q-card-section>
@@ -551,10 +523,10 @@
               </q-tab-panel>
               <!-- meshcentral -->
               <q-tab-panel name="meshcentral">
-                <div class="text-subtitle2">MeshCentral Settings</div>
+                <div class="text-subtitle2">Configurações MeshCentral</div>
                 <q-separator />
                 <q-card-section class="row" v-if="!hosted">
-                  <div class="col-4">Username:</div>
+                  <div class="col-4">Usuário Mesh:</div>
                   <div class="col-2"></div>
                   <q-input
                     dense
@@ -563,9 +535,9 @@
                     class="col-6"
                     :rules="[
                       (val) =>
-                        (val == val.toLowerCase() &&
-                          val != val.toUpperCase()) ||
-                        'Username must be all lowercase',
+                        !val ||
+                        !/[A-Z]/.test(String(val)) ||
+                        'O usuário deve ser todo em minúsculas',
                     ]"
                   />
                 </q-card-section>
@@ -676,69 +648,81 @@
               <!-- retention -->
               <q-tab-panel name="retention">
                 <q-card-section class="row">
-                  <div class="col-4">Check History (days):</div>
+                  <div class="col-4">Histórico de Verificações (dias):</div>
                   <div class="col-2"></div>
                   <q-input
                     dense
                     outlined
-                    v-model="settings.check_history_prune_days"
+                    type="number"
+                    v-model.number="settings.check_history_prune_days"
+                    :rules="[(val) => (val !== null && val !== '' && Number(val) >= 0) || 'Mínimo é 0']"
                     class="col-6"
-                    hint="Setting this value to 0 disables this feature"
+                    hint="Definir como 0 desativa esta função"
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Resolved Alerts (days):</div>
+                  <div class="col-4">Alertas Resolvidos (dias):</div>
                   <div class="col-2"></div>
                   <q-input
                     dense
                     outlined
-                    v-model="settings.resolved_alerts_prune_days"
+                    type="number"
+                    v-model.number="settings.resolved_alerts_prune_days"
+                    :rules="[(val) => (val !== null && val !== '' && Number(val) >= 0) || 'Mínimo é 0']"
                     class="col-6"
-                    hint="Setting this value to 0 disables this feature"
+                    hint="Definir como 0 desativa esta função"
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Agent History (days):</div>
+                  <div class="col-4">Histórico de Agentes (dias):</div>
                   <div class="col-2"></div>
                   <q-input
                     dense
                     outlined
-                    v-model="settings.agent_history_prune_days"
+                    type="number"
+                    v-model.number="settings.agent_history_prune_days"
+                    :rules="[(val) => (val !== null && val !== '' && Number(val) >= 0) || 'Mínimo é 0']"
                     class="col-6"
-                    hint="Setting this value to 0 disables this feature"
+                    hint="Definir como 0 desativa esta função"
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Debug Logs (days):</div>
+                  <div class="col-4">Logs de Depuração (dias):</div>
                   <div class="col-2"></div>
                   <q-input
                     dense
                     outlined
-                    v-model="settings.debug_log_prune_days"
+                    type="number"
+                    v-model.number="settings.debug_log_prune_days"
+                    :rules="[(val) => (val !== null && val !== '' && Number(val) >= 0) || 'Mínimo é 0']"
                     class="col-6"
-                    hint="Setting this value to 0 disables this feature"
+                    hint="Definir como 0 desativa esta função"
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Audit Logs (days):</div>
+                  <div class="col-4">Logs de Auditoria (dias):</div>
                   <div class="col-2"></div>
                   <q-input
                     dense
                     outlined
-                    v-model="settings.audit_log_prune_days"
+                    type="number"
+                    v-model.number="settings.audit_log_prune_days"
+                    :rules="[(val) => (val !== null && val !== '' && Number(val) >= 0) || 'Mínimo é 0']"
                     class="col-6"
-                    hint="Setting this value to 0 disables this feature"
+                    hint="Definir como 0 desativa esta função"
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Report History (days):</div>
+                  <div class="col-4">Histórico de Relatórios (dias):</div>
                   <div class="col-2"></div>
                   <q-input
                     dense
                     outlined
-                    v-model="settings.report_history_prune_days"
+                    type="number"
+                    v-model.number="settings.report_history_prune_days"
+                    :rules="[(val) => (val !== null && val !== '' && Number(val) >= 0) || 'Mínimo é 0']"
                     class="col-6"
-                    hint="Setting this value to 0 disables this feature"
+                    hint="Definir como 0 desativa esta função"
                   />
                 </q-card-section>
               </q-tab-panel>
@@ -752,17 +736,65 @@
                 <SSOProvidersTable />
               </q-tab-panel>
 
+              <!-- themes & palettes -->
+              <q-tab-panel name="themes">
+                <div class="text-subtitle2 q-mb-xs">Temas &amp; Paletas de Cores</div>
+                <q-separator class="q-mb-md" />
+                <div class="row q-col-gutter-md">
+                  <div
+                    v-for="pal in themePalettes"
+                    :key="pal.id"
+                    class="col-12 col-md-6"
+                  >
+                    <q-card
+                      bordered
+                      flat
+                      class="cursor-pointer q-pa-sm"
+                      :style="{
+                        borderColor: activePalette === pal.id ? pal.primary : 'rgba(255,255,255,0.18)',
+                        borderWidth: activePalette === pal.id ? '2px' : '1px',
+                      }"
+                      @click="choosePalette(pal.id)"
+                    >
+                      <div class="row items-center justify-between q-mb-xs">
+                        <div class="text-weight-bold">{{ pal.name }}</div>
+                        <q-badge v-if="activePalette === pal.id" color="positive">
+                          Ativo
+                        </q-badge>
+                      </div>
+                      <div
+                        class="row no-wrap"
+                        style="height: 36px; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.15)"
+                      >
+                        <div
+                          v-for="(hex, i) in pal.swatches"
+                          :key="i"
+                          :style="{ backgroundColor: hex, flex: 1 }"
+                          class="column justify-end items-center q-pb-xs"
+                        >
+                          <span
+                            style="font-size: 9px; font-family: monospace; background: rgba(0,0,0,0.55); color: #fff; padding: 1px 3px; border-radius: 3px"
+                          >
+                            {{ hex }}
+                          </span>
+                        </div>
+                      </div>
+                    </q-card>
+                  </div>
+                </div>
+              </q-tab-panel>
+
               <!-- schedules -->
               <q-tab-panel name="schedules">
                 <ScheduleTable />
               </q-tab-panel>
 
               <!-- Open AI -->
-              <!-- <q-tab-panel name="openai">
-                <div class="text-subtitle2">Open AI</div>
+              <q-tab-panel name="openai">
+                <div class="text-subtitle2">Inteligência Artificial (OpenAI / LLM)</div>
                 <q-separator />
                 <q-card-section class="row">
-                  <div class="col-4">API Key:</div>
+                  <div class="col-4">Chave de API (API Key):</div>
                   <div class="col-2"></div>
                   <q-input
                     dense
@@ -772,33 +804,16 @@
                   />
                 </q-card-section>
                 <q-card-section class="row">
-                  <div class="col-4">Open AI Model:</div>
+                  <div class="col-4">Modelo de IA:</div>
                   <div class="col-2"></div>
                   <q-input
                     dense
                     outlined
                     v-model="settings.open_ai_model"
                     class="col-6"
-                  >
-                    <template v-slot:after>
-                      <q-btn
-                        round
-                        dense
-                        flat
-                        icon="info"
-                        size="sm"
-                        @click="
-                          openURL(
-                            'https://platform.openai.com/docs/models/overview'
-                          )
-                        "
-                      >
-                        <q-tooltip>Click to see available options</q-tooltip>
-                      </q-btn>
-                    </template>
-                  </q-input>
+                  />
                 </q-card-section>
-              </q-tab-panel> -->
+              </q-tab-panel>
             </q-tab-panels>
           </q-scroll-area>
           <q-card-section class="row items-center">
@@ -808,15 +823,16 @@
                 tab === 'emailalerts' ||
                 tab === 'smsalerts' ||
                 tab === 'meshcentral' ||
-                tab === 'retention'
+                tab === 'retention' ||
+                tab === 'openai'
               "
-              label="Save"
+              label="Salvar"
               color="primary"
               type="submit"
             />
             <q-btn
               v-show="tab === 'emailalerts'"
-              label="Save and Test Email"
+              label="Salvar e Testar E-mail"
               color="primary"
               type="submit"
               class="q-ml-md"
@@ -824,7 +840,7 @@
             />
             <q-btn
               v-show="tab === 'smsalerts'"
-              label="Save and Test SMS"
+              label="Salvar e Testar SMS"
               color="primary"
               type="submit"
               class="q-ml-md"
@@ -848,6 +864,7 @@ import APIKeysTable from "@/components/core/APIKeysTable.vue";
 import SSOProvidersTable from "@/ee/sso/components/SSOProvidersTable.vue";
 import TacticalDropdown from "@/components/ui/TacticalDropdown.vue";
 import ScheduleTable from "@/core/settings/components/ScheduleTable.vue";
+import { THEME_PALETTES, currentPaletteId, applyThemePalette } from "@/utils/themePalettes";
 
 export default {
   name: "EditCoreSettings",
@@ -864,6 +881,7 @@ export default {
   mixins: [mixins],
   data() {
     return {
+      themePalettes: THEME_PALETTES,
       ready: false,
       policies: [],
       settings: {},
@@ -891,19 +909,22 @@ export default {
     };
   },
   computed: {
+    activePalette() {
+      return currentPaletteId.value;
+    },
     hosted() {
-      return this.$store.state.hosted;
+      return false;
     },
     terminalModeOptions() {
       return [
-        { label: "Use new terminal", value: "new" },
-        { label: "Use legacy terminal", value: "legacy" },
+        { label: "Usar novo terminal", value: "new" },
+        { label: "Usar terminal clássico", value: "legacy" },
       ];
     },
     fileBrowserModeOptions() {
       return [
-        { label: "Use new file browser", value: "new" },
-        { label: "Use legacy file browser", value: "legacy" },
+        { label: "Usar novo gerenciador de arquivos", value: "new" },
+        { label: "Usar gerenciador clássico", value: "legacy" },
       ];
     },
     windowsShellOptions() {
@@ -934,13 +955,25 @@ export default {
     },
   },
   methods: {
+    choosePalette(id) {
+      applyThemePalette(id);
+      this.notifySuccess("Paleta de cores aplicada com sucesso!");
+    },
     openURL(url) {
       openURL(url);
     },
     getCoreSettings() {
       this.$axios.get("/core/settings/").then((r) => {
-        this.settings = r.data;
-        this.allTimezones = Object.freeze(r.data.all_timezones);
+        const data = r.data || {};
+        data.email_alert_recipients = Array.isArray(data.email_alert_recipients)
+          ? data.email_alert_recipients
+          : [];
+        data.sms_alert_recipients = Array.isArray(data.sms_alert_recipients)
+          ? data.sms_alert_recipients
+          : [];
+        if (!data.open_ai_model) data.open_ai_model = "gpt-4o-mini";
+        this.settings = data;
+        this.allTimezones = Object.freeze(data.all_timezones || []);
         this.ready = true;
       });
     },
@@ -1032,15 +1065,38 @@ export default {
       );
       this.settings.sms_alert_recipients = removed;
     },
+    onValidationError() {
+      this.emailTest = false;
+      this.smsTest = false;
+      this.notifyError("Verifique os campos obrigatórios ou inválidos antes de salvar.");
+    },
     editSettings() {
       this.$q.loading.show();
-      delete this.settings.all_timezones;
+      const payload = { ...this.settings };
+      delete payload.all_timezones;
+      const intFields = [
+        "clear_faults_days",
+        "smtp_port",
+        "check_history_prune_days",
+        "resolved_alerts_prune_days",
+        "agent_history_prune_days",
+        "debug_log_prune_days",
+        "audit_log_prune_days",
+        "report_history_prune_days",
+      ];
+      for (const key of intFields) {
+        if (payload[key] === "" || payload[key] === null || payload[key] === undefined) {
+          payload[key] = key === "smtp_port" ? 25 : 0;
+        } else {
+          payload[key] = Number(payload[key]);
+        }
+      }
       this.$axios
-        .put("/core/settings/", this.settings)
+        .put("/core/settings/", payload)
         .then(() => {
           this.$q.loading.hide();
           if (this.emailTest) {
-            this.$q.loading.show({ message: "Sending test email..." });
+            this.$q.loading.show({ message: "Enviando e-mail de teste..." });
             this.$axios
               .post("/core/emailtest/")
               .then((r) => {
@@ -1054,7 +1110,7 @@ export default {
                 this.$q.loading.hide();
               });
           } else if (this.smsTest) {
-            this.$q.loading.show({ message: "Sending test SMS..." });
+            this.$q.loading.show({ message: "Enviando SMS de teste..." });
             this.$axios
               .post("/core/smstest/")
               .then((r) => {
@@ -1070,11 +1126,20 @@ export default {
           } else {
             this.$emit("close");
             this.$store.dispatch("getDashInfo", false);
-            this.notifySuccess("Settings were edited!");
+            this.notifySuccess("Configurações salvas com sucesso!");
           }
         })
-        .catch(() => {
+        .catch((err) => {
+          this.emailTest = false;
+          this.smsTest = false;
           this.$q.loading.hide();
+          const detail = err?.response?.data;
+          if (detail && typeof detail === "object") {
+            const firstMsg = Object.entries(detail)
+              .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`)
+              .join(" | ");
+            if (firstMsg) this.notifyError(firstMsg);
+          }
         });
     },
   },

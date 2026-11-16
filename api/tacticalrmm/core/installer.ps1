@@ -1,4 +1,4 @@
-# Tactical RMM Enhanced — Windows & Windows Server Agent Installer
+﻿# Tactical RMM Enhanced — Windows & Windows Server Agent Installer
 $innosetup = 'innosetupchange'
 $api = '"apichange"'
 $clientid = 'clientchange'
@@ -8,23 +8,33 @@ $power = powerchange
 $rdp = rdpchange
 $ping = pingchange
 $insecure = insecurechange
+$bankingSafe = bankingchange
 $auth = '"tokenchange"'
 $downloadlink = 'downloadchange'
 $apilink = $downloadlink.split('/')
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
 
-$serviceName = 'tacticalagent'
 $targetDir = 'C:\Program Files\TacticalAgent'
-$targetExe = Join-Path $targetDir 'tacticalagent.exe'
+$targetExe = Join-Path $targetDir 'tacticalrmm.exe'
+if (-not (Test-Path $targetExe)) {
+    $altExe = Join-Path $targetDir 'tacticalagent.exe'
+    if (Test-Path $altExe) { $targetExe = $altExe }
+}
 
-$existingSvc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+$existingSvc = Get-Service -Name 'tacticalrmm' -ErrorAction SilentlyContinue
+if (-not $existingSvc) { $existingSvc = Get-Service -Name 'tacticalagent' -ErrorAction SilentlyContinue }
 $regExists = Test-Path 'HKLM:\SOFTWARE\TacticalRMM'
 
 if ($existingSvc -and $regExists -and (Test-Path $targetExe)) {
     Write-Host ('Tactical RMM Enhanced Agent is already installed.')
     if ($existingSvc.Status -ne 'Running') {
-        Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+        Start-Service -Name $existingSvc.Name -ErrorAction SilentlyContinue
+    }
+    if ($bankingSafe -eq 1 -and ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1)) {
+        Set-Service -Name 'Mesh Agent' -StartupType Manual -ErrorAction SilentlyContinue
+        Stop-Service -Name 'Mesh Agent' -Force -ErrorAction SilentlyContinue
+        Stop-Process -Name 'MeshAgent*' -Force -ErrorAction SilentlyContinue
     }
     exit 0
 }
@@ -68,7 +78,16 @@ if ($connectresult.TcpTestSucceeded -eq $true -or $X -ge 3) {
 
         Start-Process -FilePath $downloadedFile -ArgumentList ('/VERYSILENT /SUPPRESSMSGBOXES') -Wait
         Start-Sleep -s 5
+        if (-not (Test-Path $targetExe)) {
+            $altExe = Join-Path $targetDir 'tacticalagent.exe'
+            if (Test-Path $altExe) { $targetExe = $altExe }
+        }
         Start-Process -FilePath $targetExe -ArgumentList $installArgs -NoNewWindow -Wait
+        if ($bankingSafe -eq 1 -and ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1)) {
+            Set-Service -Name 'Mesh Agent' -StartupType Manual -ErrorAction SilentlyContinue
+            Stop-Service -Name 'Mesh Agent' -Force -ErrorAction SilentlyContinue
+            Stop-Process -Name 'MeshAgent*' -Force -ErrorAction SilentlyContinue
+        }
         exit 0
     }
     Catch {

@@ -1,7 +1,9 @@
 import { createStore } from "vuex";
-import { Screen, Dark, LoadingBar } from "quasar";
+import { Screen, LoadingBar } from "quasar";
 import axios from "axios";
 import { formatDate } from "@/utils/format";
+import { useDashboardStore } from "@/stores/dashboard";
+import { syncDarkModeWithSavedPalette } from "@/utils/themePalettes";
 
 export default function () {
   const Store = new createStore({
@@ -247,7 +249,12 @@ export default function () {
           commit("SET_CLIENT_TREE_SORT", data.client_tree_sort);
           commit("SET_CLIENT_SPLITTER", data.client_tree_splitter);
         }
-        Dark.set(data.dark_mode);
+        syncDarkModeWithSavedPalette(data.dark_mode);
+        try {
+          useDashboardStore().setAgentCounts(data);
+        } catch (e) {
+          // Ignore if called before Pinia is ready
+        }
         commit("setCurrentTRMMVersion", data.trmm_version);
         commit("setLatestTRMMVersion", data.latest_trmm_ver);
         commit("SET_AGENT_DBLCLICK_ACTION", data.dbl_click_action);

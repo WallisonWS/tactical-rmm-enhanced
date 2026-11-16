@@ -24,7 +24,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from agents.utils import get_agent_url
+from agents.utils import WINDOWS_MESH_BANKING_PAUSE_CMD, get_agent_url
 from core.models import CoreSettings
 from core.permissions import RunServerScriptPerms
 from core.tasks import sync_mesh_perms_task
@@ -526,20 +526,35 @@ class AgentMeshCentral(APIView):
         )
         core = get_core_settings()
 
-        # Ensure Mesh Agent service is started on Windows if it was stopped
+        # Ensure Mesh Agent service is started on Windows if it was stopped (e.g. Banking Compatibility Mode)
         if agent.plat == AgentPlat.WINDOWS:
             try:
                 asyncio.run(
                     agent.nats_cmd(
                         {
-                            "func": "winsvcaction",
-                            "payload": {"name": "mesh agent", "action": "start"},
+                            "func": "rawcmd",
+                            "timeout": 8,
+                            "payload": {
+                                "command": "Set-Service -Name 'Mesh Agent' -StartupType Manual -ErrorAction SilentlyContinue; Start-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue",
+                                "shell": "powershell",
+                            },
                         },
-                        wait=False,
+                        timeout=6,
                     )
                 )
             except Exception:
-                pass
+                try:
+                    asyncio.run(
+                        agent.nats_cmd(
+                            {
+                                "func": "winsvcaction",
+                                "payload": {"name": "mesh agent", "action": "start"},
+                            },
+                            wait=False,
+                        )
+                    )
+                except Exception:
+                    pass
 
         user = (
             request.user.mesh_user_id
@@ -568,14 +583,36 @@ class AgentMeshCentral(APIView):
             "terminal": terminal,
             "file": file,
             "status": agent.status,
+            "monitoring_type": agent.monitoring_type,
+            "plat": agent.plat,
             "client": agent.client.name,
             "site": agent.site.name,
         }
         return Response(ret)
 
-    # start mesh recovery
+    # start mesh recovery or pause mesh for banking compatibility
     def post(self, request, agent_id):
         agent = get_object_or_404(Agent, agent_id=agent_id)
+        if request.data.get("action") == "stop_mesh":
+            if agent.plat == AgentPlat.WINDOWS:
+                try:
+                    asyncio.run(
+                        agent.nats_cmd(
+                            {
+                                "func": "rawcmd",
+                                "timeout": 10,
+                                "payload": {
+                                    "command": WINDOWS_MESH_BANKING_PAUSE_CMD,
+                                    "shell": "powershell",
+                                },
+                            },
+                            wait=False,
+                        )
+                    )
+                except Exception:
+                    pass
+            return Response(f"Modo Banco ativado: Mesh Agent pausado com segurança em {agent.hostname}.")
+
         data = {"func": "recover", "payload": {"mode": "mesh"}}
         r = asyncio.run(agent.nats_cmd(data, timeout=90))
         if r != "ok":
@@ -803,13 +840,6 @@ def install_agent(request):
 
     insecure = getattr(settings, "TRMM_INSECURE", False)
 
-    if insecure and request.data["installMethod"] in {"exe"}:
-        return notify_error(
-            "Not available in insecure mode. Please use the 'Manual' or 'PowerShell' method."
-        )
-
-    # TODO rework this ghetto validation hack
-    # https://github.com/amidaware/tacticalrmm/issues/1461
     try:
         int(request.data["expires"])
     except ValueError:
@@ -818,9 +848,12 @@ def install_agent(request):
     client_id = request.data["client"]
     site_id = request.data["site"]
     version = settings.LATEST_AGENT_VER
-    goarch = request.data["goarch"]
-    plat = request.data["plat"]
+    goarch = request.data.get("goarch") or GoArch.AMD64
+    plat = request.data.get("plat") or AgentPlat.WINDOWS
     distro = request.data.get("distro", "universal")
+    raw_agent_type = request.data.get("agenttype") or "workstation"
+    effective_agent_type = "workstation" if raw_agent_type == "both" else raw_agent_type
+    banking_safe = bool(request.data.get("banking_safe", raw_agent_type in ("workstation", "both")))
 
     if not _has_perm_on_site(request.user, site_id):
         raise PermissionDenied()
@@ -828,17 +861,125 @@ def install_agent(request):
     codesign_token, is_valid = token_is_valid()
     effective_token = codesign_token if is_valid else ""
 
-    inno = f"tacticalagent-v{version}-{plat}-{goarch}"
-    if plat == AgentPlat.WINDOWS:
-        inno += ".exe"
-
-    download_url = get_agent_url(goarch=goarch, plat=plat, token=effective_token)
-
     installer_user = User.objects.filter(is_installer_user=True).first()
 
     _, token = AuthToken.objects.create(
         user=installer_user, expiry=dt.timedelta(hours=int(request.data["expires"]))
     )
+
+    if plat == "universal_all" or request.data.get("installMethod") == "universal_bundle":
+        win_url = get_agent_url(goarch=GoArch.AMD64, plat=AgentPlat.WINDOWS, token=effective_token)
+        linux_url_amd64 = get_agent_url(goarch=GoArch.AMD64, plat=AgentPlat.LINUX, token=effective_token)
+        linux_url_arm64 = get_agent_url(goarch=GoArch.ARM64, plat=AgentPlat.LINUX, token=effective_token)
+        mac_url_amd64 = get_agent_url(goarch=GoArch.AMD64, plat=AgentPlat.DARWIN, token=effective_token)
+        mac_url_arm64 = get_agent_url(goarch=GoArch.ARM64, plat=AgentPlat.DARWIN, token=effective_token)
+        api_url = request.data["api"]
+        insec_flag = " --insecure" if insecure else ""
+        rdp_flag = " --rdp" if int(request.data.get("rdp", 1)) else ""
+        ping_flag = " --ping" if int(request.data.get("ping", 1)) else ""
+        power_flag = " --power" if int(request.data.get("power", 0)) else ""
+
+        win_banking_suffix = (
+            f"; if ($atype -eq 'workstation') {{ {WINDOWS_MESH_BANKING_PAUSE_CMD} }}"
+            if banking_safe
+            else ""
+        )
+
+        win_ps_oneliner = (
+            f"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; "
+            f"$osType = if ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1) {{ 'workstation' }} else {{ 'server' }}; "
+            f"$atype = if ('{raw_agent_type}' -eq 'both') {{ $osType }} else {{ '{effective_agent_type}' }}; "
+            f"$dst = \"$env:TEMP\\tacticalagent-setup.exe\"; "
+            f"Invoke-WebRequest -Uri '{win_url}' -OutFile $dst -UseBasicParsing; "
+            f"Start-Process -FilePath $dst -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait; "
+            f"Start-Sleep -Seconds 5; "
+            f"& 'C:\\Program Files\\TacticalAgent\\tacticalrmm.exe' -m install --api '{api_url}' --client-id {client_id} --site-id {site_id} --agent-type $atype --auth '{token}' -silent{rdp_flag}{ping_flag}{power_flag}{insec_flag}"
+            f"{win_banking_suffix}"
+        )
+
+        linux_universal_cmd = (
+            f"ARCH=$(uname -m); "
+            f"if [ \"$ARCH\" = \"aarch64\" ] || [ \"$ARCH\" = \"arm64\" ]; then URL='{linux_url_arm64}'; else URL='{linux_url_amd64}'; fi; "
+            f"if [ '{raw_agent_type}' = 'both' ]; then "
+            f"if [ -n \"$DISPLAY\" ] || [ -n \"$WAYLAND_DISPLAY\" ] || dpkg -l 2>/dev/null | grep -qE 'ubuntu-desktop|gnome-shell|kde-plasma' || rpm -qa 2>/dev/null | grep -qE 'gnome-shell|plasma-workspace'; then ATYPE='workstation'; else ATYPE='server'; fi; "
+            f"else ATYPE='{effective_agent_type}'; fi; "
+            f"sudo curl -fsSLk -o /usr/local/bin/tacticalagent \"$URL\" && "
+            f"sudo chmod +x /usr/local/bin/tacticalagent && "
+            f"sudo /usr/local/bin/tacticalagent -m install --api '{api_url}' --client-id {client_id} --site-id {site_id} --agent-type \"$ATYPE\" --auth '{token}'{insec_flag}"
+        )
+
+        macos_universal_cmd = (
+            f"ARCH=$(uname -m); "
+            f"if [ \"$ARCH\" = \"arm64\" ]; then URL='{mac_url_arm64}'; BIN='tacticalagent-v{version}-darwin-arm64'; else URL='{mac_url_amd64}'; BIN='tacticalagent-v{version}-darwin-amd64'; fi; "
+            f"ATYPE='{effective_agent_type}'; "
+            f"curl -fsSLk -o \"/tmp/$BIN\" \"$URL\" && "
+            f"chmod +x \"/tmp/$BIN\" && "
+            f"sudo \"/tmp/$BIN\" -m install --api '{api_url}' --client-id {client_id} --site-id {site_id} --agent-type \"$ATYPE\" --auth '{token}'{insec_flag}"
+        )
+
+        ad_gpo_banking_snippet = (
+            f"\nif ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1) {{\n"
+            f"    {WINDOWS_MESH_BANKING_PAUSE_CMD}\n"
+            "}"
+            if banking_safe
+            else ""
+        )
+
+        ad_gpo_script = f"""$ErrorActionPreference = "SilentlyContinue"
+$Domain = ([System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().DomainName)
+if (-not $Domain) {{ $Domain = "SEU-DOMINIO" }}
+$Folder = "C:\\ProgramData\\TacticalRMM"
+$NetInstaller = "\\\\$Domain\\NETLOGON\\TacticalRMM\\tactical-agent.exe"
+$LocalInstaller = "$Folder\\tactical-agent.exe"
+
+New-Item -Path $Folder -ItemType Directory -Force | Out-Null
+
+$Tactical = Get-Service -Name "tacticalrmm" -ErrorAction SilentlyContinue
+if ($Tactical) {{
+    if ($Tactical.Status -ne 'Running') {{ Start-Service -Name "tacticalrmm" -ErrorAction SilentlyContinue }}{ad_gpo_banking_snippet}
+    exit 0
+}}
+
+if (Test-Path $NetInstaller) {{
+    Copy-Item -Path $NetInstaller -Destination $LocalInstaller -Force
+    Start-Process -FilePath $LocalInstaller -ArgumentList "-silent" -Wait -NoNewWindow
+    Remove-Item $LocalInstaller -Force -ErrorAction SilentlyContinue{ad_gpo_banking_snippet}
+}} else {{
+    {win_ps_oneliner}
+}}
+"""
+
+        return Response(
+            {
+                "universal": True,
+                "token": token,
+                "expires": int(request.data["expires"]),
+                "agenttype": raw_agent_type,
+                "cmd": win_ps_oneliner,
+                "url": win_url,
+                "windows": {
+                    "url": win_url,
+                    "ps_oneliner": win_ps_oneliner,
+                    "ad_gpo_script": ad_gpo_script,
+                },
+                "linux": {
+                    "url_amd64": linux_url_amd64,
+                    "url_arm64": linux_url_arm64,
+                    "cmd": linux_universal_cmd,
+                },
+                "macos": {
+                    "url_amd64": mac_url_amd64,
+                    "url_arm64": mac_url_arm64,
+                    "cmd": macos_universal_cmd,
+                },
+            }
+        )
+
+    inno = f"tacticalagent-v{version}-{plat}-{goarch}"
+    if plat == AgentPlat.WINDOWS:
+        inno += ".exe"
+
+    download_url = get_agent_url(goarch=goarch, plat=plat, token=effective_token)
 
     install_flags = [
         "-m",
@@ -850,7 +991,7 @@ def install_agent(request):
         "--site-id",
         site_id,
         "--agent-type",
-        request.data["agenttype"],
+        effective_agent_type,
         "--auth",
         token,
     ]
@@ -861,7 +1002,7 @@ def install_agent(request):
         return generate_winagent_exe(
             client=client_id,
             site=site_id,
-            agent_type=request.data["agenttype"],
+            agent_type=effective_agent_type,
             rdp=request.data["rdp"],
             ping=request.data["ping"],
             power=request.data["power"],
@@ -877,7 +1018,7 @@ def install_agent(request):
         return generate_linux_install(
             client=str(client_id),
             site=str(site_id),
-            agent_type=request.data["agenttype"],
+            agent_type=effective_agent_type,
             arch=goarch,
             token=token,
             api=request.data["api"],
@@ -946,11 +1087,12 @@ def install_agent(request):
             "clientchange": str(client_id),
             "sitechange": str(site_id),
             "apichange": request.data["api"],
-            "atypechange": request.data["agenttype"],
+            "atypechange": effective_agent_type,
             "powerchange": str(request.data["power"]),
             "rdpchange": str(request.data["rdp"]),
             "pingchange": str(request.data["ping"]),
             "insecurechange": "1" if insecure else "0",
+            "bankingchange": "1" if banking_safe else "0",
             "downloadchange": download_url,
             "tokenchange": token,
         }

@@ -7,11 +7,9 @@ For details, see: https://license.tacticalrmm.com/ee
 import pyotp
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from allauth.socialaccount.models import SocialApp
-from django.core.exceptions import PermissionDenied
 
 from accounts.models import Role
 from core.tasks import sync_mesh_perms_task
-from core.utils import token_is_valid
 from tacticalrmm.logger import logger
 from tacticalrmm.utils import get_core_settings
 
@@ -33,10 +31,6 @@ class TacticalSocialAdapter(DefaultSocialAccountAdapter):
         return user
 
     def is_open_for_signup(self, request, sociallogin):
-        _, valid = token_is_valid()
-        if not valid:
-            raise PermissionDenied()
-
         return super().is_open_for_signup(request, sociallogin)
 
     def list_providers(self, request):

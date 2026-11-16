@@ -11,17 +11,11 @@ For details, see: https://license.tacticalrmm.com/ee
       <q-space />
       <q-btn
         size="sm"
-        color="grey-5"
+        color="primary"
         icon="fas fa-plus"
-        text-color="black"
-        label="Add OIDC Provider"
+        label="Adicionar Provedor OIDC / SSO"
         @click="addSSOProvider"
-        :disable="!ssoSettings.sso_enabled"
-      >
-        <q-tooltip v-if="!ssoSettings.sso_enabled" class="text-caption"
-          >Enable SSO in the settings to allow adding a provider.</q-tooltip
-        >
-      </q-btn>
+      />
     </div>
     <q-separator />
     <q-table

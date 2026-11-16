@@ -128,11 +128,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, watch, onMounted } from "vue";
 import { fetchFleetExecutiveSummary, type FleetExecutiveSummary } from "@/api/enhanced";
+import { useDashboardStore } from "@/stores/dashboard";
 import { useI18n } from "@/i18n";
 
 const { t } = useI18n();
+const dashboardStore = useDashboardStore();
 const loading = ref(false);
 const summary = ref<FleetExecutiveSummary>({
   total_agents: 0,
@@ -166,6 +168,13 @@ async function loadSummary() {
     loading.value = false;
   }
 }
+
+watch(
+  () => dashboardStore.summaryVersion,
+  () => {
+    loadSummary();
+  },
+);
 
 onMounted(() => {
   loadSummary();

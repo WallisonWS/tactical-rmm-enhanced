@@ -120,7 +120,7 @@ class CoreSettings(BaseAuditModel):
         max_length=255, blank=True, default="gpt-3.5-turbo"
     )
     enable_server_scripts = models.BooleanField(default=True)
-    enable_server_webterminal = models.BooleanField(default=False)
+    enable_server_webterminal = models.BooleanField(default=True)
     notify_on_info_alerts = models.BooleanField(default=False)
     notify_on_warning_alerts = models.BooleanField(default=True)
 
@@ -185,13 +185,6 @@ class CoreSettings(BaseAuditModel):
             # fail safe to not lock out user logons
             if not self.sso_enabled and self.block_local_user_logon:
                 self.block_local_user_logon = False
-
-            if old_settings.sso_enabled != self.sso_enabled and self.sso_enabled:
-                from core.utils import token_is_valid
-
-                _, valid = token_is_valid()
-                if not valid:
-                    raise ValidationError("")
 
         super().save(*args, **kwargs)
 
@@ -259,25 +252,17 @@ class CoreSettings(BaseAuditModel):
 
     @property
     def server_scripts_enabled(self) -> bool:
-        if (
-            getattr(settings, "HOSTED", False)
-            or getattr(settings, "TRMM_DISABLE_SERVER_SCRIPTS", False)
-            or getattr(settings, "DEMO", False)
-        ):
+        if getattr(settings, "DEMO", False):
             return False
 
-        return self.enable_server_scripts
+        return True
 
     @property
     def web_terminal_enabled(self) -> bool:
-        if (
-            getattr(settings, "HOSTED", False)
-            or getattr(settings, "TRMM_DISABLE_WEB_TERMINAL", False)
-            or getattr(settings, "DEMO", False)
-        ):
+        if getattr(settings, "DEMO", False):
             return False
 
-        return self.enable_server_webterminal
+        return True
 
     def send_mail(
         self,

@@ -22,7 +22,7 @@ from rest_framework.serializers import (
 )
 from rest_framework.views import APIView
 
-from accounts.utils import is_root_user
+from accounts.utils import is_root_user, is_superuser
 from core.tasks import sync_mesh_perms_task
 from logs.models import AuditLog
 from tacticalrmm.helpers import notify_error
@@ -76,7 +76,7 @@ class CheckCredsV2(KnoxLoginView):
 
         # block local logon if configured
         core_settings = get_core_settings()
-        if not user.is_superuser and core_settings.block_local_user_logon:
+        if not is_superuser(user) and core_settings.block_local_user_logon:
             return notify_error("Bad credentials")
 
         # if totp token not set modify response to notify frontend
@@ -105,7 +105,7 @@ class LoginViewV2(KnoxLoginView):
 
         # block local logon if configured
         core_settings = get_core_settings()
-        if not user.is_superuser and core_settings.block_local_user_logon:
+        if not is_superuser(user) and core_settings.block_local_user_logon:
             return notify_error("Bad credentials")
 
         if user.is_sso_user:

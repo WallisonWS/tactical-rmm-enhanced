@@ -238,14 +238,9 @@ class GetUpdateSSOSettings(APIView):
 
         core_settings = get_core_settings()
 
-        try:
-            core_settings.block_local_user_logon = data["block_local_user_logon"]
-            core_settings.sso_enabled = data["sso_enabled"]
-            core_settings.save(update_fields=["block_local_user_logon", "sso_enabled"])
-        except ValidationError:
-            return Response(
-                "This feature requires a Tier 1 or higher sponsorship: https://docs.tacticalrmm.com/sponsor",
-                status=status.HTTP_423_LOCKED,
-            )
-
+        core_settings.block_local_user_logon = bool(data.get("block_local_user_logon", False))
+        core_settings.sso_enabled = bool(data.get("sso_enabled", False))
+        if not core_settings.sso_enabled:
+            core_settings.block_local_user_logon = False
+        core_settings.save(update_fields=["block_local_user_logon", "sso_enabled"])
         return Response("ok")

@@ -1,5 +1,7 @@
 import axios from "axios";
 import { ref } from "vue";
+import { getBaseUrl } from "@/boot/axios";
+import { useAuthStore } from "@/stores/auth";
 
 export const fleetDomainMap = ref<Record<string, { part_of_domain: boolean; domain: string }>>({});
 export const fleetOutsideAdIds = ref<string[]>([]);
@@ -615,3 +617,77 @@ export async function runAgentLANDiscovery(
   });
   return data;
 }
+
+export interface FleetSyncResult {
+  status: string;
+  total: number;
+  online: number;
+  offline: number;
+  overdue: number;
+  reboot_needed: number;
+  recovered_count: number;
+  recovered_hostnames: string[];
+  deduplicated_count: number;
+  deduplicated_hostnames: string[];
+  timestamp: string;
+}
+
+export async function syncAndCleanupFleet(payload?: {
+  deduplicate?: boolean;
+  wake_overdue?: boolean;
+}): Promise<FleetSyncResult> {
+  const { data } = await axios.post("/agents/fleet-sync/", payload || {});
+  return data;
+}
+
+export interface FleetBulkCLIResultItem {
+  agent_id: string;
+  hostname: string;
+  client: string;
+  site: string;
+  plat: string;
+  success: boolean;
+  output: string;
+}
+
+export interface FleetBulkCLIResponse {
+  status: string;
+  total_targeted: number;
+  success_count: number;
+  failed_count: number;
+  results: FleetBulkCLIResultItem[];
+  timestamp: string;
+}
+
+export async function runFleetBulkCLI(payload: {
+  target?: string;
+  preset?: string;
+  shell?: string;
+  command?: string;
+  timeout?: number;
+  agent_ids?: string[];
+  only_online?: boolean;
+}): Promise<FleetBulkCLIResponse> {
+  const { data } = await axios.post("/agents/fleet-bulk-cli/", payload);
+  return data;
+}
+
+export async function pauseAgentMeshForBanking(agentId: string, keepalive = false): Promise<string> {
+  if (keepalive && typeof fetch !== "undefined") {
+    const token = useAuthStore().token;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers.Authorization = `Token ${token}`;
+    await fetch(`${getBaseUrl()}/agents/${agentId}/meshcentral/`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ action: "stop_mesh" }),
+      keepalive: true,
+      credentials: "include",
+    });
+    return "Modo Banco ativado";
+  }
+
+  const { data } = await axios.post(`/agents/${agentId}/meshcentral/`, { action: "stop_mesh" });
+  return typeof data === "string" ? data : "Modo Banco ativado com sucesso.";
+}
+

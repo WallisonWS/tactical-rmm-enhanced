@@ -15,6 +15,7 @@ from rest_framework.views import APIView
 
 from agents.models import Agent
 from agents.permissions import SendCMDPerms as SendCommandPerms
+from agents.utils import WINDOWS_MESH_BANKING_PAUSE_CMD
 from alerts.models import Alert
 from checks.models import CheckResult
 from core.models import CoreSettings
@@ -1870,3 +1871,293 @@ class AgentLANDiscoveryView(APIView):
         r["client_name"] = agent.client.name
         r["site_name"] = agent.site.name
         return Response(r)
+
+
+class FleetSyncAndCleanupView(APIView):
+    """
+    POST /agents/fleet-sync/
+    1) Pings all offline/overdue agents via NATS concurrently and updates last_seen for any live agent.
+    2) Deduplicates stale/reformatted duplicate hostnames in the same site when a newer online agent exists.
+    3) Clears Redis caches and returns updated real-time counts (total, online, offline, overdue, reboot).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request) -> Response:
+        deduplicate = bool(request.data.get("deduplicate", True))
+        wake_overdue = bool(request.data.get("wake_overdue", True))
+
+        all_agents = list(
+            Agent.objects.filter_by_role(request.user).select_related("site__client")
+        )
+        recovered_agents: list[str] = []
+        deduplicated_agents: list[str] = []
+
+        # 1. Ping offline/overdue agents via NATS to immediately mark reachable ones as online
+        if wake_overdue:
+            candidates = [a for a in all_agents if a.status != AGENT_STATUS_ONLINE]
+
+            async def _ping_candidates(agent_list: list[Agent]) -> list[Agent]:
+                sem = asyncio.Semaphore(35)
+                alive: list[Agent] = []
+
+                async def _check_one(ag: Agent) -> None:
+                    async with sem:
+                        with suppress(Exception):
+                            res = await ag.nats_cmd({"func": "ping"}, timeout=3)
+                            if res == "pong":
+                                alive.append(ag)
+                                with suppress(Exception):
+                                    await ag.nats_cmd({"func": "sync"}, wait=False)
+
+                await asyncio.gather(*[_check_one(a) for a in agent_list])
+                return alive
+
+            if candidates:
+                with suppress(Exception):
+                    alive_list = asyncio.run(_ping_candidates(candidates))
+                    now_ts = djangotime.now()
+                    for ag in alive_list:
+                        ag.last_seen = now_ts
+                        ag.save(update_fields=["last_seen"])
+                        recovered_agents.append(ag.hostname)
+
+        # 2. Deduplicate reformatted computers with identical hostname in the same site
+        if deduplicate:
+            refreshed = list(
+                Agent.objects.filter_by_role(request.user).select_related("site")
+            )
+            by_site_host: dict[tuple[int, str], list[Agent]] = {}
+            for ag in refreshed:
+                key = (ag.site_id, (ag.hostname or "").strip().lower())
+                if key[1]:
+                    by_site_host.setdefault(key, []).append(ag)
+
+            for (_, _), group in by_site_host.items():
+                if len(group) < 2:
+                    continue
+                # Sort so online agents and most recently seen come first
+                group.sort(
+                    key=lambda x: (
+                        1 if x.status == AGENT_STATUS_ONLINE else 0,
+                        x.last_seen or djangotime.datetime.min.replace(tzinfo=djangotime.utc),
+                    ),
+                    reverse=True,
+                )
+                primary = group[0]
+                if primary.status == AGENT_STATUS_ONLINE:
+                    for stale_dup in group[1:]:
+                        if stale_dup.status != AGENT_STATUS_ONLINE:
+                            deduplicated_agents.append(
+                                f"{stale_dup.hostname} ({stale_dup.agent_id[:8]})"
+                            )
+                            stale_dup.delete()
+
+        with suppress(Exception):
+            from core.utils import clear_entire_cache
+
+            clear_entire_cache()
+
+        final_agents = list(Agent.objects.filter_by_role(request.user))
+        online_cnt = sum(1 for a in final_agents if a.status == AGENT_STATUS_ONLINE)
+        offline_cnt = sum(1 for a in final_agents if a.status == "offline")
+        overdue_cnt = sum(1 for a in final_agents if a.status == AGENT_STATUS_OVERDUE)
+        reboot_cnt = sum(1 for a in final_agents if a.needs_reboot)
+
+        return Response(
+            {
+                "status": "ok",
+                "total": len(final_agents),
+                "online": online_cnt,
+                "offline": offline_cnt,
+                "overdue": overdue_cnt,
+                "reboot_needed": reboot_cnt,
+                "recovered_count": len(recovered_agents),
+                "recovered_hostnames": recovered_agents,
+                "deduplicated_count": len(deduplicated_agents),
+                "deduplicated_hostnames": deduplicated_agents,
+                "timestamp": djangotime.now().isoformat(),
+            }
+        )
+
+
+class FleetBulkCLIView(APIView):
+    """
+    POST /agents/fleet-bulk-cli/
+    Executes a command or preset action (e.g. Banking Compatibility Mode, Wallpaper Unlocker,
+    AD/GPO Sync, DNS/Spooler Reset, or custom PowerShell/CMD/Bash) across targeted agents in parallel.
+    """
+
+    permission_classes = [IsAuthenticated, SendCommandPerms]
+
+    PRESETS: Dict[str, Dict[str, str]] = {
+        "banking_mode_enable": {
+            "plat": "windows",
+            "shell": "powershell",
+            "command": (
+                f"{WINDOWS_MESH_BANKING_PAUSE_CMD}; "
+                "Write-Output 'MODO_BANCO_ATIVO: Monitoramento Tactical RMM 100% Online e Mesh Agent em Modo Sob Demanda (Sem bloqueio em sites de bancos/Warsaw/Topaz).'"
+            ),
+        },
+        "banking_mode_disable": {
+            "plat": "windows",
+            "shell": "powershell",
+            "command": (
+                "Set-Service -Name 'Mesh Agent' -StartupType Automatic -ErrorAction SilentlyContinue; "
+                "Start-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue; "
+                "Write-Output 'Mesh Agent restaurado para execucao continua Automatica.'"
+            ),
+        },
+        "clean_wallpaper_lock": {
+            "plat": "windows",
+            "shell": "powershell",
+            "command": (
+                "Remove-ItemProperty -Path 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name 'Wallpaper','WallpaperStyle' -ErrorAction SilentlyContinue; "
+                "Get-ChildItem 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue | ForEach-Object { "
+                "$s = $_.PSChildName; "
+                "Remove-ItemProperty -Path \"Registry::HKEY_USERS\\$s\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\" -Name 'Wallpaper','WallpaperStyle' -ErrorAction SilentlyContinue; "
+                "$d = \"Registry::HKEY_USERS\\$s\\Control Panel\\Desktop\"; "
+                "if (Test-Path $d) { "
+                "$w = (Get-ItemProperty -Path $d -Name 'WallPaper' -ErrorAction SilentlyContinue).WallPaper; "
+                "if ($w -like '*systemprofile*' -or $w -like '*Wallpapers*') { "
+                "Set-ItemProperty -Path $d -Name 'WallPaper' -Value 'C:\\Windows\\Web\\Wallpaper\\Windows\\img0.jpg' -ErrorAction SilentlyContinue "
+                "} } }; "
+                "Get-ChildItem 'C:\\Windows\\system32\\config\\systemprofile\\AppData\\Local' -Directory -ErrorAction SilentlyContinue | "
+                "ForEach-Object { Remove-Item -Path (Join-Path $_.FullName 'Wallpapers') -Recurse -Force -ErrorAction SilentlyContinue }; "
+                "gpupdate /force | Out-Null; "
+                "Write-Output 'Trava de Papel de Parede (Policy / systemprofile) removida com sucesso!'"
+            ),
+        },
+        "gpupdate_ad_sync": {
+            "plat": "windows",
+            "shell": "powershell",
+            "command": (
+                "ipconfig /flushdns | Out-Null; ipconfig /registerdns | Out-Null; gpupdate /force; "
+                "Write-Output 'DNS e Politicas do Active Directory (GPO) sincronizados com sucesso.'"
+            ),
+        },
+    }
+
+    def post(self, request) -> Response:
+        target = str(request.data.get("target") or "all").strip().lower()
+        preset = str(request.data.get("preset") or "").strip()
+        shell = str(request.data.get("shell") or "powershell").strip().lower()
+        command = str(request.data.get("command") or "").strip()
+        try:
+            timeout_sec = min(max(int(request.data.get("timeout") or 30), 5), 120)
+        except (TypeError, ValueError):
+            timeout_sec = 30
+        agent_ids = request.data.get("agent_ids") or []
+        only_online = bool(request.data.get("only_online", True))
+
+        if preset and preset in self.PRESETS:
+            p = self.PRESETS[preset]
+            shell = p["shell"]
+            command = p["command"]
+            if target == "all" and p.get("plat"):
+                target = p["plat"]
+
+        if not command:
+            return Response(
+                {"error": "Informe um comando ou selecione uma ação rápida."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = Agent.objects.filter_by_role(request.user).select_related("site__client")
+        if agent_ids and isinstance(agent_ids, list):
+            qs = qs.filter(agent_id__in=agent_ids)
+        elif target == "windows":
+            qs = qs.filter(plat="windows")
+        elif target == "linux":
+            qs = qs.filter(plat="linux")
+        elif target == "darwin":
+            qs = qs.filter(plat="darwin")
+        elif target == "servers":
+            qs = qs.filter(monitoring_type="server")
+        elif target == "workstations":
+            qs = qs.filter(monitoring_type="workstation")
+
+        agents_list = list(qs)
+        if only_online:
+            agents_list = [a for a in agents_list if a.status == AGENT_STATUS_ONLINE]
+
+        async def _exec_all(targets: list[Agent]) -> list[Dict[str, Any]]:
+            sem = asyncio.Semaphore(30)
+            results: list[Dict[str, Any]] = []
+
+            async def _run_one(ag: Agent) -> None:
+                async with sem:
+                    eff_shell = (
+                        "bash"
+                        if ag.plat in ("linux", "darwin")
+                        else (shell if shell in ("powershell", "cmd") else "powershell")
+                    )
+                    try:
+                        out = await ag.nats_cmd(
+                            {
+                                "func": "rawcmd",
+                                "timeout": timeout_sec,
+                                "payload": {
+                                    "command": command,
+                                    "shell": eff_shell,
+                                },
+                            },
+                            timeout=timeout_sec + 5,
+                        )
+                        ok = out not in ("timeout", "natsdown", "error")
+                        results.append(
+                            {
+                                "agent_id": ag.agent_id,
+                                "hostname": ag.hostname,
+                                "client": ag.site.client.name,
+                                "site": ag.site.name,
+                                "plat": ag.plat,
+                                "success": ok,
+                                "output": str(out).strip() if ok else f"Sem resposta ({out})",
+                            }
+                        )
+                    except Exception as exc:
+                        results.append(
+                            {
+                                "agent_id": ag.agent_id,
+                                "hostname": ag.hostname,
+                                "client": ag.site.client.name,
+                                "site": ag.site.name,
+                                "plat": ag.plat,
+                                "success": False,
+                                "output": str(exc),
+                            }
+                        )
+
+            await asyncio.gather(*[_run_one(a) for a in targets])
+            return results
+
+        exec_results = asyncio.run(_exec_all(agents_list)) if agents_list else []
+        exec_results.sort(key=lambda x: (not x["success"], x["hostname"]))
+        success_cnt = sum(1 for r in exec_results if r["success"])
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.EXEC_COMMAND,
+            message=f"{request.user.username} executou CLI em massa ({preset or shell}) em {len(agents_list)} agentes",
+            after_value={
+                "target": target,
+                "preset": preset,
+                "shell": shell,
+                "total_targeted": len(agents_list),
+                "success_count": success_cnt,
+            },
+        )
+
+        return Response(
+            {
+                "status": "ok",
+                "total_targeted": len(agents_list),
+                "success_count": success_cnt,
+                "failed_count": len(agents_list) - success_cnt,
+                "results": exec_results,
+                "timestamp": djangotime.now().isoformat(),
+            }
+        )
+

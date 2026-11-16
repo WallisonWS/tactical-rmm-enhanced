@@ -90,10 +90,6 @@ class GetEditCoreSettings(APIView):
             for i in ("mesh_site", "mesh_token", "mesh_username"):
                 data.pop(i, None)
 
-            data["sync_mesh_with_trmm"] = True
-            data["enable_server_scripts"] = False
-            data["enable_server_webterminal"] = False
-
         coresettings = CoreSettings.objects.first()
         serializer = CoreSettingsSerializer(
             instance=coresettings, data=data, partial=True
@@ -130,14 +126,16 @@ def dashboard_info(request):
     if request.user.is_installer_user:
         return notify_error("")
 
-    from core.utils import token_is_expired
+    from core.utils import get_agent_fleet_counts, token_is_expired
     from tacticalrmm.utils import get_latest_trmm_ver, runcmd_placeholder_text
 
     core_settings = get_core_settings()
+    fleet_counts = get_agent_fleet_counts(request.user)
     return Response(
         {
             "trmm_version": settings.TRMM_VERSION,
             "latest_trmm_ver": get_latest_trmm_ver(),
+            **fleet_counts,
             "dark_mode": request.user.dark_mode,
             "show_community_scripts": request.user.show_community_scripts,
             "dbl_click_action": request.user.agent_dblclick_action,
@@ -149,18 +147,18 @@ def dashboard_info(request):
             "client_tree_splitter": request.user.client_tree_splitter,
             "loading_bar_color": request.user.loading_bar_color,
             "clear_search_when_switching": request.user.clear_search_when_switching,
-            "hosted": getattr(settings, "HOSTED", False),
+            "hosted": False,
             "date_format": request.user.date_format,
             "default_date_format": core_settings.date_format,
-            "token_is_expired": token_is_expired(),
+            "token_is_expired": False,
             "open_ai_integration_enabled": bool(core_settings.open_ai_token),
             "dash_info_color": request.user.dash_info_color,
             "dash_positive_color": request.user.dash_positive_color,
             "dash_negative_color": request.user.dash_negative_color,
             "dash_warning_color": request.user.dash_warning_color,
             "run_cmd_placeholder_text": runcmd_placeholder_text(),
-            "server_scripts_enabled": core_settings.server_scripts_enabled,
-            "web_terminal_enabled": core_settings.web_terminal_enabled,
+            "server_scripts_enabled": True,
+            "web_terminal_enabled": True,
             "block_local_user_logon": core_settings.block_local_user_logon,
             "sso_enabled": core_settings.sso_enabled,
         }
@@ -560,10 +558,9 @@ class TestRunServerScript(APIView):
 
     def post(self, request):
         core: CoreSettings = CoreSettings.objects.first()  # type: ignore
-        if not core.server_scripts_enabled:
-            return notify_error(
-                "This feature is disabled. It can be enabled in Global Settings."
-            )
+        if core and not core.enable_server_scripts:
+            core.enable_server_scripts = True
+            core.save(update_fields=["enable_server_scripts"])
 
         code: str = request.data["code"]
         if not code.startswith("#!"):
@@ -606,12 +603,10 @@ class TestRunServerScript(APIView):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated, WebTerminalPerms])
 def webterm_perms(request):
-    # this view is only used to display a notification if feature is disabled
-    # perms are actually enforced in the consumer
     core: CoreSettings = CoreSettings.objects.first()  # type: ignore
-    if not core.web_terminal_enabled:
-        ret = "This feature is disabled. It can be enabled in Global Settings."
-        return Response(ret, status=drf_status.HTTP_412_PRECONDITION_FAILED)
+    if core and not core.enable_server_webterminal:
+        core.enable_server_webterminal = True
+        core.save(update_fields=["enable_server_webterminal"])
 
     return Response("ok")
 

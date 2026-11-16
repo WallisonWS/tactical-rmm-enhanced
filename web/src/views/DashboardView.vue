@@ -357,6 +357,20 @@
                 >
                   Fora do AD ({{ outsideAdCount }})
                 </q-chip>
+                <q-chip
+                  clickable
+                  dense
+                  size="12px"
+                  color="teal-7"
+                  text-color="white"
+                  icon="sync"
+                  @click="runFullFleetSync"
+                >
+                  Sincronizar 100%
+                  <q-tooltip>
+                    Verifica todos os agentes offline/vencidos via NATS em tempo real, remove duplicatas de máquinas formatadas e atualiza todos os contadores
+                  </q-tooltip>
+                </q-chip>
               </div>
 
               <q-space />
@@ -557,7 +571,8 @@ import AlertTemplateAdd from "@/components/modals/alerts/AlertTemplateAdd.vue";
 import IntegrationsContextMenu from "@/components/ui/IntegrationsContextMenu.vue";
 
 import { removeClient, removeSite } from "@/api/clients";
-import { fetchFleetExecutiveSummary, fleetDomainMap } from "@/api/enhanced";
+import { fetchFleetExecutiveSummary, fleetDomainMap, syncAndCleanupFleet } from "@/api/enhanced";
+import { useDashboardStore } from "@/stores/dashboard";
 import { t } from "@/i18n";
 
 export default {
@@ -749,8 +764,7 @@ export default {
   },
   watch: {
     search(newVal) {
-      if (newVal === "") this.clearFilter();
-      else if (newVal.length < this.filterTextLength) this.clearFilter();
+      if (newVal === "" || newVal === null) this.clearFilter();
     },
     selectedTree() {
       if (this.clearSearchWhenSwitching) this.clearFilter();
@@ -761,6 +775,21 @@ export default {
   },
   methods: {
     t,
+    async runFullFleetSync() {
+      this.$q.loading.show({ message: "Sincronizando 100% dos agentes via NATS e limpando duplicatas..." });
+      try {
+        const res = await syncAndCleanupFleet({ deduplicate: true, wake_overdue: true });
+        await this.$store.dispatch("refreshDashboard");
+        useDashboardStore().triggerSummaryRefresh();
+        this.notifySuccess(
+          `Sincronização concluída! Online: ${res.online} | Offline: ${res.offline} | Vencidos: ${res.overdue} (Reativados: ${res.recovered_count}, Duplicatas limpas: ${res.deduplicated_count})`,
+        );
+      } catch (e) {
+        this.$store.dispatch("refreshDashboard");
+      } finally {
+        this.$q.loading.hide();
+      }
+    },
     toggleClientSidebar() {
       if (this.clientTreeSplitter > 2) {
         this.savedSidebarWidth = this.clientTreeSplitter;
@@ -782,11 +811,11 @@ export default {
       this.$store.commit("SET_SPLITTER", this.innerModel);
     },
     setQuickFilter(token) {
-      if (this.search.trim() === token) {
+      if (this.search && this.search.trim() === token) {
         this.clearFilter();
       } else {
-        this.search = token + " ";
         this.filterTextLength = token.length;
+        this.search = token + " ";
       }
     },
     getTree() {
@@ -1108,6 +1137,19 @@ export default {
 
     // set initial value for agent table and agent tabs
     this.$store.commit("SET_SPLITTER", this.innerModel);
+
+    // Auto-refresh agent list & counters every 30s
+    this._dashSyncTimer = setInterval(() => {
+      this.$store.dispatch("getDashInfo", false);
+      this.$store.dispatch("loadAgents");
+      this.$store.dispatch("loadTree");
+      useDashboardStore().triggerSummaryRefresh();
+    }, 30000);
+  },
+  beforeUnmount() {
+    if (this._dashSyncTimer) {
+      clearInterval(this._dashSyncTimer);
+    }
   },
 };
 </script>

@@ -15,12 +15,9 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer, JsonWebsocketConsumer
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
-from django.db.models import F
-from django.utils import timezone as djangotime
 
-from agents.models import Agent
 from core.models import CoreSettings
-from tacticalrmm.constants import AgentMonType
+from core.utils import get_agent_fleet_counts
 from tacticalrmm.helpers import days_until_cert_expires
 from tacticalrmm.logger import logger
 
@@ -63,41 +60,11 @@ class DashInfo(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def get_dashboard_info(self):
-        total_server_agents_count = (
-            Agent.objects.filter_by_role(self.user)
-            .filter(monitoring_type=AgentMonType.SERVER)
-            .count()
-        )
-        offline_server_agents_count = (
-            Agent.objects.filter_by_role(self.user)
-            .filter(monitoring_type=AgentMonType.SERVER)
-            .filter(
-                last_seen__lt=djangotime.now()
-                - (djangotime.timedelta(minutes=1) * F("offline_time"))
-            )
-            .count()
-        )
-        total_workstation_agents_count = (
-            Agent.objects.filter_by_role(self.user)
-            .filter(monitoring_type=AgentMonType.WORKSTATION)
-            .count()
-        )
-        offline_workstation_agents_count = (
-            Agent.objects.filter_by_role(self.user)
-            .filter(monitoring_type=AgentMonType.WORKSTATION)
-            .filter(
-                last_seen__lt=djangotime.now()
-                - (djangotime.timedelta(minutes=1) * F("offline_time"))
-            )
-            .count()
-        )
+        counts = get_agent_fleet_counts(self.user)
         return {
             "action": "dashboard.agentcount",
             "data": {
-                "total_server_offline_count": offline_server_agents_count,
-                "total_workstation_offline_count": offline_workstation_agents_count,
-                "total_server_count": total_server_agents_count,
-                "total_workstation_count": total_workstation_agents_count,
+                **counts,
                 "days_until_cert_expires": (
                     days_until_cert_expires()
                     if not getattr(settings, "DEMO", False)
@@ -115,7 +82,7 @@ class DashInfo(AsyncJsonWebsocketConsumer):
             else:
                 await self.send_json(c)
             finally:
-                await asyncio.sleep(30)
+                await asyncio.sleep(10)
 
 
 class TerminalConsumer(JsonWebsocketConsumer):
@@ -172,9 +139,9 @@ class TerminalConsumer(JsonWebsocketConsumer):
             return
 
         core: CoreSettings = CoreSettings.objects.first()  # type: ignore
-        if not core.web_terminal_enabled:
-            self.close(4401)
-            return
+        if core and not core.enable_server_webterminal:
+            core.enable_server_webterminal = True
+            core.save(update_fields=["enable_server_webterminal"])
 
         if self.user.block_dashboard_login or not _has_perm(
             self.user, "can_use_webterm"

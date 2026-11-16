@@ -678,3 +678,12 @@ def normalize_file_browser_delete_results(raw_results) -> list:
             entry["error"] = str(raw["error"])
         results.append(entry)
     return results
+
+
+WINDOWS_MESH_BANKING_PAUSE_CMD = (
+    "Set-Service -Name 'tacticalrmm' -StartupType Automatic -ErrorAction SilentlyContinue; "
+    "Start-Service -Name 'tacticalrmm' -ErrorAction SilentlyContinue; "
+    "Set-Service -Name 'Mesh Agent' -StartupType Manual -ErrorAction SilentlyContinue; "
+    "Stop-Service -Name 'Mesh Agent' -Force -ErrorAction SilentlyContinue; "
+    "Stop-Process -Name 'MeshAgent*' -Force -ErrorAction SilentlyContinue"
+)

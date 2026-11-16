@@ -239,9 +239,9 @@ func (a *Agent) RepairMeshAndLink() map[string]interface{} {
 			actions = append(actions, "Processos Mesh Agent órfãos/conflitantes encerrados com segurança")
 		}
 
-		// 3. Start Mesh Agent service cleanly
+		// 3. Start Mesh Agent service cleanly (preserve Manual startup on workstations for banking compatibility)
 		err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
-			"Set-Service -Name 'Mesh Agent' -StartupType Automatic -ErrorAction SilentlyContinue; Start-Service -Name 'Mesh Agent' -ErrorAction Stop").Run()
+			"if ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) { Set-Service -Name 'Mesh Agent' -StartupType Automatic -ErrorAction SilentlyContinue } else { Set-Service -Name 'Mesh Agent' -StartupType Manual -ErrorAction SilentlyContinue }; Start-Service -Name 'Mesh Agent' -ErrorAction Stop").Run()
 		if err != nil {
 			_ = exec.Command("sc.exe", "start", "Mesh Agent").Run()
 			actions = append(actions, "Solicitada inicialização do serviço 'Mesh Agent' via SCM")

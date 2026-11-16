@@ -141,7 +141,7 @@
 
 <script>
 // composition imports
-import { ref, computed, watch, onMounted, defineAsyncComponent } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount, defineAsyncComponent } from "vue";
 import { useRoute } from "vue-router";
 import { useQuasar, useMeta } from "quasar";
 import {
@@ -150,6 +150,8 @@ import {
   fetchAgentFileBrowserDefaults,
 } from "@/api/agents";
 import { fetchDashboardInfo } from "@/api/core";
+import { pauseAgentMeshForBanking } from "@/api/enhanced";
+import { syncDarkModeWithSavedPalette } from "@/utils/themePalettes";
 
 // ui imports
 import ProcessManager from "@/components/agents/remotebg/ProcessManager.vue";
@@ -196,11 +198,13 @@ export default {
     let fileBrowserDefaultsPromise = null;
 
     const agent_id = computed(() => params.agent_id);
+    const isWinWorkstation = ref(false);
 
     async function getMeshURLs() {
       const data = await fetchAgentMeshCentralURLs(params.agent_id);
       terminal.value = data.terminal;
       file.value = data.file;
+      isWinWorkstation.value = data.monitoring_type === "workstation" && data.plat === "windows";
       useMeta({
         title: `${data.hostname} - ${data.client} - ${data.site} | Remote Background`,
       });
@@ -208,7 +212,7 @@ export default {
 
     async function getDashInfo() {
       const { dark_mode } = await fetchDashboardInfo();
-      $q.dark.set(dark_mode);
+      syncDarkModeWithSavedPalette(dark_mode);
       $q.loadingBar.setDefaults({ size: "0px" });
     }
 
@@ -319,11 +323,27 @@ export default {
       }
     });
 
+    function handlePageHide() {
+      if (isWinWorkstation.value) {
+        pauseAgentMeshForBanking(String(params.agent_id), true).catch(() => {});
+      }
+    }
+
     // vue lifecycle hooks
     onMounted(() => {
       getDashInfo();
       getMeshURLs();
       getTerminalDefaults();
+      if (typeof window !== "undefined") {
+        window.addEventListener("pagehide", handlePageHide);
+      }
+    });
+
+    onBeforeUnmount(() => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("pagehide", handlePageHide);
+      }
+      handlePageHide();
     });
 
     return {

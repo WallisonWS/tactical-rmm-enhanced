@@ -483,3 +483,25 @@ def run_server_script(
             os.remove(tmp_script_path)
 
     return stdout, stderr, execution_time, retcode
+
+
+def get_agent_fleet_counts(user) -> dict[str, int]:
+    """Return total and offline/overdue counts for servers and workstations visible to user."""
+    from django.db.models import F
+    from django.utils import timezone as djangotime
+    from tacticalrmm.constants import AgentMonType
+
+    Agent = apps.get_model("agents", "Agent")
+    qs = Agent.objects.filter_by_role(user)
+    now = djangotime.now()
+    cutoff = djangotime.timedelta(minutes=1) * F("offline_time")
+
+    servers = qs.filter(monitoring_type=AgentMonType.SERVER)
+    workstations = qs.filter(monitoring_type=AgentMonType.WORKSTATION)
+
+    return {
+        "total_server_count": servers.count(),
+        "total_server_offline_count": servers.filter(last_seen__lt=now - cutoff).count(),
+        "total_workstation_count": workstations.count(),
+        "total_workstation_offline_count": workstations.filter(last_seen__lt=now - cutoff).count(),
+    }

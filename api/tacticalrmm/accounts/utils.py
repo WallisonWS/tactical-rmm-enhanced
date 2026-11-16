@@ -21,4 +21,11 @@ def is_root_user(*, request: "HttpRequest", user: "User") -> bool:
 
 
 def is_superuser(user: "User") -> bool:
-    return user.role and getattr(user.role, "is_superuser")
+    """Return True when the user has Django superuser flag or a superuser RBAC role."""
+    if not user or not getattr(user, "is_authenticated", True):
+        return False
+    role = getattr(user, "role", None)
+    return bool(
+        getattr(user, "is_superuser", False)
+        or (role and getattr(role, "is_superuser", False))
+    )

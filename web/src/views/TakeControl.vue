@@ -23,6 +23,31 @@
         icon="refresh"
         @click="restartMeshService"
       />
+      <q-checkbox
+        v-if="isWorkstation"
+        v-model="autoPauseOnExit"
+        dense
+        dark
+        color="teal-4"
+        class="q-mr-md text-caption"
+        label="Auto-pausar Mesh ao sair"
+      >
+        <q-tooltip>
+          Ao fechar esta janela de controle remoto, pausa o Mesh Agent automaticamente na estação para não bloquear sites de bancos (Warsaw / Topaz)
+        </q-tooltip>
+      </q-checkbox>
+      <q-btn
+        class="q-mr-md"
+        color="teal-7"
+        size="sm"
+        label="Modo Banco (Pausar Mesh)"
+        icon="account_balance"
+        @click="pauseMeshForBanking"
+      >
+        <q-tooltip>
+          Coloca o Mesh Agent em repouso (Sob Demanda) para que o funcionário use sites de bancos sem bloqueio, mantendo o monitoramento Tactical RMM 100% Online
+        </q-tooltip>
+      </q-btn>
       <q-btn
         :color="dash_negative_color"
         size="sm"
@@ -46,24 +71,44 @@
 
 <script>
 // composition imports
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useStore } from "vuex";
 import { useRoute } from "vue-router";
 import { useMeta, useQuasar } from "quasar";
 import { fetchAgentMeshCentralURLs, sendAgentRecoverMesh, fetchAgent } from "@/api/agents";
 import { fetchDashboardInfo } from "@/api/core";
 import { sendAgentServiceAction } from "@/api/services";
-import { manageAgentRDP, downloadNativeRDPFile } from "@/api/enhanced";
+import { manageAgentRDP, downloadNativeRDPFile, pauseAgentMeshForBanking } from "@/api/enhanced";
+import { syncDarkModeWithSavedPalette } from "@/utils/themePalettes";
 import { notifySuccess, notifyError } from "@/utils/notify";
 
 export default {
   name: "TakeControl",
   setup() {
+    const isWorkstation = ref(false);
+    const autoPauseOnExit = ref(true);
+
+    function handlePageHide() {
+      if (isWorkstation.value && autoPauseOnExit.value) {
+        pauseAgentMeshForBanking(String(params.agent_id), true).catch(() => {});
+      }
+    }
+
     // vue lifecycle hooks
     onMounted(() => {
       dashInfo();
       getDashInfo();
       getMeshURLs();
+      if (typeof window !== "undefined") {
+        window.addEventListener("pagehide", handlePageHide);
+      }
+    });
+
+    onBeforeUnmount(() => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("pagehide", handlePageHide);
+      }
+      handlePageHide();
     });
 
     // quasar setup
@@ -104,6 +149,7 @@ export default {
         const data = await fetchAgentMeshCentralURLs(params.agent_id);
         control.value = data.control;
         status.value = data.status;
+        isWorkstation.value = data.monitoring_type === "workstation" && data.plat === "windows";
         agentHostname.value = data.hostname || "";
         useMeta({
           title: `${data.hostname} - ${data.client} - ${data.site} | Take Control`,
@@ -116,7 +162,7 @@ export default {
 
     async function getDashInfo() {
       const { dark_mode, loading_bar_color } = await fetchDashboardInfo();
-      $q.dark.set(dark_mode);
+      syncDarkModeWithSavedPalette(dark_mode);
       $q.loadingBar.setDefaults({ color: loading_bar_color });
     }
 
@@ -185,6 +231,21 @@ export default {
       }
     }
 
+    async function pauseMeshForBanking() {
+      $q.loading.show({ message: "Ativando Modo Compatibilidade Bancária (Mesh Sob Demanda)..." });
+      try {
+        const msg = await pauseAgentMeshForBanking(String(params.agent_id), false);
+        notifySuccess(
+          msg ||
+            "Modo Compatibilidade Bancária ativado! O funcionário já pode acessar os bancos normalmente e o monitoramento Tactical continua Online.",
+        );
+      } catch (e) {
+        notifyError("Falha ao ativar Modo Compatibilidade Bancária.");
+      } finally {
+        $q.loading.hide();
+      }
+    }
+
     return {
       // reactive data
       control,
@@ -192,11 +253,14 @@ export default {
       statusColor,
       dash_negative_color,
       rdpConnecting,
+      isWorkstation,
+      autoPauseOnExit,
 
       // methods
       repairMeshCentral,
       restartMeshService,
       connectNativeRDP,
+      pauseMeshForBanking,
     };
   },
 };

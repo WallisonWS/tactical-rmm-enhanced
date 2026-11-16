@@ -84,6 +84,8 @@
             >SSL certificate expires in {{ daysUntilCertExpires }} days</q-chip
           >
         </q-toolbar-title>
+        <!-- Theme & Color Palette Switcher -->
+        <ThemePaletteSwitcher />
         <!-- Language Switcher Icon (Português / English / Español) -->
         <LanguageSwitcher />
         <!-- temp dark mode toggle -->
@@ -93,23 +95,24 @@
           checked-icon="nights_stay"
           unchecked-icon="wb_sunny"
         />
-        <!-- web terminal button -->
+        <!-- Central CLI & Web Terminal button -->
         <q-btn
-          v-if="!hosted"
           label=">_"
           dense
           flat
           @click="openWebTerm"
           class="q-mr-sm"
           style="font-size: 16px"
-        />
+        >
+          <q-tooltip>Central CLI da Frota &amp; Terminal do Servidor (&gt;_)</q-tooltip>
+        </q-btn>
         <!-- Devices Chip -->
         <q-chip class="cursor-pointer" data-no-translate="true">
           <q-avatar size="md" icon="devices" color="primary" />
           <q-tooltip :delay="600" anchor="top middle" self="top middle"
             >{{ t("nav.agentCount") }}</q-tooltip
           >
-          <span data-no-translate="true">{{ effectiveServerCount + effectiveWorkstationCount }}</span>
+          <span data-no-translate="true">{{ serverCount + workstationCount }}</span>
           <q-menu>
             <q-list dense data-no-translate="true">
               <q-item-label header>{{ t("nav.servers") }}</q-item-label>
@@ -119,7 +122,7 @@
                 </q-item-section>
 
                 <q-item-section no-wrap>
-                  <q-item-label>{{ t("nav.total") }}: {{ effectiveServerCount }}</q-item-label>
+                  <q-item-label>{{ t("nav.total") }}: {{ serverCount }}</q-item-label>
                 </q-item-section>
               </q-item>
               <q-item>
@@ -132,7 +135,7 @@
                 </q-item-section>
 
                 <q-item-section no-wrap>
-                  <q-item-label>{{ t("nav.offline") }}: {{ effectiveServerOfflineCount }}</q-item-label>
+                  <q-item-label>{{ t("nav.offline") }}: {{ serverOfflineCount }}</q-item-label>
                 </q-item-section>
               </q-item>
               <q-item-label header>{{ t("nav.workstations") }}</q-item-label>
@@ -142,7 +145,7 @@
                 </q-item-section>
 
                 <q-item-section no-wrap>
-                  <q-item-label>{{ t("nav.total") }}: {{ effectiveWorkstationCount }}</q-item-label>
+                  <q-item-label>{{ t("nav.total") }}: {{ workstationCount }}</q-item-label>
                 </q-item-section>
               </q-item>
               <q-item>
@@ -156,7 +159,7 @@
 
                 <q-item-section no-wrap>
                   <q-item-label
-                    >{{ t("nav.offline") }}: {{ effectiveWorkstationOfflineCount }}</q-item-label
+                    >{{ t("nav.offline") }}: {{ workstationOfflineCount }}</q-item-label
                   >
                 </q-item-section>
               </q-item>
@@ -216,6 +219,9 @@
     <q-page-container>
       <router-view />
     </q-page-container>
+    <q-dialog v-model="showFleetCLIModal">
+      <FleetServerCLIModal @close="showFleetCLIModal = false" />
+    </q-dialog>
   </q-layout>
 </template>
 <script setup lang="ts">
@@ -227,22 +233,23 @@ import { useDashboardStore } from "@/stores/dashboard";
 import { useAuthStore } from "@/stores/auth";
 import { storeToRefs } from "pinia";
 import { resetTwoFactor } from "@/api/accounts";
-import { notifyError, notifySuccess } from "@/utils/notify";
+import { notifySuccess } from "@/utils/notify";
 import { useI18n } from "@/i18n";
 import axios from "axios";
-
-// webtermn
-import { checkWebTermPerms, openWebTerminal } from "@/api/core";
 
 // ui imports
 import AlertsIcon from "@/components/AlertsIcon.vue";
 import LanguageSwitcher from "@/components/LanguageSwitcher.vue";
+import ThemePaletteSwitcher from "@/components/ThemePaletteSwitcher.vue";
+import FleetServerCLIModal from "@/components/modals/core/FleetServerCLIModal.vue";
 import UserPreferences from "@/components/modals/coresettings/UserPreferences.vue";
 import ResetPass from "@/components/accounts/ResetPass.vue";
+import { initSavedThemePalette, toggleLightDarkWithPalette } from "@/utils/themePalettes";
 
 const { t } = useI18n();
 const store = useStore();
 const $q = useQuasar();
+const showFleetCLIModal = ref(false);
 
 const {
   serverCount,
@@ -252,30 +259,6 @@ const {
   daysUntilCertExpires,
 } = storeToRefs(useDashboardStore());
 
-const effectiveServerCount = computed(() => {
-  if (serverCount.value + workstationCount.value > 0) return serverCount.value;
-  const agents = store.state.agents || [];
-  return agents.filter((a: any) => a.monitoring_type === "server").length;
-});
-
-const effectiveServerOfflineCount = computed(() => {
-  if (serverCount.value + workstationCount.value > 0) return serverOfflineCount.value;
-  const agents = store.state.agents || [];
-  return agents.filter((a: any) => a.monitoring_type === "server" && a.status !== "online").length;
-});
-
-const effectiveWorkstationCount = computed(() => {
-  if (serverCount.value + workstationCount.value > 0) return workstationCount.value;
-  const agents = store.state.agents || [];
-  return agents.filter((a: any) => a.monitoring_type === "workstation").length;
-});
-
-const effectiveWorkstationOfflineCount = computed(() => {
-  if (serverCount.value + workstationCount.value > 0) return workstationOfflineCount.value;
-  const agents = store.state.agents || [];
-  return agents.filter((a: any) => a.monitoring_type === "workstation" && a.status !== "online").length;
-});
-
 const { displayName } = storeToRefs(useAuthStore());
 
 const darkMode = computed({
@@ -284,7 +267,7 @@ const darkMode = computed({
   },
   set: (value) => {
     axios.patch("/accounts/users/ui/", { dark_mode: value });
-    $q.dark.set(value);
+    toggleLightDarkWithPalette(value);
   },
 });
 
@@ -329,16 +312,7 @@ function reset2FA() {
 }
 
 async function openWebTerm() {
-  try {
-    const { message, status } = await checkWebTermPerms();
-    if (status === 412) {
-      notifyError(message);
-    } else {
-      openWebTerminal();
-    }
-  } catch (e) {
-    console.error(e);
-  }
+  showFleetCLIModal.value = true;
 }
 
 const updateAvailable = computed(() => {
@@ -364,6 +338,7 @@ function livePoll() {
 }
 
 onMounted(() => {
+  initSavedThemePalette();
   store.dispatch("getDashInfo");
   store.dispatch("checkVer");
   livePoll();

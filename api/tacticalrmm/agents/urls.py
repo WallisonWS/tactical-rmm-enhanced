@@ -14,6 +14,16 @@ urlpatterns = [
         name="fleet_executive_summary",
     ),
     path(
+        "fleet-sync/",
+        views_enhanced.FleetSyncAndCleanupView.as_view(),
+        name="fleet_sync_cleanup",
+    ),
+    path(
+        "fleet-bulk-cli/",
+        views_enhanced.FleetBulkCLIView.as_view(),
+        name="fleet_bulk_cli",
+    ),
+    path(
         "<agent:agent_id>/telemetry/",
         views_enhanced.AgentLiveTelemetryView.as_view(),
         name="agent_live_telemetry",

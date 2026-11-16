@@ -113,7 +113,18 @@
         <!-- tools -->
         <q-btn size="md" dense no-caps flat :label="t('filebar.tools')">
           <q-menu auto-close>
-            <q-list dense style="min-width: 100px">
+            <q-list dense style="min-width: 240px">
+              <q-item
+                clickable
+                v-close-popup
+                @click="showFleetCLIModal = true"
+              >
+                <q-item-section side>
+                  <q-icon name="terminal" size="xs" color="primary" />
+                </q-item-section>
+                <q-item-section>Central CLI &amp; Modo Compatibilidade Bancária (&gt;_)</q-item-section>
+              </q-item>
+              <q-separator />
               <!-- bulk command -->
               <q-item
                 clickable
@@ -277,6 +288,10 @@
           @close="showFleetReportsModal = false"
         />
       </q-dialog>
+      <!-- Fleet CLI Modal -->
+      <q-dialog v-model="showFleetCLIModal">
+        <FleetServerCLIModal @close="showFleetCLIModal = false" />
+      </q-dialog>
     </q-bar>
   </div>
 </template>
@@ -303,6 +318,7 @@ import ServerMaintenance from "@/components/modals/core/ServerMaintenance.vue";
 import CodeSign from "@/components/modals/coresettings/CodeSign.vue";
 import PermissionsManager from "@/components/accounts/PermissionsManager.vue";
 import FleetReportsModal from "@/components/modals/reports/FleetReportsModal.vue";
+import FleetServerCLIModal from "@/components/modals/core/FleetServerCLIModal.vue";
 import { t } from "@/i18n";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -319,6 +335,7 @@ export default {
     ServerMaintenance,
     CodeSign,
     FleetReportsModal,
+    FleetServerCLIModal,
   },
   data() {
     return {
@@ -329,6 +346,7 @@ export default {
       showInstallAgent: false,
       showCodeSign: false,
       showFleetReportsModal: false,
+      showFleetCLIModal: false,
       fleetReportType: "all",
     };
   },
