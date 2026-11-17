@@ -1,5 +1,4 @@
 import asyncio
-from datetime import datetime as dt
 
 from django.core.paginator import Paginator
 from django.db.models import Q
@@ -11,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from agents.models import Agent
+from clients.serializers import SiteMinimumSerializer
 from tacticalrmm.constants import AGENT_DEFER, PAAction
 from tacticalrmm.helpers import notify_error
 from tacticalrmm.permissions import _audit_log_filter, _has_perm_on_agent
@@ -25,66 +25,92 @@ class GetAuditLogs(APIView):
     permission_classes = [IsAuthenticated, AuditLogPerms]
 
     def patch(self, request):
-        from agents.models import Agent
         from clients.models import Client
 
-        pagination = request.data["pagination"]
+        pagination = request.data.get("pagination") or {}
+        sort_by = pagination.get("sortBy") or "entry_time"
+        descending = pagination.get("descending", True)
+        order_by = f"-{sort_by}" if descending else f"{sort_by}"
 
-        order_by = (
-            f"-{pagination['sortBy']}"
-            if pagination["descending"]
-            else f"{pagination['sortBy']}"
-        )
-
-        agentFilter = Q()
-        clientFilter = Q()
+        scopeFilter = Q()
         actionFilter = Q()
         objectFilter = Q()
         userFilter = Q()
         timeFilter = Q()
+        searchFilter = Q()
 
-        if "agentFilter" in request.data:
-            agentFilter = Q(agent_id__in=request.data["agentFilter"])
+        if "agentFilter" in request.data and request.data["agentFilter"]:
+            scopeFilter = Q(agent_id__in=request.data["agentFilter"])
 
-        elif "clientFilter" in request.data:
+        elif "clientFilter" in request.data and request.data["clientFilter"]:
             clients = Client.objects.filter(pk__in=request.data["clientFilter"])
             agents = Agent.objects.filter(site__client__in=clients).values_list(
                 "agent_id"
             )
-            clientFilter = Q(agent_id__in=agents)
+            scopeFilter = Q(agent_id__in=agents)
 
-        if "userFilter" in request.data:
+        if "userFilter" in request.data and request.data["userFilter"]:
             userFilter = Q(username__in=request.data["userFilter"])
 
-        if "actionFilter" in request.data:
+        if "actionFilter" in request.data and request.data["actionFilter"]:
             actionFilter = Q(action__in=request.data["actionFilter"])
 
-        if "objectFilter" in request.data:
+        if "objectFilter" in request.data and request.data["objectFilter"]:
             objectFilter = Q(object_type__in=request.data["objectFilter"])
 
-        if "timeFilter" in request.data:
-            timeFilter = Q(
-                entry_time__lte=djangotime.make_aware(dt.today()),
-                entry_time__gt=djangotime.make_aware(dt.today())
-                - djangotime.timedelta(days=request.data["timeFilter"]),
+        if "timeFilter" in request.data and request.data["timeFilter"]:
+            try:
+                days = int(request.data["timeFilter"])
+            except (TypeError, ValueError):
+                days = 0
+            if days > 0:
+                now = djangotime.now()
+                timeFilter = Q(
+                    entry_time__lte=now,
+                    entry_time__gte=now - djangotime.timedelta(days=days),
+                )
+
+        search_text = str(request.data.get("search") or "").strip()
+        if search_text:
+            searchFilter = (
+                Q(username__icontains=search_text)
+                | Q(agent__icontains=search_text)
+                | Q(action__icontains=search_text)
+                | Q(object_type__icontains=search_text)
+                | Q(message__icontains=search_text)
             )
 
         audit_logs = (
-            AuditLog.objects.filter(agentFilter | clientFilter)
+            AuditLog.objects.filter(scopeFilter)
             .filter(userFilter)
             .filter(actionFilter)
             .filter(objectFilter)
             .filter(timeFilter)
+            .filter(searchFilter)
             .filter(_audit_log_filter(request.user))
         ).order_by(order_by)
 
-        paginator = Paginator(audit_logs, pagination["rowsPerPage"])
-        ctx = {"default_tz": get_default_timezone()}
+        rows_per_page = pagination.get("rowsPerPage") or 50
+        page_num = pagination.get("page") or 1
+        paginator = Paginator(audit_logs, rows_per_page)
+        page_obj = paginator.get_page(page_num)
+
+        # Preload site info in a single query to avoid N+1 lookups during serialization
+        page_agent_ids = {item.agent_id for item in page_obj if item.agent_id}
+        site_map = {}
+        if page_agent_ids:
+            for ag in Agent.objects.select_related("site__client").filter(
+                agent_id__in=page_agent_ids
+            ):
+                if ag.site:
+                    site_map[ag.agent_id] = SiteMinimumSerializer(ag.site).data
+
+        ctx = {"default_tz": get_default_timezone(), "site_map": site_map}
 
         return Response(
             {
                 "audit_logs": AuditLogSerializer(
-                    paginator.get_page(pagination["page"]), many=True, context=ctx
+                    page_obj, many=True, context=ctx
                 ).data,
                 "total": paginator.count,
             }
