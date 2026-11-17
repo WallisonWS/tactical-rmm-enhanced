@@ -449,7 +449,7 @@
                       {{ activeFilterCount }}
                     </q-badge>
                     <q-tooltip>Filtros Avançados ({{ activeFilterCount }} ativos)</q-tooltip>
-                    <q-menu style="min-width: 310px; max-height: 75vh; overflow-y: auto">
+                    <q-menu style="min-width: 295px; max-height: 70vh; overflow-y: auto">
                       <q-list dense class="trmm-scroll-pane">
                         <q-item-label header class="text-weight-bold text-primary">
                           Saúde &amp; Manutenção
@@ -460,7 +460,7 @@
                             <q-checkbox v-model="filterChecksFailing" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>{{ t("dash.checksFailing") }} ({{ failingChecksCount }})</q-item-label>
+                            <q-item-label>{{ t("dash.checksFailing") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -469,7 +469,7 @@
                             <q-checkbox v-model="filterPatchesPending" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>{{ t("dash.patchesPending") }} ({{ patchesPendingCount }})</q-item-label>
+                            <q-item-label>{{ t("dash.patchesPending") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -487,7 +487,7 @@
                             <q-checkbox v-model="filterRebootNeeded" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>{{ t("dash.rebootNeeded") }} ({{ rebootNeededCount }})</q-item-label>
+                            <q-item-label>{{ t("dash.rebootNeeded") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -511,7 +511,7 @@
                             <q-radio val="all" v-model="filterAvailability" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>{{ t("dash.showAllAgents") }} ({{ filteredAgents.length }})</q-item-label>
+                            <q-item-label>{{ t("dash.showAllAgents") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -520,7 +520,7 @@
                             <q-radio val="online" v-model="filterAvailability" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>{{ t("dash.showOnlineOnly") }} ({{ onlineCount }})</q-item-label>
+                            <q-item-label>{{ t("dash.showOnlineOnly") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -529,7 +529,7 @@
                             <q-radio val="disconnected" v-model="filterAvailability" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>Desconectados — Offline + Vencidos ({{ offlineOrOverdueCount }})</q-item-label>
+                            <q-item-label>Desconectados (Offline + Vencidos)</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -538,7 +538,7 @@
                             <q-radio val="offline" v-model="filterAvailability" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>{{ t("dash.showOfflineOnly") }} ({{ offlineOnlyCount }})</q-item-label>
+                            <q-item-label>{{ t("dash.showOfflineOnly") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -547,7 +547,7 @@
                             <q-radio val="overdue" v-model="filterAvailability" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>Apenas Vencidos / Overdue ({{ overdueOnlyCount }})</q-item-label>
+                            <q-item-label>Apenas Vencidos / Overdue</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -580,7 +580,7 @@
                             <q-radio val="windows" v-model="filterPlatform" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>Windows ({{ windowsCount }})</q-item-label>
+                            <q-item-label>Windows</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -589,7 +589,7 @@
                             <q-radio val="linux" v-model="filterPlatform" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>Linux ({{ linuxCount }})</q-item-label>
+                            <q-item-label>Linux</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -598,7 +598,7 @@
                             <q-radio val="darwin" v-model="filterPlatform" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>macOS ({{ darwinCount }})</q-item-label>
+                            <q-item-label>macOS</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -622,7 +622,7 @@
                             <q-radio val="inad" v-model="filterAdStatus" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>Ingressados no AD ({{ insideAdCount }})</q-item-label>
+                            <q-item-label>Ingressados no AD</q-item-label>
                           </q-item-section>
                         </q-item>
 
@@ -631,7 +631,7 @@
                             <q-radio val="outsidead" v-model="filterAdStatus" @update:model-value="applyFilter" />
                           </q-item-section>
                           <q-item-section>
-                            <q-item-label>Fora do AD / Workgroup ({{ outsideAdCount }})</q-item-label>
+                            <q-item-label>Fora do AD / Workgroup</q-item-label>
                           </q-item-section>
                         </q-item>
                       </q-list>
