@@ -42,9 +42,49 @@
           <q-btn
             dense
             outline
+            color="amber-4"
+            icon="hub"
+            :label="showLdapOverride ? 'Ocultar DC LDAP' : 'Conectar via IP do DC'"
+            @click="showLdapOverride = !showLdapOverride"
+          >
+            <q-tooltip>
+              Opcional: informe IP/FQDN do Controlador de Domínio + credencial caso o agente consultado esteja fora do AD
+            </q-tooltip>
+          </q-btn>
+          <q-btn
+            dense
+            outline
+            color="deep-purple-3"
+            icon="publish"
+            label="Publicar GPO no AD"
+            :loading="publishingGpo"
+            :disable="!selectedClient || !selectedSite || !selectedProbeId"
+            @click="onPublishGpoFromProbe"
+          >
+            <q-tooltip>
+              Publica binários + Install-TacticalRMM.ps1 no NETLOGON e cria/vincula a GPO na raiz do domínio para capturar máquinas desligadas e CN=Computers
+            </q-tooltip>
+          </q-btn>
+          <q-btn
+            dense
+            outline
+            color="orange-4"
+            icon="terminal"
+            label="Script Completo DC (.ps1)"
+            :loading="downloadingDcScript"
+            :disable="!selectedClient || !selectedSite"
+            @click="onDownloadAllInOneDcScript"
+          >
+            <q-tooltip>
+              Baixa script único para rodar como Admin direto no Controlador de Domínio: instala no DC, varre TODO o AD, faz Push paralelo e cria/vincula GPO na raiz
+            </q-tooltip>
+          </q-btn>
+          <q-btn
+            dense
+            outline
             color="light-blue-4"
             icon="policy"
-            label="Baixar GPO Corrigida (.ps1)"
+            label="GPO (.ps1)"
             :loading="downloadingGpo"
             :disable="!selectedClient || !selectedSite"
             @click="downloadFixedGpoScript"
@@ -58,9 +98,54 @@
             outline
             color="teal-3"
             icon="download"
-            label="Exportar CSV"
+            label="CSV"
             :disable="!filteredRows.length"
             @click="exportCsv"
+          />
+        </div>
+      </div>
+
+      <!-- Optional Direct DC / LDAP Override -->
+      <div v-if="showLdapOverride" class="row items-center q-col-gutter-sm q-mt-xs">
+        <div class="col-12 col-sm-4">
+          <q-input
+            v-model="ldapServer"
+            dense
+            outlined
+            dark
+            label="IP ou FQDN do Controlador AD (Opcional)"
+            placeholder="Ex: 10.0.0.10"
+          />
+        </div>
+        <div class="col-6 col-sm-3">
+          <q-input
+            v-model="pushUsername"
+            dense
+            outlined
+            dark
+            label="Usuário AD (em memória)"
+            placeholder="DOMINIO\\Administrator"
+          />
+        </div>
+        <div class="col-6 col-sm-3">
+          <q-input
+            v-model="pushPassword"
+            dense
+            outlined
+            dark
+            :type="showPassword ? 'text' : 'password'"
+            label="Senha AD (em memória)"
+          />
+        </div>
+        <div class="col-12 col-sm-2">
+          <q-btn
+            unelevated
+            color="amber-8"
+            icon="search"
+            label="Consultar DC"
+            class="full-width"
+            :loading="loading"
+            @click="loadAudit()"
           />
         </div>
       </div>
@@ -74,7 +159,30 @@
         </template>
         <div class="text-weight-medium">{{ errorMsg }}</div>
         <div class="text-caption q-mt-xs">
-          Selecione acima um Controlador de Domínio ou Servidor Windows ingressado no AD que esteja Online no Tactical.
+          Selecione acima um servidor AD online, preencha "Conectar via IP do DC", ou escolha o Cliente/Site abaixo e clique em "Script Completo DC (.ps1)" para rodar diretamente no Controlador de Domínio e puxar todas as máquinas:
+        </div>
+        <div class="row q-col-gutter-sm q-mt-sm">
+          <div class="col-12 col-sm-5">
+            <q-select
+              v-model="selectedClient"
+              dense
+              outlined
+              dark
+              :options="clientOptions"
+              label="Cliente de Destino"
+              @update:model-value="onClientChanged"
+            />
+          </div>
+          <div class="col-12 col-sm-5">
+            <q-select
+              v-model="selectedSite"
+              dense
+              outlined
+              dark
+              :options="siteOptions"
+              label="Site de Destino"
+            />
+          </div>
         </div>
       </q-banner>
 
@@ -149,7 +257,7 @@
           <span class="text-caption">{{ diag }}</span>
         </q-banner>
 
-        <!-- AD Folder Chips (CRD, Computadores, Computers, crd.local, etc.) -->
+        <!-- AD Folder Chips (OUs, Containers, Domain Root) -->
         <div class="q-mt-sm q-mb-sm">
           <div class="text-caption text-grey q-mb-xs">
             Pastas / OUs encontradas no AD ({{ report.folder_summary.length }}) — clique para filtrar:
@@ -205,7 +313,26 @@
             <q-checkbox v-model="onlyEnabled" dense label="Somente habilitados no AD" />
             <q-checkbox v-model="onlyActive90d" dense label="Ativos ≤ 90 dias" />
           </div>
-          <div class="col-12 col-md-4">
+          <div class="col-12 col-md-4 row items-center justify-end q-gutter-xs">
+            <q-btn
+              v-if="allMissingFilteredRows.length"
+              dense
+              unelevated
+              color="deep-orange"
+              icon="done_all"
+              :label="`Puxar TODOS Faltantes (${allMissingFilteredRows.length})`"
+              :loading="pushLoading"
+              :disable="!selectedSite"
+              @click="runPushInstall(allMissingFilteredRows, false)"
+            >
+              <q-tooltip>
+                Envia instalação automática (WinRM + SMB/SchTasks + WMI DCOM) em lotes para TODOS os {{ allMissingFilteredRows.length }} computadores faltantes desta lista
+              </q-tooltip>
+            </q-btn>
+          </div>
+        </div>
+        <div class="row q-mb-sm">
+          <div class="col-12">
             <q-input
               v-model="search"
               dense
@@ -390,15 +517,25 @@
                   * Credenciais transitam somente em memória no Push e nunca são gravadas no banco.
                 </span>
               </div>
-              <q-btn
-                unelevated
-                color="deep-orange"
-                icon="install_desktop"
-                :label="`Push Remoto nos Selecionados (${selectedRows.length})`"
-                :loading="pushLoading"
-                :disable="!selectedRows.length || !selectedSite"
-                @click="runPushInstall(selectedRows, forceReinstall)"
-              />
+              <div class="row q-gutter-xs">
+                <q-btn
+                  outline
+                  color="amber-9"
+                  icon="select_all"
+                  :label="`Selecionar Faltantes (${allMissingFilteredRows.length})`"
+                  :disable="!allMissingFilteredRows.length || pushLoading"
+                  @click="selectAllMissing"
+                />
+                <q-btn
+                  unelevated
+                  color="deep-orange"
+                  icon="install_desktop"
+                  :label="`Push nos Selecionados (${selectedRows.length})`"
+                  :loading="pushLoading"
+                  :disable="!selectedRows.length || !selectedSite"
+                  @click="runPushInstall(selectedRows, forceReinstall)"
+                />
+              </div>
             </div>
 
             <div v-if="pushProgressMsg" class="text-caption text-amber q-mt-xs">
@@ -445,6 +582,7 @@ import { getBaseUrl } from "@/boot/axios";
 import {
   fetchADDirectoryAudit,
   pushInstallADComputers,
+  publishADGPO,
   type ADDirectoryAuditReport,
   type ADDirectoryComputer,
   type ADPushInstallResultItem,
@@ -479,6 +617,8 @@ const selectedSite = ref<{ label: string; value: number } | null>(null);
 const agentType = ref<"both" | "workstation" | "server">("both");
 const pushUsername = ref("");
 const pushPassword = ref("");
+const ldapServer = ref("");
+const showLdapOverride = ref(false);
 const showPassword = ref(false);
 const bankingMode = ref(true);
 const enableRdp = ref(true);
@@ -486,6 +626,8 @@ const enablePing = ref(true);
 const forceReinstall = ref(false);
 
 const downloadingGpo = ref(false);
+const publishingGpo = ref(false);
+const downloadingDcScript = ref(false);
 const pushLoading = ref(false);
 const pushProgressMsg = ref("");
 const pushResults = ref<ADPushInstallResultItem[]>([]);
@@ -525,6 +667,10 @@ const filteredRows = computed(() => {
     return true;
   });
 });
+
+const allMissingFilteredRows = computed(() =>
+  filteredRows.value.filter((r) => !r.in_tactical && r.enabled),
+);
 
 const pushSucceeded = computed(() => pushResults.value.filter((r) => r.success).length);
 
@@ -587,12 +733,21 @@ function onClientChanged() {
   selectedSite.value = siteOptions.value[0] || null;
 }
 
+function selectAllMissing() {
+  selectedRows.value = [...allMissingFilteredRows.value];
+}
+
 async function loadAudit(probeId?: string) {
   loading.value = true;
   errorMsg.value = "";
   try {
     const idToUse = typeof probeId === "string" ? probeId : selectedProbeId.value;
-    const res = await fetchADDirectoryAudit(idToUse || undefined);
+    const res = await fetchADDirectoryAudit({
+      probeAgentId: idToUse || undefined,
+      ldapServer: ldapServer.value.trim() || undefined,
+      username: pushUsername.value.trim() || undefined,
+      password: pushPassword.value || undefined,
+    });
     report.value = res;
     if (res.probe_agent?.agent_id) {
       selectedProbeId.value = res.probe_agent.agent_id;
@@ -669,6 +824,62 @@ async function downloadFixedGpoScript() {
     notifyError(extractApiError(e, "Erro ao gerar script GPO corrigido."));
   } finally {
     downloadingGpo.value = false;
+  }
+}
+
+async function onPublishGpoFromProbe() {
+  if (!selectedSite.value || !selectedProbeId.value) return;
+  publishingGpo.value = true;
+  try {
+    const res = await publishADGPO({
+      mode: "publish_from_probe",
+      site_id: selectedSite.value.value,
+      probe_agent_id: selectedProbeId.value,
+      agent_type: agentType.value,
+      rdp: enableRdp.value ? 1 : 0,
+      ping: enablePing.value ? 1 : 0,
+      banking_mode: bankingMode.value,
+      auto_link_gpo: true,
+      run_gpupdate: true,
+      api: getBaseUrl(),
+    });
+    notifySuccess(res.message || "GPO e binários publicados no AD/NETLOGON!");
+  } catch (e: unknown) {
+    notifyError(extractApiError(e, "Erro ao publicar GPO/NETLOGON no AD."));
+  } finally {
+    publishingGpo.value = false;
+  }
+}
+
+async function onDownloadAllInOneDcScript() {
+  if (!selectedSite.value) return;
+  downloadingDcScript.value = true;
+  try {
+    const res = await publishADGPO({
+      mode: "generate_dc_script",
+      site_id: selectedSite.value.value,
+      agent_type: agentType.value,
+      rdp: enableRdp.value ? 1 : 0,
+      ping: enablePing.value ? 1 : 0,
+      banking_mode: bankingMode.value,
+      api: getBaseUrl(),
+    });
+    if (!res.script) {
+      notifyError("Backend não retornou o script completo.");
+      return;
+    }
+    const blob = new Blob([res.script], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = res.filename || "TacticalRMM-Deploy-All-AD.ps1";
+    link.click();
+    URL.revokeObjectURL(url);
+    notifySuccess("Script TacticalRMM-Deploy-All-AD.ps1 baixado! Execute como Admin no DC.");
+  } catch (e: unknown) {
+    notifyError(extractApiError(e, "Erro ao gerar script completo para o DC."));
+  } finally {
+    downloadingDcScript.value = false;
   }
 }
 

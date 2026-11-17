@@ -804,11 +804,63 @@ export interface ADPushInstallResponse {
   results: ADPushInstallResultItem[];
 }
 
+export interface ADPublishGPOResponse {
+  ok: boolean;
+  mode?: string;
+  filename?: string;
+  script?: string;
+  netlogon_path?: string;
+  gpo_linked?: boolean;
+  gpupdate_count?: number;
+  message?: string;
+}
+
 export async function fetchADDirectoryAudit(
-  probeAgentId?: string,
+  options?:
+    | string
+    | {
+        probeAgentId?: string;
+        ldapServer?: string;
+        username?: string;
+        password?: string;
+      },
 ): Promise<ADDirectoryAuditReport> {
-  const params = probeAgentId ? { probe_agent_id: probeAgentId } : undefined;
+  if (!options || typeof options === "string") {
+    const params = options ? { probe_agent_id: options } : undefined;
+    const { data } = await axios.get("/agents/ad-directory-audit/", { params });
+    return data;
+  }
+  if (options.ldapServer || options.username || options.password) {
+    const { data } = await axios.post("/agents/ad-directory-audit/", {
+      probe_agent_id: options.probeAgentId || undefined,
+      ldap_server: options.ldapServer || undefined,
+      username: options.username || undefined,
+      password: options.password || undefined,
+    });
+    return data;
+  }
+  const params = options.probeAgentId ? { probe_agent_id: options.probeAgentId } : undefined;
   const { data } = await axios.get("/agents/ad-directory-audit/", { params });
+  return data;
+}
+
+export async function publishADGPO(payload: {
+  mode: "publish_from_probe" | "generate_dc_script";
+  site_id: number;
+  probe_agent_id?: string;
+  agent_type?: "both" | "workstation" | "server";
+  rdp?: number;
+  ping?: number;
+  power?: number;
+  banking_mode?: boolean;
+  auto_link_gpo?: boolean;
+  run_gpupdate?: boolean;
+  api?: string;
+}): Promise<ADPublishGPOResponse> {
+  const { data } = await axios.post("/agents/ad-publish-gpo/", {
+    api: payload.api || getBaseUrl(),
+    ...payload,
+  });
   return data;
 }
 

@@ -34,6 +34,11 @@ urlpatterns = [
         name="fleet_ad_push_install",
     ),
     path(
+        "ad-publish-gpo/",
+        views_enhanced.FleetADPublishGPOView.as_view(),
+        name="fleet_ad_publish_gpo",
+    ),
+    path(
         "<agent:agent_id>/telemetry/",
         views_enhanced.AgentLiveTelemetryView.as_view(),
         name="agent_live_telemetry",

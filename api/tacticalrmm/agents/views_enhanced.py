@@ -2059,13 +2059,27 @@ class FleetSyncAndCleanupView(APIView):
         )
 
 
-_AD_AUDIT_PS_SCRIPT = r"""[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+_AD_AUDIT_PS_SCRIPT_BODY = r"""[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Stop'
+$auditCfgJson = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__AUDIT_CFG_B64__'))
+$auditCfg = $auditCfgJson | ConvertFrom-Json
+$ldapServer = ([string]$auditCfg.ldap_server).Trim()
+$bindUser = ([string]$auditCfg.user).Trim()
+$bindPass = [string]$auditCfg.pass
+
 try {
-    $rootDse = [ADSI]"LDAP://RootDSE"
+    function Open-AdEntry([string]$subPath) {
+        $prefix = if ($ldapServer) { "LDAP://$ldapServer/$subPath" } else { "LDAP://$subPath" }
+        if ($bindUser -and $bindPass) {
+            return New-Object System.DirectoryServices.DirectoryEntry($prefix, $bindUser, $bindPass, [System.DirectoryServices.AuthenticationTypes]::Secure)
+        }
+        return [ADSI]$prefix
+    }
+
+    $rootDse = Open-AdEntry "RootDSE"
     $defaultNC = [string]$rootDse.defaultNamingContext
     if (-not $defaultNC) {
-        @{ ok = $false; error = "Este computador nao esta ingressado em um dominio Active Directory (RootDSE defaultNamingContext vazio)." } | ConvertTo-Json -Compress
+        @{ ok = $false; error = "Este computador nao esta ingressado em um dominio Active Directory e nenhum servidor LDAP respondeu (RootDSE vazio)." } | ConvertTo-Json -Compress
         exit 0
     }
     $dcParts = @()
@@ -2076,7 +2090,7 @@ try {
     $domainDns = ($dcParts -join '.').ToLower()
     if (-not $domainDns) { $domainDns = ([string]$env:USERDNSDOMAIN).ToLower() }
 
-    $searchRoot = [ADSI]"LDAP://$defaultNC"
+    $searchRoot = Open-AdEntry $defaultNC
     $searcher = New-Object System.DirectoryServices.DirectorySearcher($searchRoot)
     $searcher.Filter = "(&(objectCategory=computer)(objectClass=computer))"
     $searcher.PageSize = 1000
@@ -2180,8 +2194,27 @@ try {
     } | ConvertTo-Json -Depth 4 -Compress
 } catch {
     @{ ok = $false; error = $_.Exception.Message } | ConvertTo-Json -Compress
+} finally {
+    $bindPass = $null
+    $auditCfgJson = $null
 }
 """
+
+
+def _build_ad_audit_ps_script(
+    ldap_server: str = "", username: str = "", password: str = ""
+) -> str:
+    cfg_b64 = base64.b64encode(
+        json.dumps(
+            {
+                "ldap_server": ldap_server.strip(),
+                "user": username.strip(),
+                "pass": password,
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).decode("ascii")
+    return _AD_AUDIT_PS_SCRIPT_BODY.replace("__AUDIT_CFG_B64__", cfg_b64)
 
 
 def _wrap_ps_utf8_b64(script: str) -> str:
@@ -2210,18 +2243,17 @@ def _pick_domain_probe_agent(user, preferred_agent_id=None):
         if ag.status != AGENT_STATUS_ONLINE:
             continue
         prof = _extract_wmi_profile(ag)
-        ad_info = prof.get("ad_info") if isinstance(prof.get("ad_info"), dict) else {}
-        domain_role = int(ad_info.get("domain_role_code") or 0)
-        part_of_domain = bool(ad_info.get("part_of_domain"))
-        domain_name = str(ad_info.get("domain") or "")
+        domain_role = int(prof.get("domain_role") or 0)
+        part_of_domain = bool(prof.get("part_of_domain"))
+        domain_name = str(prof.get("domain_name") or "")
         is_dc = domain_role >= 4
         if is_dc:
             tier = 0
         elif ag.monitoring_type == "server" and part_of_domain:
             tier = 1
-        elif ag.monitoring_type == "server":
-            tier = 2
         elif part_of_domain:
+            tier = 2
+        elif ag.monitoring_type == "server":
             tier = 3
         else:
             tier = 4
@@ -2283,6 +2315,24 @@ class FleetADDirectoryAuditView(APIView):
             if request.method == "GET"
             else request.data.get("probe_agent_id")
         )
+        ldap_server = str(
+            (
+                request.query_params.get("ldap_server")
+                if request.method == "GET"
+                else request.data.get("ldap_server")
+            )
+            or ""
+        ).strip()
+        if ldap_server and not re.match(r"^[A-Za-z0-9._-]+$", ldap_server):
+            return notify_error("Servidor LDAP / IP inválido.")
+
+        ldap_username = str(
+            (request.data.get("username") if request.method != "GET" else "") or ""
+        ).strip()
+        ldap_password = str(
+            (request.data.get("password") if request.method != "GET" else "") or ""
+        )
+
         probe, available_probes = _pick_domain_probe_agent(
             request.user, preferred_agent_id=preferred_id
         )
@@ -2293,7 +2343,13 @@ class FleetADDirectoryAuditView(APIView):
         if not _has_perm_on_agent(request.user, probe.agent_id):
             return notify_error("Sem permissão no servidor consultado.")
 
-        cmd_payload = _wrap_ps_utf8_b64(_AD_AUDIT_PS_SCRIPT)
+        cmd_payload = _wrap_ps_utf8_b64(
+            _build_ad_audit_ps_script(
+                ldap_server=ldap_server,
+                username=ldap_username,
+                password=ldap_password,
+            )
+        )
         raw = asyncio.run(
             probe.nats_cmd(
                 {
@@ -2821,6 +2877,9 @@ if ($FinalReg -and $FinalReg.AgentID) {{
         remote_b64 = base64.b64encode(target_install_script.encode("utf-8")).decode(
             "ascii"
         )
+        target_enc_b64 = base64.b64encode(
+            target_install_script.encode("utf-16le")
+        ).decode("ascii")
 
         username = str(request.data.get("username") or "").strip()
         password = str(request.data.get("password") or "")
@@ -2829,6 +2888,7 @@ if ($FinalReg -and $FinalReg.AgentID) {{
             {
                 "hosts": clean_hosts,
                 "remote_b64": remote_b64,
+                "enc_b64": target_enc_b64,
                 "user": username,
                 "pass": password,
             },
@@ -2842,6 +2902,7 @@ $cfgJson = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{
 $cfg = $cfgJson | ConvertFrom-Json
 $hosts = @($cfg.hosts)
 $remoteB64 = [string]$cfg.remote_b64
+$encB64 = [string]$cfg.enc_b64
 $rawUser = [string]$cfg.user
 $rawPass = [string]$cfg.pass
 
@@ -2852,7 +2913,7 @@ if ($rawUser -and $rawPass) {{
 }}
 
 $workerScript = {{
-    param([string]$h, [string]$b64, $cred, [string]$rawUser, [string]$rawPass)
+    param([string]$h, [string]$b64, [string]$enc, $cred, [string]$rawUser, [string]$rawPass)
     $ErrorActionPreference = 'Continue'
 
     function Test-TcpPort([string]$targetHost, [int]$port, [int]$ms) {{
@@ -2871,11 +2932,22 @@ $workerScript = {{
         }}
     }}
 
+    $targetHost = $h
     $resolvedIp = ""
-    try {{
-        $addrs = [System.Net.Dns]::GetHostAddresses($h) | Where-Object {{ $_.AddressFamily -eq 'InterNetwork' }}
-        if ($addrs) {{ $resolvedIp = $addrs[0].IPAddressToString }}
-    }} catch {{
+    $dnsCandidates = @($h)
+    if ($h -match '\.') {{ $dnsCandidates += $h.Split('.')[0] }}
+    foreach ($cand in $dnsCandidates) {{
+        try {{
+            $addrs = [System.Net.Dns]::GetHostAddresses($cand) | Where-Object {{ $_.AddressFamily -eq 'InterNetwork' }}
+            if ($addrs) {{
+                $resolvedIp = $addrs[0].IPAddressToString
+                $targetHost = $cand
+                break
+            }}
+        }} catch {{}}
+    }}
+
+    if (-not $resolvedIp) {{
         return [pscustomobject]@{{
             hostname = $h
             ip = ""
@@ -2886,24 +2958,28 @@ $workerScript = {{
         }}
     }}
 
-    $winrmOpen = Test-TcpPort $h 5985 1100
-    $smbOpen = Test-TcpPort $h 445 1100
-    if ((-not $winrmOpen) -and (-not $smbOpen)) {{
+    $winrmOpen = Test-TcpPort $targetHost 5985 1100
+    $smbOpen = Test-TcpPort $targetHost 445 1100
+    $wmiOpen = Test-TcpPort $targetHost 135 1100
+    if ((-not $winrmOpen) -and (-not $smbOpen) -and (-not $wmiOpen)) {{
         return [pscustomobject]@{{
             hostname = $h
             ip = $resolvedIp
             success = $false
             method = "TCP"
             status = "unreachable"
-            detail = "Sem resposta nas portas WinRM (5985) e SMB (445) — PC desligado ou firewall bloqueando gerenciamento remoto."
+            detail = "Sem resposta nas portas WinRM (5985), SMB (445) e WMI/RPC (135) — PC desligado ou firewall bloqueando gerenciamento remoto."
         }}
     }}
 
     $winrmErr = ""
+    $smbErr = ""
+    $wmiErr = ""
+
     if ($winrmOpen) {{
         try {{
             $icParams = @{{
-                ComputerName = $h
+                ComputerName = $targetHost
                 ErrorAction = 'Stop'
                 ArgumentList = @($b64)
                 ScriptBlock = {{
@@ -2944,11 +3020,11 @@ $workerScript = {{
     if ($smbOpen) {{
         $drvName = "TRMM" + ([guid]::NewGuid().ToString("N").Substring(0, 8))
         try {{
-            net use "\\$h\ADMIN$" /delete /y 2>$null | Out-Null
+            net use "\\$targetHost\ADMIN$" /delete /y 2>$null | Out-Null
             $ndParams = @{{
                 Name = $drvName
                 PSProvider = 'FileSystem'
-                Root = "\\$h\ADMIN$"
+                Root = "\\$targetHost\ADMIN$"
                 ErrorAction = 'Stop'
             }}
             if ($null -ne $cred) {{ $ndParams['Credential'] = $cred }}
@@ -2961,9 +3037,9 @@ $workerScript = {{
 
             $tn = "TacticalRMM_ADPush"
             $tr = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\Windows\Temp\trmm-push-install.ps1"
-            $stCreate = @("/Create", "/S", $h)
-            $stRun = @("/Run", "/S", $h)
-            $stDel = @("/Delete", "/S", $h)
+            $stCreate = @("/Create", "/S", $targetHost)
+            $stRun = @("/Run", "/S", $targetHost)
+            $stDel = @("/Delete", "/S", $targetHost)
             if ($rawUser -and $rawPass) {{
                 $stCreate += @("/U", $rawUser, "/P", $rawPass)
                 $stRun += @("/U", $rawUser, "/P", $rawPass)
@@ -2974,48 +3050,68 @@ $workerScript = {{
             $stDel += @("/TN", $tn, "/F")
 
             $createOut = (& schtasks.exe @stCreate 2>&1 | Out-String).Trim()
-            if ($LASTEXITCODE -ne 0) {{
+            if ($LASTEXITCODE -eq 0) {{
+                $runOut = (& schtasks.exe @stRun 2>&1 | Out-String).Trim()
+                Start-Sleep -Seconds 6
+                & schtasks.exe @stDel 2>$null | Out-Null
                 return [pscustomobject]@{{
                     hostname = $h
                     ip = $resolvedIp
-                    success = $false
+                    success = $true
                     method = "SMB+SchTasks"
-                    status = "failed"
-                    detail = "schtasks /Create falhou: $createOut" + ($(if ($winrmErr) {{ " | WinRM: $winrmErr" }} else {{ "" }}))
+                    status = "dispatched"
+                    detail = "Instalador disparado como SYSTEM via SMB/RPC ($runOut). Aguarde ~30s no painel."
                 }}
-            }}
-            $runOut = (& schtasks.exe @stRun 2>&1 | Out-String).Trim()
-            Start-Sleep -Seconds 6
-            & schtasks.exe @stDel 2>$null | Out-Null
-            return [pscustomobject]@{{
-                hostname = $h
-                ip = $resolvedIp
-                success = $true
-                method = "SMB+SchTasks"
-                status = "dispatched"
-                detail = "Instalador disparado como SYSTEM via SMB/RPC ($runOut). Aguarde ~30s no painel."
+            }} else {{
+                $smbErr = "schtasks /Create falhou: $createOut"
             }}
         }} catch {{
-            return [pscustomobject]@{{
-                hostname = $h
-                ip = $resolvedIp
-                success = $false
-                method = "SMB+SchTasks"
-                status = "failed"
-                detail = "Erro SMB (ADMIN): $($_.Exception.Message)" + ($(if ($winrmErr) {{ " | WinRM: $winrmErr" }} else {{ "" }}))
-            }}
+            $smbErr = "Erro SMB (ADMIN): $($_.Exception.Message)"
         }} finally {{
             Remove-PSDrive -Name $drvName -Force -ErrorAction SilentlyContinue
         }}
     }}
 
+    if ($wmiOpen -and $enc) {{
+        $cimSess = $null
+        try {{
+            $cimOpt = New-CimSessionOption -Protocol Dcom
+            $csParams = @{{
+                ComputerName = $targetHost
+                SessionOption = $cimOpt
+                ErrorAction = 'Stop'
+            }}
+            if ($null -ne $cred) {{ $csParams['Credential'] = $cred }}
+            $cimSess = New-CimSession @csParams
+            $cmdLine = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $enc"
+            $wmiOut = Invoke-CimMethod -CimSession $cimSess -ClassName Win32_Process -MethodName Create -Arguments @{{ CommandLine = $cmdLine }} -ErrorAction Stop
+            if ($wmiOut.ReturnValue -eq 0) {{
+                return [pscustomobject]@{{
+                    hostname = $h
+                    ip = $resolvedIp
+                    success = $true
+                    method = "WMI-DCOM"
+                    status = "dispatched"
+                    detail = "Processo remoto iniciado via WMI/RPC 135 (PID $($wmiOut.ProcessId)). Aguarde ~30s no painel."
+                }}
+            }} else {{
+                $wmiErr = "WMI Win32_Process.Create retornou codigo $($wmiOut.ReturnValue)"
+            }}
+        }} catch {{
+            $wmiErr = "WMI-DCOM: $($_.Exception.Message)"
+        }} finally {{
+            if ($null -ne $cimSess) {{ Remove-CimSession -CimSession $cimSess -ErrorAction SilentlyContinue }}
+        }}
+    }}
+
+    $errs = @($winrmErr, $smbErr, $wmiErr) | Where-Object {{ $_ }}
     return [pscustomobject]@{{
         hostname = $h
         ip = $resolvedIp
         success = $false
-        method = "WinRM"
+        method = "WinRM/SMB/WMI"
         status = "failed"
-        detail = $winrmErr
+        detail = ($errs -join " | ")
     }}
 }}
 
@@ -3026,7 +3122,7 @@ try {{
     foreach ($target in $hosts) {{
         $ps = [powershell]::Create()
         $ps.RunspacePool = $pool
-        [void]$ps.AddScript($workerScript).AddArgument([string]$target).AddArgument($remoteB64).AddArgument($cred).AddArgument($rawUser).AddArgument($rawPass)
+        [void]$ps.AddScript($workerScript).AddArgument([string]$target).AddArgument($remoteB64).AddArgument($encB64).AddArgument($cred).AddArgument($rawUser).AddArgument($rawPass)
         $jobs += [pscustomobject]@{{ PS = $ps; Handle = $ps.BeginInvoke(); Host = $target }}
     }}
     $results = @()
@@ -3114,6 +3210,464 @@ try {{
                 "results": results_list,
             }
         )
+
+
+class FleetADPublishGPOView(APIView):
+    """
+    POST /agents/ad-publish-gpo/
+    Generates an all-in-one DC AD Deploy script (mode='generate_dc_script') or publishes
+    the self-hosted Windows binaries + Install-TacticalRMM.ps1 to NETLOGON\\TacticalRMM and
+    creates/links the Domain Root Startup GPO 'Tactical RMM Enhanced - Deploy' directly
+    from the online AD probe/DC (mode='publish_from_probe').
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        import datetime as dt
+        from django.conf import settings
+        from knox.models import AuthToken
+        from accounts.models import User
+        from agents.utils import get_agent_url
+        from clients.models import Site
+        from core.utils import token_is_valid
+        from tacticalrmm.constants import AgentPlat, GoArch
+        from tacticalrmm.helpers import notify_error
+        from tacticalrmm.permissions import (
+            _has_perm,
+            _has_perm_on_agent,
+            _has_perm_on_site,
+        )
+
+        if not _has_perm(request, "can_install_agents"):
+            return notify_error("Permissão insuficiente para configurar deploy AD/GPO.")
+
+        mode = str(request.data.get("mode") or "publish_from_probe").strip()
+        site_id = request.data.get("site_id")
+        if not site_id:
+            return notify_error("Selecione o Cliente / Site de destino no Tactical RMM.")
+        try:
+            site = Site.objects.select_related("client").get(pk=int(site_id))
+        except (ValueError, TypeError, Site.DoesNotExist):
+            return notify_error("Site de destino inválido.")
+
+        if not _has_perm_on_site(request.user, site.pk):
+            return notify_error("Sem permissão neste Site.")
+
+        installer_user = User.objects.filter(is_installer_user=True).first()
+        if not installer_user:
+            return notify_error("Usuário instalador (is_installer_user) não encontrado.")
+
+        raw_agent_type = str(request.data.get("agent_type") or "both").lower()
+        if raw_agent_type not in ("both", "workstation", "server"):
+            raw_agent_type = "both"
+
+        rdp_flag = " --rdp" if int(request.data.get("rdp", 1)) else ""
+        ping_flag = " --ping" if int(request.data.get("ping", 1)) else ""
+        power_flag = " --power" if int(request.data.get("power", 0)) else ""
+        banking_mode = bool(request.data.get("banking_mode", True))
+        auto_link_gpo = bool(request.data.get("auto_link_gpo", True))
+        run_gpupdate = bool(request.data.get("run_gpupdate", True))
+
+        expires_h = 87600 if mode == "publish_from_probe" else 24
+        _, token = AuthToken.objects.create(
+            user=installer_user, expiry=dt.timedelta(hours=expires_h)
+        )
+
+        api_url = str(request.data.get("api") or "").strip().rstrip("/")
+        if not api_url:
+            api_url = f"{request.scheme}://{request.get_host()}".rstrip("/")
+
+        version = settings.LATEST_AGENT_VER
+        cors_origins = getattr(settings, "CORS_ORIGIN_WHITELIST", [])
+        base_web = (
+            cors_origins[0].rstrip("/")
+            if cors_origins
+            else f"{request.scheme}://{request.get_host()}".rstrip("/")
+        )
+        local_win_amd64 = f"{base_web}/agents/tacticalagent-v{version}-windows-amd64.exe"
+        local_win_386 = f"{base_web}/agents/tacticalagent-v{version}-windows-386.exe"
+        codesign_token, is_valid = token_is_valid()
+        win_url = get_agent_url(
+            goarch=GoArch.AMD64,
+            plat=AgentPlat.WINDOWS,
+            token=codesign_token if is_valid else "",
+        )
+        win_banking_snippet = (
+            f"\nif ($atype -eq 'workstation') {{ {WINDOWS_MESH_BANKING_PAUSE_CMD} }}"
+            if banking_mode
+            else ""
+        )
+        gpo_args = (
+            f"-m gpoinstall -api '{api_url}' -client-id {site.client_id} -site-id {site.pk} "
+            f"-agent-type $atype -auth '{token}' -silent -gpo"
+            f"{rdp_flag}{ping_flag}{power_flag}"
+        )
+
+        gpo_ps1_content = f"""$ErrorActionPreference = "Continue"
+$Folder = "C:\\ProgramData\\TacticalRMM"
+$LogFile = "$Folder\\gpo-install.log"
+New-Item -Path $Folder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+function Write-GpoLog([string]$Msg) {{
+    try {{
+        $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        Add-Content -Path $LogFile -Value "[$ts] $Msg" -Encoding UTF8 -ErrorAction SilentlyContinue
+    }} catch {{}}
+}}
+
+$TacticalSvc = Get-Service -Name "tacticalrmm" -ErrorAction SilentlyContinue
+if (-not $TacticalSvc) {{ $TacticalSvc = Get-Service -Name "tacticalagent" -ErrorAction SilentlyContinue }}
+$InstalledExe = "C:\\Program Files\\TacticalAgent\\tacticalrmm.exe"
+if (-not (Test-Path $InstalledExe)) {{ $InstalledExe = "C:\\Program Files\\TacticalAgent\\tacticalagent.exe" }}
+$RegProp = Get-ItemProperty -Path "HKLM:\\SOFTWARE\\TacticalRMM" -ErrorAction SilentlyContinue
+
+if ($TacticalSvc -and (Test-Path $InstalledExe) -and $RegProp -and $RegProp.AgentID) {{
+    if ($TacticalSvc.Status -ne 'Running') {{
+        Start-Service -Name $TacticalSvc.Name -ErrorAction SilentlyContinue
+    }}{win_banking_snippet}
+    exit 0
+}}
+
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+Write-GpoLog "Iniciando instalacao GPO em $env:COMPUTERNAME..."
+$Domain = ([System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().DomainName)
+$ArchBin = if ([Environment]::Is64BitOperatingSystem) {{ "tacticalagent-v{version}-windows-amd64.exe" }} else {{ "tacticalagent-v{version}-windows-386.exe" }}
+$NetCandidates = @()
+if ($Domain) {{
+    $NetCandidates = @(
+        "\\\\$Domain\\NETLOGON\\TacticalRMM\\$ArchBin",
+        "\\\\$Domain\\NETLOGON\\TacticalRMM\\tactical-agent.exe"
+    )
+}}
+$NetInstaller = $NetCandidates | Where-Object {{ Test-Path $_ }} | Select-Object -First 1
+$LocalInstaller = "$Folder\\tactical-agent.exe"
+$osType = if ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1) {{ 'workstation' }} else {{ 'server' }}
+$atype = if ('{raw_agent_type}' -eq 'both') {{ $osType }} else {{ '{raw_agent_type}' }}
+
+if ($NetInstaller) {{
+    Write-GpoLog "Copiando binário da rede: $NetInstaller"
+    Copy-Item -Path $NetInstaller -Destination $LocalInstaller -Force -ErrorAction SilentlyContinue
+    & $LocalInstaller {gpo_args} 2>&1 | Out-String | ForEach-Object {{ if ($_.Trim()) {{ Write-GpoLog $_.Trim() }} }}
+    Remove-Item $LocalInstaller -Force -ErrorAction SilentlyContinue{win_banking_snippet}
+}} else {{
+    $localUrl = if ([Environment]::Is64BitOperatingSystem) {{ '{local_win_amd64}' }} else {{ '{local_win_386}' }}
+    $dst = "$env:TEMP\\tacticalagent-setup.exe"
+    $downloadedLocal = $false
+    try {{
+        Invoke-WebRequest -Uri $localUrl -OutFile $dst -UseBasicParsing -TimeoutSec 45
+        if ((Test-Path $dst) -and ((Get-Item $dst).Length -gt 1048576)) {{ $downloadedLocal = $true }}
+    }} catch {{ $downloadedLocal = $false }}
+    if (-not $downloadedLocal) {{
+        Invoke-WebRequest -Uri '{win_url}' -OutFile $dst -UseBasicParsing
+        Start-Process -FilePath $dst -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait
+        Start-Sleep -Seconds 5
+    }}
+    $exe = "C:\\Program Files\\TacticalAgent\\tacticalrmm.exe"
+    if ((-not $downloadedLocal) -and (Test-Path $exe)) {{
+        & $exe {gpo_args}
+    }} else {{
+        & $dst {gpo_args}
+    }}{win_banking_snippet}
+}}
+"""
+        gpo_ps1_b64 = base64.b64encode(gpo_ps1_content.encode("utf-8")).decode("ascii")
+
+        if mode == "generate_dc_script":
+            dc_script = f"""# Tactical RMM Enhanced - Deploy Completo em Todo o Active Directory (Executar como Administrador no DC)
+# Cliente: {site.client.name} | Site: {site.name}
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ErrorActionPreference = 'Continue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+
+$rootDse = [ADSI]"LDAP://RootDSE"
+$defaultNC = [string]$rootDse.defaultNamingContext
+$domainDns = ([System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().DomainName)
+if (-not $defaultNC) {{ Write-Error "Este servidor nao esta em um dominio AD."; exit 1 }}
+Write-Host "[1/4] Dominio AD detectado: $domainDns ($defaultNC)" -ForegroundColor Cyan
+
+# 1. Instalar no proprio DC caso ainda nao esteja no Tactical
+$gpoScriptText = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{gpo_ps1_b64}'))
+$selfReg = Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\TacticalRMM' -ErrorAction SilentlyContinue
+if (-not ($selfReg -and $selfReg.AgentID)) {{
+    Write-Host "[*] Instalando Tactical Agent neste servidor DC ($env:COMPUTERNAME)..." -ForegroundColor Yellow
+    & ([scriptblock]::Create($gpoScriptText))
+}} else {{
+    Write-Host "[OK] DC ja registrado no Tactical (AgentID=$($selfReg.AgentID))." -ForegroundColor Green
+}}
+
+# 2. Publicar instaladores + GPO Script no NETLOGON
+$netDir = "\\\\$domainDns\\NETLOGON\\TacticalRMM"
+New-Item -Path $netDir -ItemType Directory -Force | Out-Null
+[System.IO.File]::WriteAllText("$netDir\\Install-TacticalRMM.ps1", $gpoScriptText, (New-Object System.Text.UTF8Encoding($false)))
+$downloads = @(
+    @{{ url = '{local_win_amd64}'; file = "$netDir\\tacticalagent-v{version}-windows-amd64.exe" }},
+    @{{ url = '{local_win_386}'; file = "$netDir\\tacticalagent-v{version}-windows-386.exe" }}
+)
+foreach ($d in $downloads) {{
+    try {{
+        Invoke-WebRequest -Uri $d.url -OutFile $d.file -UseBasicParsing -TimeoutSec 60
+        Write-Host "[2/4] Publicado em NETLOGON: $($d.file)" -ForegroundColor Green
+    }} catch {{
+        Write-Warning "Falha ao baixar $($d.url): $($_.Exception.Message)"
+    }}
+}}
+
+# 3. Criar e vincular GPO de Startup na raiz do dominio (cobre CRD, Computadores, Computers e raiz)
+if (Get-Command New-GPO -ErrorAction SilentlyContinue) {{
+    try {{
+        $gpoName = "Tactical RMM Enhanced - Deploy"
+        $gpo = Get-GPO -Name $gpoName -ErrorAction SilentlyContinue
+        if (-not $gpo) {{ $gpo = New-GPO -Name $gpoName -Comment "Deploy automatico Tactical RMM Enhanced" }}
+        $guid = $gpo.Id.ToString("B").ToUpper()
+        $sysvolBase = "\\\\$domainDns\\SYSVOL\\$domainDns\\Policies\\$guid"
+        $startupDir = "$sysvolBase\\Machine\\Scripts\\Startup"
+        New-Item -Path $startupDir -ItemType Directory -Force | Out-Null
+        $psIni = "`r`n[ScriptsConfig]`r`nStartExecutePSFirst=true`r`n[Startup]`r`n0CmdLine=\\\\$domainDns\\NETLOGON\\TacticalRMM\\Install-TacticalRMM.ps1`r`n0Parameters=`r`n"
+        [System.IO.File]::WriteAllText("$sysvolBase\\Machine\\Scripts\\psscripts.ini", $psIni, [System.Text.Encoding]::Unicode)
+        $gptPath = "$sysvolBase\\gpt.ini"
+        $curVer = 0
+        if (Test-Path $gptPath) {{
+            $gptRaw = Get-Content -Path $gptPath -Raw
+            if ($gptRaw -match 'Version=(\\d+)') {{ $curVer = [int]$Matches[1] }}
+        }}
+        $newVer = $curVer + 65536
+        [System.IO.File]::WriteAllText($gptPath, "[General]`r`nVersion=$newVer`r`n", [System.Text.Encoding]::ASCII)
+        $gpoEntry = [ADSI]"LDAP://$($gpo.Path)"
+        $gpoEntry.Put("versionNumber", $newVer)
+        $extVal = [string]$gpoEntry.gPCMachineExtensionNames
+        $scriptsCse = "[{{42B5FAAE-6536-11D2-AE5A-0000F87571E3}}{{40B6664F-4972-11D1-A7CA-0000F87571E3}}]"
+        if ($extVal -notmatch '42B5FAAE-6536-11D2-AE5A-0000F87571E3') {{
+            $gpoEntry.Put("gPCMachineExtensionNames", "$extVal$scriptsCse")
+        }}
+        $gpoEntry.SetInfo()
+        $existingLinks = (Get-GPInheritance -Target $defaultNC).GpoLinks | Where-Object {{ $_.DisplayName -eq $gpoName }}
+        if (-not $existingLinks) {{
+            New-GPLink -Name $gpoName -Target $defaultNC -LinkEnabled Yes | Out-Null
+        }}
+        Write-Host "[3/4] GPO '$gpoName' vinculada na raiz $defaultNC com startup script!" -ForegroundColor Green
+    }} catch {{
+        Write-Warning "Nao foi possivel automatizar a GPO via cmdlet (configure manualmente apontando para $netDir\\Install-TacticalRMM.ps1): $($_.Exception.Message)"
+    }}
+}}
+
+# 4. Varrer TODOS os computadores habilitados no AD e empurrar instalacao agora em paralelo
+$searchRoot = [ADSI]"LDAP://$defaultNC"
+$searcher = New-Object System.DirectoryServices.DirectorySearcher($searchRoot)
+$searcher.Filter = "(&(objectCategory=computer)(objectClass=computer)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+$searcher.PageSize = 1000
+$targets = @()
+foreach ($r in $searcher.FindAll()) {{
+    $h = if ($r.Properties.Contains("dnshostname") -and $r.Properties["dnshostname"].Count -gt 0) {{ [string]$r.Properties["dnshostname"][0] }} else {{ [string]$r.Properties["name"][0] }}
+    if ($h) {{ $targets += $h }}
+}}
+$searcher.Dispose()
+Write-Host "[4/4] Encontrados $($targets.Count) computadores habilitados em $domainDns. Disparando Push em paralelo..." -ForegroundColor Cyan
+
+$encCmd = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($gpoScriptText))
+$pool = [runspacefactory]::CreateRunspacePool(1, 8)
+$pool.Open()
+$jobs = @()
+foreach ($t in $targets) {{
+    $ps = [powershell]::Create()
+    $ps.RunspacePool = $pool
+    [void]$ps.AddScript({{
+        param($hostName, $scriptTxt, $enc)
+        $short = $hostName.Split('.')[0]
+        $reach = $false
+        $used = $hostName
+        foreach ($cand in @($hostName, $short)) {{
+            try {{
+                $dns = [System.Net.Dns]::GetHostAddresses($cand) | Where-Object {{ $_.AddressFamily -eq 'InterNetwork' }}
+                if ($dns) {{ $reach = $true; $used = $cand; break }}
+            }} catch {{}}
+        }}
+        if (-not $reach) {{ return "$hostName : OFFLINE_DNS" }}
+        try {{
+            $out = Invoke-Command -ComputerName $used -ErrorAction Stop -ScriptBlock {{ param($s) & ([scriptblock]::Create($s)) }} -ArgumentList $scriptTxt
+            return "$hostName : OK WinRM"
+        }} catch {{}}
+        try {{
+            $cOpt = New-CimSessionOption -Protocol Dcom
+            $cs = New-CimSession -ComputerName $used -SessionOption $cOpt -ErrorAction Stop
+            $w = Invoke-CimMethod -CimSession $cs -ClassName Win32_Process -MethodName Create -Arguments @{{ CommandLine = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $enc" }} -ErrorAction Stop
+            Remove-CimSession $cs -ErrorAction SilentlyContinue
+            if ($w.ReturnValue -eq 0) {{ return "$hostName : DISPARADO WMI" }}
+        }} catch {{}}
+        try {{
+            if (Get-Command Invoke-GPUpdate -ErrorAction SilentlyContinue) {{
+                Invoke-GPUpdate -Computer $used -RandomDelayInMinutes 0 -Force -ErrorAction Stop | Out-Null
+                return "$hostName : GPUPDATE_FORCED"
+            }}
+        }} catch {{}}
+        return "$hostName : PENDENTE_PROXIMO_BOOT_GPO"
+    }}).AddArgument($t).AddArgument($gpoScriptText).AddArgument($encCmd)
+    $jobs += [pscustomobject]@{{ Host = $t; PS = $ps; Handle = $ps.BeginInvoke() }}
+}}
+foreach ($j in $jobs) {{
+    try {{
+        $msg = $j.PS.EndInvoke($j.Handle)
+        Write-Host "  $msg"
+    }} catch {{
+        Write-Host "  $($j.Host) : ERRO"
+    }} finally {{
+        $j.PS.Dispose()
+    }}
+}}
+$pool.Close()
+$pool.Dispose()
+Write-Host "Concluido! Aguarde 30-60s e clique em Sincronizar 100% no Tactical RMM." -ForegroundColor Green
+"""
+            return Response(
+                {
+                    "ok": True,
+                    "mode": "generate_dc_script",
+                    "filename": "TacticalRMM-Deploy-All-AD.ps1",
+                    "script": dc_script,
+                }
+            )
+
+        # mode == 'publish_from_probe'
+        if not _has_perm(request, "can_send_cmd"):
+            return notify_error("Permissão can_send_cmd necessária para publicar via agente.")
+
+        preferred_id = request.data.get("probe_agent_id")
+        probe, _ = _pick_domain_probe_agent(
+            request.user, preferred_agent_id=preferred_id
+        )
+        if not probe:
+            return notify_error("Nenhum servidor AD/Windows online disponível.")
+        if not _has_perm_on_agent(request.user, probe.agent_id):
+            return notify_error("Sem permissão no agente selecionado.")
+
+        pub_cfg_b64 = base64.b64encode(
+            json.dumps(
+                {
+                    "gpo_ps1_b64": gpo_ps1_b64,
+                    "amd64_url": local_win_amd64,
+                    "x86_url": local_win_386,
+                    "amd64_name": f"tacticalagent-v{version}-windows-amd64.exe",
+                    "x86_name": f"tacticalagent-v{version}-windows-386.exe",
+                    "auto_link_gpo": auto_link_gpo,
+                    "run_gpupdate": run_gpupdate,
+                }
+            ).encode("utf-8")
+        ).decode("ascii")
+
+        publish_ps = rf"""[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ErrorActionPreference = 'Continue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+$cfg = ([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{pub_cfg_b64}'))) | ConvertFrom-Json
+$domain = ([System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().DomainName)
+if (-not $domain) {{
+    @{{ ok = $false; error = "Este agente nao esta em um dominio AD." }} | ConvertTo-Json -Compress
+    exit 0
+}}
+$netDir = "\\$domain\NETLOGON\TacticalRMM"
+try {{
+    New-Item -Path $netDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    $psText = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($cfg.gpo_ps1_b64))
+    [System.IO.File]::WriteAllText("$netDir\Install-TacticalRMM.ps1", $psText, (New-Object System.Text.UTF8Encoding($false)))
+    Invoke-WebRequest -Uri $cfg.amd64_url -OutFile "$netDir\$($cfg.amd64_name)" -UseBasicParsing -TimeoutSec 60
+    Invoke-WebRequest -Uri $cfg.x86_url -OutFile "$netDir\$($cfg.x86_name)" -UseBasicParsing -TimeoutSec 60
+}} catch {{
+    @{{ ok = $false; error = "Falha ao gravar em $netDir (execute em um DC ou conta com permissao NETLOGON): $($_.Exception.Message)" }} | ConvertTo-Json -Compress
+    exit 0
+}}
+
+$gpoResult = "NETLOGON publicado com sucesso."
+$gpoLinked = $false
+$gpupdateCount = 0
+if ($cfg.auto_link_gpo -and (Get-Command New-GPO -ErrorAction SilentlyContinue)) {{
+    try {{
+        $defaultNC = [string]([ADSI]"LDAP://RootDSE").defaultNamingContext
+        $gpoName = "Tactical RMM Enhanced - Deploy"
+        $gpo = Get-GPO -Name $gpoName -ErrorAction SilentlyContinue
+        if (-not $gpo) {{ $gpo = New-GPO -Name $gpoName -Comment "Deploy automatico Tactical RMM Enhanced" }}
+        $guid = $gpo.Id.ToString("B").ToUpper()
+        $sysvolBase = "\\$domain\SYSVOL\$domain\Policies\$guid"
+        New-Item -Path "$sysvolBase\Machine\Scripts\Startup" -ItemType Directory -Force | Out-Null
+        $psIni = "`r`n[ScriptsConfig]`r`nStartExecutePSFirst=true`r`n[Startup]`r`n0CmdLine=\\$domain\NETLOGON\TacticalRMM\Install-TacticalRMM.ps1`r`n0Parameters=`r`n"
+        [System.IO.File]::WriteAllText("$sysvolBase\Machine\Scripts\psscripts.ini", $psIni, [System.Text.Encoding]::Unicode)
+        $gptPath = "$sysvolBase\gpt.ini"
+        $curVer = 0
+        if (Test-Path $gptPath) {{
+            $gptRaw = Get-Content -Path $gptPath -Raw
+            if ($gptRaw -match 'Version=(\d+)') {{ $curVer = [int]$Matches[1] }}
+        }}
+        $newVer = $curVer + 65536
+        [System.IO.File]::WriteAllText($gptPath, "[General]`r`nVersion=$newVer`r`n", [System.Text.Encoding]::ASCII)
+        $gpoEntry = [ADSI]"LDAP://$($gpo.Path)"
+        $gpoEntry.Put("versionNumber", $newVer)
+        $extVal = [string]$gpoEntry.gPCMachineExtensionNames
+        $scriptsCse = "[{{42B5FAAE-6536-11D2-AE5A-0000F87571E3}}{{40B6664F-4972-11D1-A7CA-0000F87571E3}}]"
+        if ($extVal -notmatch '42B5FAAE-6536-11D2-AE5A-0000F87571E3') {{
+            $gpoEntry.Put("gPCMachineExtensionNames", "$extVal$scriptsCse")
+        }}
+        $gpoEntry.SetInfo()
+        $existingLinks = (Get-GPInheritance -Target $defaultNC).GpoLinks | Where-Object {{ $_.DisplayName -eq $gpoName }}
+        if (-not $existingLinks) {{
+            New-GPLink -Name $gpoName -Target $defaultNC -LinkEnabled Yes | Out-Null
+        }}
+        $gpoLinked = $true
+        $gpoResult = "NETLOGON publicado e GPO '$gpoName' vinculada na raiz $defaultNC!"
+        if ($cfg.run_gpupdate -and (Get-Command Invoke-GPUpdate -ErrorAction SilentlyContinue)) {{
+            $searcher = New-Object System.DirectoryServices.DirectorySearcher([ADSI]"LDAP://$defaultNC")
+            $searcher.Filter = "(&(objectCategory=computer)(objectClass=computer)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+            $searcher.PageSize = 500
+            foreach ($r in ($searcher.FindAll() | Select-Object -First 30)) {{
+                $cn = if ($r.Properties.Contains("dnshostname") -and $r.Properties["dnshostname"].Count -gt 0) {{ [string]$r.Properties["dnshostname"][0] }} else {{ [string]$r.Properties["name"][0] }}
+                if ($cn) {{
+                    try {{ Invoke-GPUpdate -Computer $cn -RandomDelayInMinutes 0 -Force -ErrorAction Stop | Out-Null; $gpupdateCount++ }} catch {{}}
+                }}
+            }}
+            $searcher.Dispose()
+        }}
+    }} catch {{
+        $gpoResult = "NETLOGON publicado, mas ajuste manual da GPO necessario: $($_.Exception.Message)"
+    }}
+}} else {{
+    $gpoResult = "NETLOGON publicado em $netDir (cmdlets GroupPolicy ausentes neste agente; aponte sua GPO para $netDir\Install-TacticalRMM.ps1)."
+}}
+
+@{{
+    ok = $true
+    netlogon_path = $netDir
+    gpo_linked = $gpoLinked
+    gpupdate_count = $gpupdateCount
+    message = $gpoResult
+}} | ConvertTo-Json -Compress
+"""
+        raw = asyncio.run(
+            probe.nats_cmd(
+                {
+                    "func": "rawcmd",
+                    "timeout": 90,
+                    "payload": {"command": _wrap_ps_utf8_b64(publish_ps), "shell": "powershell"},
+                },
+                timeout=95,
+            )
+        )
+        if raw in ("timeout", "natsdown", "error") or not raw:
+            return notify_error(f"Sem resposta do agente '{probe.hostname}': {raw}")
+
+        raw_str = str(raw).strip()
+        s_i, e_i = raw_str.find("{"), raw_str.rfind("}")
+        if s_i == -1 or e_i <= s_i:
+            return notify_error(f"Retorno inesperado: {raw_str[:400]}")
+        res_json = json.loads(raw_str[s_i : e_i + 1])
+        if not res_json.get("ok"):
+            return notify_error(res_json.get("error") or "Falha ao publicar GPO no AD.")
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            agent=probe.hostname,
+            agent_id=probe.agent_id,
+            object_type="agent",
+            action="agent_install",
+            message=f"AD NETLOGON/GPO publicado ({site.client.name}/{site.name}): {res_json.get('message', '')[:120]}",
+            debug_info={"ip": getattr(request, "_client_ip", "")},
+        )
+        return Response(res_json)
 
 
 class FleetBulkCLIView(APIView):
