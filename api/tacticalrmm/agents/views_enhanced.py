@@ -1170,7 +1170,14 @@ class AgentHardwareInventoryView(APIView):
 
         if agent.plat == "windows":
             if action == "gpupdate_force":
-                ps_adm = "gpupdate /force | Out-Null; Write-Output 'Políticas de Grupo (GPO) atualizadas com sucesso (gpupdate /force).'"
+                ps_adm = (
+                    "Start-Service -Name 'gpsvc','w32time' -ErrorAction SilentlyContinue; "
+                    "ipconfig /flushdns | Out-Null; "
+                    "$inDom = (Get-CimInstance Win32_ComputerSystem).PartOfDomain; "
+                    "if ($inDom) { $null = klist -lh 0 -li 0x3e7 purge 2>&1; ipconfig /registerdns | Out-Null }; "
+                    "$gpOut = ('N' | gpupdate /force /wait:25 2>&1) -join ' | '; "
+                    "Write-Output \"Políticas de Grupo (GPO) + DNS + Kerberos atualizados: $gpOut\""
+                )
             elif action == "clear_print_spooler":
                 ps_adm = (
                     "Stop-Service -Name 'Spooler' -Force -ErrorAction SilentlyContinue; "
@@ -1984,8 +1991,8 @@ class FleetSyncAndCleanupView(APIView):
 class FleetBulkCLIView(APIView):
     """
     POST /agents/fleet-bulk-cli/
-    Executes a command or preset action (e.g. Banking Compatibility Mode, Wallpaper Unlocker,
-    AD/GPO Sync, DNS/Spooler Reset, or custom PowerShell/CMD/Bash) across targeted agents in parallel.
+    Executes a command or preset action (e.g. Banking Compatibility Mode,
+    AD/GPO/DNS/Kerberos/Time Sync, or custom PowerShell/CMD/Bash) across targeted agents in parallel.
     """
 
     permission_classes = [IsAuthenticated, SendCommandPerms]
@@ -2008,32 +2015,30 @@ class FleetBulkCLIView(APIView):
                 "Write-Output 'Mesh Agent restaurado para execucao continua Automatica.'"
             ),
         },
-        "clean_wallpaper_lock": {
-            "plat": "windows",
-            "shell": "powershell",
-            "command": (
-                "Remove-ItemProperty -Path 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name 'Wallpaper','WallpaperStyle' -ErrorAction SilentlyContinue; "
-                "Get-ChildItem 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue | ForEach-Object { "
-                "$s = $_.PSChildName; "
-                "Remove-ItemProperty -Path \"Registry::HKEY_USERS\\$s\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\" -Name 'Wallpaper','WallpaperStyle' -ErrorAction SilentlyContinue; "
-                "$d = \"Registry::HKEY_USERS\\$s\\Control Panel\\Desktop\"; "
-                "if (Test-Path $d) { "
-                "$w = (Get-ItemProperty -Path $d -Name 'WallPaper' -ErrorAction SilentlyContinue).WallPaper; "
-                "if ($w -like '*systemprofile*' -or $w -like '*Wallpapers*') { "
-                "Set-ItemProperty -Path $d -Name 'WallPaper' -Value 'C:\\Windows\\Web\\Wallpaper\\Windows\\img0.jpg' -ErrorAction SilentlyContinue "
-                "} } }; "
-                "Get-ChildItem 'C:\\Windows\\system32\\config\\systemprofile\\AppData\\Local' -Directory -ErrorAction SilentlyContinue | "
-                "ForEach-Object { Remove-Item -Path (Join-Path $_.FullName 'Wallpapers') -Recurse -Force -ErrorAction SilentlyContinue }; "
-                "gpupdate /force | Out-Null; "
-                "Write-Output 'Trava de Papel de Parede (Policy / systemprofile) removida com sucesso!'"
-            ),
-        },
         "gpupdate_ad_sync": {
             "plat": "windows",
             "shell": "powershell",
             "command": (
-                "ipconfig /flushdns | Out-Null; ipconfig /registerdns | Out-Null; gpupdate /force; "
-                "Write-Output 'DNS e Politicas do Active Directory (GPO) sincronizados com sucesso.'"
+                "$ProgressPreference = 'SilentlyContinue'; "
+                "$cs = Get-CimInstance Win32_ComputerSystem; "
+                "$inDom = [bool]$cs.PartOfDomain; "
+                "$dom = if ($inDom) { $cs.Domain } else { $cs.Workgroup }; "
+                "foreach ($svc in @('w32time','gpsvc')) { Start-Service -Name $svc -ErrorAction SilentlyContinue }; "
+                "if ($inDom) { Start-Service -Name 'Netlogon' -ErrorAction SilentlyContinue }; "
+                "ipconfig /flushdns | Out-Null; "
+                "ipconfig /registerdns | Out-Null; "
+                "$timeSync = (w32tm /resync /nowait 2>&1) -join ' '; "
+                "$klistMsg = ''; "
+                "$domMsg = \"Workgroup ($dom)\"; "
+                "if ($inDom) { "
+                "$null = klist -lh 0 -li 0x3e7 purge 2>&1; "
+                "$klistMsg = 'Tickets Kerberos renovados | '; "
+                "$scOk = Test-ComputerSecureChannel -ErrorAction SilentlyContinue; "
+                "$dcLine = (nltest /dsgetdc:$dom 2>$null | Select-String 'DC:') -join ''; "
+                "$domMsg = \"Dominio: $dom | Canal Seguro: $scOk | $($dcLine.Trim())\" "
+                "}; "
+                "$gpOut = ('N' | gpupdate /force /wait:25 2>&1) -join ' | '; "
+                "Write-Output \"[$env:COMPUTERNAME] $domMsg | ${klistMsg}DNS limpo/registrado | Hora: $timeSync | GPO: $gpOut\""
             ),
         },
     }

@@ -1,5 +1,5 @@
 <template>
-  <q-layout container view="hHh lpr lfr">
+  <q-layout container view="hHh lpr lfr" class="trmm-subtabs">
     <q-header
       :class="{ 'bg-dark': $q.dark.isActive, 'bg-light': !$q.dark.isActive }"
     >

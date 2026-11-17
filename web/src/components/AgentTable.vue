@@ -1,13 +1,13 @@
 <template>
-  <div class="q-pa-none">
+  <div class="fit q-pa-none overflow-hidden">
     <q-table
       dense
       :table-class="{
         'table-bgcolor': !$q.dark.isActive,
         'table-bgcolor-dark': $q.dark.isActive,
       }"
-      class="agents-tbl-sticky"
-      :table-style="{ 'max-height': tableHeight }"
+      class="agents-tbl-sticky trmm-fill-table"
+      :table-style="{ 'max-height': '100%' }"
       :rows="agents"
       :filter="search"
       :filter-method="filterTable"
@@ -16,6 +16,10 @@
       row-key="id"
       binary-state-sort
       virtual-scroll
+      :virtual-scroll-item-size="30"
+      :virtual-scroll-slice-size="30"
+      :virtual-scroll-slice-ratio-before="1"
+      :virtual-scroll-slice-ratio-after="1"
       v-model:pagination="pagination"
       :rows-per-page-options="[0]"
       no-data-label="No Agents"
@@ -87,6 +91,7 @@
       <!-- body slots -->
       <template v-slot:body="props">
         <q-tr
+          data-no-translate="true"
           @contextmenu="agentRowSelected(props.row.agent_id, props.row.plat)"
           :props="props"
           :class="rowSelectedClass(props.row.agent_id)"
@@ -511,35 +516,41 @@ export default {
       const lowerTerms = terms ? terms.toLowerCase() : "";
       let advancedFilter = false;
       let availability = null;
+      let platformFilter = null;
       let checks = false;
       let patches = false;
       let actions = false;
       let reboot = false;
+      let maintenance = false;
       let outsideAd = false;
       let inAd = false;
-      let search = "";
+      const searchWords = [];
 
-      const params = lowerTerms.trim().split(" ");
+      const params = lowerTerms.trim().split(/\s+/).filter(Boolean);
       // parse search text and set variables
       params.forEach((param) => {
-        if (param.includes("is:")) {
+        if (param.startsWith("is:")) {
           advancedFilter = true;
-          let filter = param.split(":")[1];
+          const filter = param.slice(3);
           if (filter === "patchespending") patches = true;
-          if (filter === "actionspending") actions = true;
+          else if (filter === "actionspending") actions = true;
           else if (filter === "checksfailing") checks = true;
           else if (filter === "rebootneeded") reboot = true;
+          else if (filter === "maintenance") maintenance = true;
           else if (filter === "outsidead") outsideAd = true;
           else if (filter === "inad") inAd = true;
+          else if (filter === "windows" || filter === "linux" || filter === "darwin")
+            platformFilter = filter;
           else if (
             filter === "online" ||
             filter === "offline" ||
             filter === "expired" ||
-            filter === "overdue"
+            filter === "overdue" ||
+            filter === "disconnected"
           )
             availability = filter;
         } else {
-          search = param + "";
+          searchWords.push(param);
         }
       });
 
@@ -549,6 +560,8 @@ export default {
           if (patches && !row.has_patches_pending) return false;
           if (actions && row.pending_actions_count === 0) return false;
           if (reboot && !row.needs_reboot) return false;
+          if (maintenance && !row.maintenance_mode) return false;
+          if (platformFilter && row.plat !== platformFilter) return false;
           if (outsideAd) {
             const info = this.domainInfoFor(row.agent_id);
             if (!info || info.part_of_domain !== false) return false;
@@ -563,6 +576,8 @@ export default {
             return false;
           else if (availability === "overdue" && row.status !== "overdue")
             return false;
+          else if (availability === "disconnected" && row.status === "online")
+            return false;
           else if (availability === "expired") {
             let now = new Date();
             let last_seen = new Date(row.last_seen);
@@ -571,17 +586,21 @@ export default {
           }
         }
 
-        // Normal text filter
-        return allColumns.some((col) => {
-          let valObj = cellValue(col, row);
-          if (Array.isArray(valObj)) {
-            valObj = valObj.map((item) => (item.value ? item.value : item));
-          }
-          const val = valObj + "";
-          const haystack =
-            val === "undefined" || val === "null" ? "" : val.toLowerCase();
-          return haystack.indexOf(search) !== -1;
-        });
+        if (searchWords.length === 0) return true;
+
+        // Multi-word text filter: every word must match at least one column
+        return searchWords.every((word) =>
+          allColumns.some((col) => {
+            let valObj = cellValue(col, row);
+            if (Array.isArray(valObj)) {
+              valObj = valObj.map((item) => (item.value ? item.value : item));
+            }
+            const val = valObj + "";
+            const haystack =
+              val === "undefined" || val === "null" ? "" : val.toLowerCase();
+            return haystack.indexOf(word) !== -1;
+          }),
+        );
       });
     },
     rowDoubleClicked(agent_id, agentPlatform) {

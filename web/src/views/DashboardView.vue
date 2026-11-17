@@ -1,11 +1,12 @@
 <template>
-  <q-page>
-    <FileBar />
-    <ExecutiveKPIBar v-if="showKpiBar" />
+  <q-page class="column no-wrap overflow-hidden" style="height: calc(100vh - 50px)">
+    <FileBar style="flex: 0 0 auto" />
+    <ExecutiveKPIBar v-if="showKpiBar" style="flex: 0 0 auto" />
     <q-splitter
       v-model="clientTreeSplitter"
       :limits="[0, 40]"
-      :style="{ height: `${$q.screen.height - 50 - (showKpiBar ? 132 : 38)}px` }"
+      class="col full-width"
+      style="min-height: 0"
     >
       <template v-slot:before>
         <div
@@ -17,8 +18,8 @@
         </div>
         <div
           v-else
-          class="q-pa-sm q-gutter-sm scroll"
-          style="height: 85vh; overflow: initial"
+          class="q-pa-sm q-gutter-sm trmm-scroll-pane"
+          style="height: 100%; overflow-y: auto; overscroll-behavior: contain"
         >
           <q-list dense class="rounded-borders">
             <q-item
@@ -234,13 +235,14 @@
           reverse
           unit="px"
           horizontal
+          class="fit"
           @update:model-value="$store.commit('SET_SPLITTER', innerModel)"
-          after-class="hide-scrollbar"
-          before-class="hide-scrollbar"
+          after-class="column no-wrap overflow-hidden"
+          before-class="column no-wrap overflow-hidden"
           emit-immediately
         >
           <template v-slot:before>
-            <div class="row items-center no-wrap q-px-xs q-py-xs q-gutter-x-xs">
+            <div class="row items-center wrap q-px-xs q-py-xs q-gutter-xs" style="flex: 0 0 auto">
               <!-- Sidebar Toggle Button -->
               <q-btn
                 dense
@@ -265,22 +267,29 @@
                 align="left"
                 narrow-indicator
               >
-                <q-tab name="server" icon="fas fa-server" :label="t('nav.servers')" />
+                <q-tab
+                  name="server"
+                  icon="fas fa-server"
+                  :label="`${t('nav.servers')} (${serverTabCount})`"
+                />
                 <q-tab
                   name="workstation"
                   icon="computer"
-                  :label="t('nav.workstations')"
+                  :label="`${t('nav.workstations')} (${workstationTabCount})`"
                 />
-                <q-tab name="mixed" :label="t('dash.mixed')" />
+                <q-tab
+                  name="mixed"
+                  :label="`${t('dash.mixed')} (${agents.length})`"
+                />
               </q-tabs>
 
-              <!-- 1-Click Quick Filter Chips -->
-              <div class="row items-center no-wrap q-gutter-x-xs gt-sm" data-no-translate="true">
+              <!-- 1-Click Quick Category Chips -->
+              <div class="row items-center wrap q-gutter-xs" data-no-translate="true">
                 <q-chip
                   clickable
                   dense
                   size="12px"
-                  :color="search === '' ? 'primary' : 'grey-8'"
+                  :color="!hasAnyTokenFilter ? 'primary' : 'grey-8'"
                   text-color="white"
                   @click="clearFilter"
                 >
@@ -290,20 +299,21 @@
                   clickable
                   dense
                   size="12px"
-                  :color="search.includes('is:online') ? 'positive' : 'grey-8'"
+                  :color="hasToken('is:online') ? 'positive' : 'grey-8'"
                   text-color="white"
                   icon="check_circle"
                   @click="setQuickFilter('is:online')"
                 >
                   {{ t("dash.quickOnline") }} ({{ onlineCount }})
+                  <q-tooltip>Máquinas conectadas e respondendo em tempo real</q-tooltip>
                 </q-chip>
                 <q-chip
                   v-if="offlineOnlyCount > 0"
                   clickable
                   dense
                   size="12px"
-                  :color="search.includes('is:offline') ? 'warning' : 'grey-8'"
-                  :text-color="search.includes('is:offline') ? 'black' : 'white'"
+                  :color="hasToken('is:offline') ? 'warning' : 'grey-8'"
+                  :text-color="hasToken('is:offline') ? 'black' : 'white'"
                   icon="power_off"
                   @click="setQuickFilter('is:offline')"
                 >
@@ -314,19 +324,33 @@
                   clickable
                   dense
                   size="12px"
-                  :color="search.includes('is:overdue') ? 'deep-orange' : 'grey-8'"
+                  :color="hasToken('is:overdue') ? 'deep-orange' : 'grey-8'"
                   text-color="white"
                   icon="schedule"
                   @click="setQuickFilter('is:overdue')"
                 >
                   {{ t("dash.overdue") }} ({{ overdueOnlyCount }})
+                  <q-tooltip>Máquinas que passaram do tempo de check-in (Overdue)</q-tooltip>
+                </q-chip>
+                <q-chip
+                  v-if="offlineOrOverdueCount > 0"
+                  clickable
+                  dense
+                  size="12px"
+                  :color="hasToken('is:disconnected') ? 'brown-7' : 'grey-8'"
+                  text-color="white"
+                  icon="cloud_off"
+                  @click="setQuickFilter('is:disconnected')"
+                >
+                  Desconectados ({{ offlineOrOverdueCount }})
+                  <q-tooltip>Mostra todos Offline ({{ offlineOnlyCount }}) + Vencidos ({{ overdueOnlyCount }}) juntos</q-tooltip>
                 </q-chip>
                 <q-chip
                   v-if="failingChecksCount > 0"
                   clickable
                   dense
                   size="12px"
-                  :color="search.includes('is:checksfailing') ? 'negative' : 'grey-8'"
+                  :color="hasToken('is:checksfailing') ? 'negative' : 'grey-8'"
                   text-color="white"
                   icon="warning"
                   @click="setQuickFilter('is:checksfailing')"
@@ -338,7 +362,7 @@
                   clickable
                   dense
                   size="12px"
-                  :color="search.includes('is:rebootneeded') ? 'orange-9' : 'grey-8'"
+                  :color="hasToken('is:rebootneeded') ? 'orange-9' : 'grey-8'"
                   text-color="white"
                   icon="restart_alt"
                   @click="setQuickFilter('is:rebootneeded')"
@@ -350,12 +374,36 @@
                   clickable
                   dense
                   size="12px"
-                  :color="search.includes('is:outsidead') ? 'amber-9' : 'grey-8'"
+                  :color="hasToken('is:outsidead') ? 'amber-9' : 'grey-8'"
                   text-color="white"
                   icon="domain_disabled"
                   @click="setQuickFilter('is:outsidead')"
                 >
                   Fora do AD ({{ outsideAdCount }})
+                </q-chip>
+                <q-chip
+                  v-if="linuxCount > 0"
+                  clickable
+                  dense
+                  size="12px"
+                  :color="hasToken('is:linux') ? 'light-blue-8' : 'grey-8'"
+                  text-color="white"
+                  icon="mdi-linux"
+                  @click="setQuickFilter('is:linux')"
+                >
+                  Linux ({{ linuxCount }})
+                </q-chip>
+                <q-chip
+                  v-if="darwinCount > 0"
+                  clickable
+                  dense
+                  size="12px"
+                  :color="hasToken('is:darwin') ? 'blue-grey-6' : 'grey-8'"
+                  text-color="white"
+                  icon="mdi-apple"
+                  @click="setQuickFilter('is:darwin')"
+                >
+                  macOS ({{ darwinCount }})
                 </q-chip>
                 <q-chip
                   clickable
@@ -375,16 +423,16 @@
 
               <q-space />
 
-              <!-- Search & Filter Control -->
+              <!-- Search & Synced Advanced Filter Control -->
               <q-input
                 v-model="search"
-                style="width: 300px"
-                :label="t('dash.search')"
+                style="min-width: 240px; width: 290px"
+                label="Pesquisar PC, usuário, IP..."
                 dense
                 outlined
                 clearable
                 @clear="clearFilter"
-                class="q-pr-md"
+                class="q-pr-xs"
               >
                 <template v-slot:prepend>
                   <q-icon name="search" color="primary" />
@@ -395,142 +443,230 @@
                     dense
                     flat
                     icon="filter_alt"
-                    :color="isFilteringTable ? 'green' : ''"
+                    :color="isFilteringTable ? 'positive' : ''"
                   >
-                    <q-menu>
-                      <q-list dense>
-                        <q-item-label header>{{ t("dash.filterTable") }}</q-item-label>
+                    <q-badge v-if="activeFilterCount > 0" color="positive" floating>
+                      {{ activeFilterCount }}
+                    </q-badge>
+                    <q-tooltip>Filtros Avançados ({{ activeFilterCount }} ativos)</q-tooltip>
+                    <q-menu style="min-width: 310px; max-height: 75vh; overflow-y: auto">
+                      <q-list dense class="trmm-scroll-pane">
+                        <q-item-label header class="text-weight-bold text-primary">
+                          Saúde &amp; Manutenção
+                        </q-item-label>
 
-                        <q-item>
+                        <q-item tag="label" clickable v-ripple>
                           <q-item-section side>
-                            <q-checkbox v-model="filterChecksFailing" />
+                            <q-checkbox v-model="filterChecksFailing" @update:model-value="applyFilter" />
                           </q-item-section>
-
                           <q-item-section>
-                            <q-item-label>{{ t("dash.checksFailing") }}</q-item-label>
+                            <q-item-label>{{ t("dash.checksFailing") }} ({{ failingChecksCount }})</q-item-label>
                           </q-item-section>
                         </q-item>
 
-                        <q-item>
+                        <q-item tag="label" clickable v-ripple>
                           <q-item-section side>
-                            <q-checkbox v-model="filterPatchesPending" />
+                            <q-checkbox v-model="filterPatchesPending" @update:model-value="applyFilter" />
                           </q-item-section>
-
                           <q-item-section>
-                            <q-item-label>{{ t("dash.patchesPending") }}</q-item-label>
+                            <q-item-label>{{ t("dash.patchesPending") }} ({{ patchesPendingCount }})</q-item-label>
                           </q-item-section>
                         </q-item>
 
-                        <q-item>
+                        <q-item tag="label" clickable v-ripple>
                           <q-item-section side>
-                            <q-checkbox v-model="filterActionsPending" />
+                            <q-checkbox v-model="filterActionsPending" @update:model-value="applyFilter" />
                           </q-item-section>
-
                           <q-item-section>
                             <q-item-label>{{ t("dash.actionsPending") }}</q-item-label>
                           </q-item-section>
                         </q-item>
 
-                        <q-item>
+                        <q-item tag="label" clickable v-ripple>
                           <q-item-section side>
-                            <q-checkbox v-model="filterRebootNeeded" />
+                            <q-checkbox v-model="filterRebootNeeded" @update:model-value="applyFilter" />
                           </q-item-section>
-
                           <q-item-section>
-                            <q-item-label>{{ t("dash.rebootNeeded") }}</q-item-label>
+                            <q-item-label>{{ t("dash.rebootNeeded") }} ({{ rebootNeededCount }})</q-item-label>
                           </q-item-section>
                         </q-item>
 
-                        <q-item-label header>{{ t("kpi.availability") }}</q-item-label>
-
-                        <q-item>
+                        <q-item tag="label" clickable v-ripple>
                           <q-item-section side>
-                            <q-radio val="all" v-model="filterAvailability" />
+                            <q-checkbox v-model="filterMaintenance" @update:model-value="applyFilter" />
                           </q-item-section>
-
                           <q-item-section>
-                            <q-item-label>{{ t("dash.showAllAgents") }}</q-item-label>
+                            <q-item-label>Em Modo de Manutenção</q-item-label>
                           </q-item-section>
                         </q-item>
 
-                        <q-item>
-                          <q-item-section side>
-                            <q-radio
-                              val="online"
-                              v-model="filterAvailability"
-                            />
-                          </q-item-section>
+                        <q-separator class="q-my-xs" />
 
+                        <q-item-label header class="text-weight-bold text-primary">
+                          {{ t("kpi.availability") }}
+                        </q-item-label>
+
+                        <q-item tag="label" clickable v-ripple>
+                          <q-item-section side>
+                            <q-radio val="all" v-model="filterAvailability" @update:model-value="applyFilter" />
+                          </q-item-section>
                           <q-item-section>
-                            <q-item-label>{{ t("dash.showOnlineOnly") }}</q-item-label>
+                            <q-item-label>{{ t("dash.showAllAgents") }} ({{ filteredAgents.length }})</q-item-label>
                           </q-item-section>
                         </q-item>
 
-                        <q-item>
+                        <q-item tag="label" clickable v-ripple>
                           <q-item-section side>
-                            <q-radio
-                              val="offline"
-                              v-model="filterAvailability"
-                            />
+                            <q-radio val="online" v-model="filterAvailability" @update:model-value="applyFilter" />
                           </q-item-section>
-
                           <q-item-section>
-                            <q-item-label>{{ t("dash.showOfflineOnly") }}</q-item-label>
+                            <q-item-label>{{ t("dash.showOnlineOnly") }} ({{ onlineCount }})</q-item-label>
                           </q-item-section>
                         </q-item>
 
-                        <q-item>
+                        <q-item tag="label" clickable v-ripple>
                           <q-item-section side>
-                            <q-radio
-                              val="overdue"
-                              v-model="filterAvailability"
-                            />
+                            <q-radio val="disconnected" v-model="filterAvailability" @update:model-value="applyFilter" />
                           </q-item-section>
-
                           <q-item-section>
-                            <q-item-label>{{ t("dash.showOverdueOnly") }}</q-item-label>
+                            <q-item-label>Desconectados — Offline + Vencidos ({{ offlineOrOverdueCount }})</q-item-label>
                           </q-item-section>
                         </q-item>
 
-                        <q-item>
+                        <q-item tag="label" clickable v-ripple>
                           <q-item-section side>
-                            <q-radio
-                              val="offline_30days"
-                              v-model="filterAvailability"
-                            />
+                            <q-radio val="offline" v-model="filterAvailability" @update:model-value="applyFilter" />
                           </q-item-section>
+                          <q-item-section>
+                            <q-item-label>{{ t("dash.showOfflineOnly") }} ({{ offlineOnlyCount }})</q-item-label>
+                          </q-item-section>
+                        </q-item>
 
+                        <q-item tag="label" clickable v-ripple>
+                          <q-item-section side>
+                            <q-radio val="overdue" v-model="filterAvailability" @update:model-value="applyFilter" />
+                          </q-item-section>
+                          <q-item-section>
+                            <q-item-label>Apenas Vencidos / Overdue ({{ overdueOnlyCount }})</q-item-label>
+                          </q-item-section>
+                        </q-item>
+
+                        <q-item tag="label" clickable v-ripple>
+                          <q-item-section side>
+                            <q-radio val="offline_30days" v-model="filterAvailability" @update:model-value="applyFilter" />
+                          </q-item-section>
                           <q-item-section>
                             <q-item-label>{{ t("dash.showOffline30Days") }}</q-item-label>
                           </q-item-section>
                         </q-item>
+
+                        <q-separator class="q-my-xs" />
+
+                        <q-item-label header class="text-weight-bold text-primary">
+                          Sistema Operacional
+                        </q-item-label>
+
+                        <q-item tag="label" clickable v-ripple>
+                          <q-item-section side>
+                            <q-radio val="all" v-model="filterPlatform" @update:model-value="applyFilter" />
+                          </q-item-section>
+                          <q-item-section>
+                            <q-item-label>Todos os Sistemas</q-item-label>
+                          </q-item-section>
+                        </q-item>
+
+                        <q-item tag="label" clickable v-ripple>
+                          <q-item-section side>
+                            <q-radio val="windows" v-model="filterPlatform" @update:model-value="applyFilter" />
+                          </q-item-section>
+                          <q-item-section>
+                            <q-item-label>Windows ({{ windowsCount }})</q-item-label>
+                          </q-item-section>
+                        </q-item>
+
+                        <q-item tag="label" clickable v-ripple>
+                          <q-item-section side>
+                            <q-radio val="linux" v-model="filterPlatform" @update:model-value="applyFilter" />
+                          </q-item-section>
+                          <q-item-section>
+                            <q-item-label>Linux ({{ linuxCount }})</q-item-label>
+                          </q-item-section>
+                        </q-item>
+
+                        <q-item tag="label" clickable v-ripple>
+                          <q-item-section side>
+                            <q-radio val="darwin" v-model="filterPlatform" @update:model-value="applyFilter" />
+                          </q-item-section>
+                          <q-item-section>
+                            <q-item-label>macOS ({{ darwinCount }})</q-item-label>
+                          </q-item-section>
+                        </q-item>
+
+                        <q-separator class="q-my-xs" />
+
+                        <q-item-label header class="text-weight-bold text-primary">
+                          Active Directory (AD)
+                        </q-item-label>
+
+                        <q-item tag="label" clickable v-ripple>
+                          <q-item-section side>
+                            <q-radio val="all" v-model="filterAdStatus" @update:model-value="applyFilter" />
+                          </q-item-section>
+                          <q-item-section>
+                            <q-item-label>Todos</q-item-label>
+                          </q-item-section>
+                        </q-item>
+
+                        <q-item tag="label" clickable v-ripple>
+                          <q-item-section side>
+                            <q-radio val="inad" v-model="filterAdStatus" @update:model-value="applyFilter" />
+                          </q-item-section>
+                          <q-item-section>
+                            <q-item-label>Ingressados no AD ({{ insideAdCount }})</q-item-label>
+                          </q-item-section>
+                        </q-item>
+
+                        <q-item tag="label" clickable v-ripple>
+                          <q-item-section side>
+                            <q-radio val="outsidead" v-model="filterAdStatus" @update:model-value="applyFilter" />
+                          </q-item-section>
+                          <q-item-section>
+                            <q-item-label>Fora do AD / Workgroup ({{ outsideAdCount }})</q-item-label>
+                          </q-item-section>
+                        </q-item>
                       </q-list>
 
-                      <div class="row no-wrap q-pa-md">
-                        <div class="column">
-                          <q-btn
-                            v-close-popup
-                            :label="t('dash.apply')"
-                            color="primary"
-                            @click="applyFilter"
-                          />
-                        </div>
-                        <q-space />
-                        <div class="column">
-                          <q-btn :label="t('dash.clear')" @click="clearFilter" />
-                        </div>
+                      <div class="row no-wrap q-pa-sm q-gutter-sm justify-between">
+                        <q-btn
+                          outline
+                          no-caps
+                          dense
+                          color="grey"
+                          :label="t('dash.clear')"
+                          @click="clearFilter"
+                        />
+                        <q-btn
+                          v-close-popup
+                          unelevated
+                          no-caps
+                          dense
+                          color="primary"
+                          label="Fechar"
+                        />
                       </div>
                     </q-menu>
                   </q-btn>
                 </template>
               </q-input>
             </div>
-            <AgentTable
-              :agents="filteredAgents"
-              :columns="localizedColumns"
-              :search="search"
-              :visibleColumns="visibleColumns"
-            />
+            <div class="col full-width overflow-hidden" style="min-height: 0">
+              <AgentTable
+                :agents="filteredAgents"
+                :columns="localizedColumns"
+                :search="search"
+                :visibleColumns="visibleColumns"
+              />
+            </div>
           </template>
           <template v-slot:separator>
             <q-avatar
@@ -605,10 +741,13 @@ export default {
       search: this.$route.query.search ? this.$route.query.search : "",
       filterTextLength: 0,
       filterAvailability: "all",
+      filterPlatform: "all",
+      filterAdStatus: "all",
       filterPatchesPending: false,
       filterActionsPending: false,
       filterChecksFailing: false,
       filterRebootNeeded: false,
+      filterMaintenance: false,
       urlActions: [],
       columns: [
         {
@@ -764,7 +903,11 @@ export default {
   },
   watch: {
     search(newVal) {
-      if (newVal === "" || newVal === null) this.clearFilter();
+      if (newVal === "" || newVal === null) {
+        this.resetFilterStateOnly();
+      } else {
+        this.syncFiltersFromSearch(newVal);
+      }
     },
     selectedTree() {
       if (this.clearSearchWhenSwitching) this.clearFilter();
@@ -775,6 +918,53 @@ export default {
   },
   methods: {
     t,
+    hasToken(token) {
+      const tokens = String(this.search || "")
+        .toLowerCase()
+        .trim()
+        .split(/\s+/);
+      return tokens.includes(token.toLowerCase());
+    },
+    resetFilterStateOnly() {
+      this.filterTextLength = 0;
+      this.filterPatchesPending = false;
+      this.filterRebootNeeded = false;
+      this.filterChecksFailing = false;
+      this.filterActionsPending = false;
+      this.filterMaintenance = false;
+      this.filterAvailability = "all";
+      this.filterPlatform = "all";
+      this.filterAdStatus = "all";
+    },
+    syncFiltersFromSearch(val) {
+      const tokens = String(val || "")
+        .toLowerCase()
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+
+      this.filterChecksFailing = tokens.includes("is:checksfailing");
+      this.filterPatchesPending = tokens.includes("is:patchespending");
+      this.filterActionsPending = tokens.includes("is:actionspending");
+      this.filterRebootNeeded = tokens.includes("is:rebootneeded");
+      this.filterMaintenance = tokens.includes("is:maintenance");
+
+      if (tokens.includes("is:online")) this.filterAvailability = "online";
+      else if (tokens.includes("is:disconnected")) this.filterAvailability = "disconnected";
+      else if (tokens.includes("is:offline")) this.filterAvailability = "offline";
+      else if (tokens.includes("is:overdue")) this.filterAvailability = "overdue";
+      else if (tokens.includes("is:expired")) this.filterAvailability = "offline_30days";
+      else this.filterAvailability = "all";
+
+      if (tokens.includes("is:windows")) this.filterPlatform = "windows";
+      else if (tokens.includes("is:linux")) this.filterPlatform = "linux";
+      else if (tokens.includes("is:darwin")) this.filterPlatform = "darwin";
+      else this.filterPlatform = "all";
+
+      if (tokens.includes("is:outsidead")) this.filterAdStatus = "outsidead";
+      else if (tokens.includes("is:inad")) this.filterAdStatus = "inad";
+      else this.filterAdStatus = "all";
+    },
     async runFullFleetSync() {
       this.$q.loading.show({ message: "Sincronizando 100% dos agentes via NATS e limpando duplicatas..." });
       try {
@@ -811,12 +1001,30 @@ export default {
       this.$store.commit("SET_SPLITTER", this.innerModel);
     },
     setQuickFilter(token) {
-      if (this.search && this.search.trim() === token) {
-        this.clearFilter();
+      const availTokens = ["is:online", "is:offline", "is:overdue", "is:disconnected", "is:expired"];
+      const platTokens = ["is:windows", "is:linux", "is:darwin"];
+      const adTokens = ["is:outsidead", "is:inad"];
+      const rawTokens = String(this.search || "").trim().split(/\s+/).filter(Boolean);
+      const lowToken = token.toLowerCase();
+      const exists = rawTokens.some((tItem) => tItem.toLowerCase() === lowToken);
+
+      let nextTokens;
+      if (exists) {
+        nextTokens = rawTokens.filter((tItem) => tItem.toLowerCase() !== lowToken);
       } else {
-        this.filterTextLength = token.length;
-        this.search = token + " ";
+        nextTokens = rawTokens.filter((tItem) => {
+          const low = tItem.toLowerCase();
+          if (availTokens.includes(lowToken) && availTokens.includes(low)) return false;
+          if (platTokens.includes(lowToken) && platTokens.includes(low)) return false;
+          if (adTokens.includes(lowToken) && adTokens.includes(low)) return false;
+          return true;
+        });
+        nextTokens.push(token);
       }
+
+      const nextStr = nextTokens.join(" ");
+      this.search = nextStr ? `${nextStr} ` : "";
+      this.filterTextLength = this.search.length;
     },
     getTree() {
       this.$store.dispatch("loadTree");
@@ -949,60 +1157,36 @@ export default {
         });
     },
     clearFilter() {
-      this.filterTextLength = 0;
-      this.filterPatchesPending = false;
-      this.filterRebootNeeded = false;
-      this.filterChecksFailing = false;
-      this.filterActionsPending = false;
-      this.filterAvailability = "all";
+      this.resetFilterStateOnly();
       this.search = "";
     },
     applyFilter() {
-      // clear search if availability changes to all
-      if (
-        this.filterAvailability === "all" &&
-        (this.search.includes("is:online") ||
-          this.search.includes("is:offline") ||
-          this.search.includes("is:expired") ||
-          this.search.includes("is:overdue"))
-      )
-        this.clearFilter();
+      // Preserve any plain-text search words user typed while rebuilding is:* tokens
+      const freeWords = String(this.search || "")
+        .trim()
+        .split(/\s+/)
+        .filter((w) => w && !w.toLowerCase().startsWith("is:"));
 
-      // don't apply filter if nothing is being filtered
-      if (!this.isFilteringTable) return;
+      const tokens = [];
 
-      let filterText = "";
+      if (this.filterChecksFailing) tokens.push("is:checksfailing");
+      if (this.filterPatchesPending) tokens.push("is:patchespending");
+      if (this.filterActionsPending) tokens.push("is:actionspending");
+      if (this.filterRebootNeeded) tokens.push("is:rebootneeded");
+      if (this.filterMaintenance) tokens.push("is:maintenance");
 
-      if (this.filterPatchesPending) {
-        filterText += "is:patchespending ";
-      }
+      if (this.filterAvailability === "online") tokens.push("is:online");
+      else if (this.filterAvailability === "disconnected") tokens.push("is:disconnected");
+      else if (this.filterAvailability === "offline") tokens.push("is:offline");
+      else if (this.filterAvailability === "overdue") tokens.push("is:overdue");
+      else if (this.filterAvailability === "offline_30days") tokens.push("is:expired");
 
-      if (this.filterActionsPending) {
-        filterText += "is:actionspending ";
-      }
+      if (this.filterPlatform !== "all") tokens.push(`is:${this.filterPlatform}`);
+      if (this.filterAdStatus !== "all") tokens.push(`is:${this.filterAdStatus}`);
 
-      if (this.filterChecksFailing) {
-        filterText += "is:checksfailing ";
-      }
-
-      if (this.filterRebootNeeded) {
-        filterText += "is:rebootneeded ";
-      }
-
-      if (this.filterAvailability !== "all") {
-        if (this.filterAvailability === "online") {
-          filterText += "is:online ";
-        } else if (this.filterAvailability === "offline") {
-          filterText += "is:offline ";
-        } else if (this.filterAvailability === "offline_30days") {
-          filterText += "is:expired ";
-        } else if (this.filterAvailability === "overdue") {
-          filterText += "is:overdue ";
-        }
-      }
-
-      this.search = filterText;
-      this.filterTextLength = filterText.length - 1;
+      const combined = [...tokens, ...freeWords].join(" ").trim();
+      this.search = combined ? `${combined} ` : "";
+      this.filterTextLength = this.search.length;
     },
     getURLActions() {
       this.$axios.get("/core/urlaction/").then((r) => {
@@ -1064,9 +1248,24 @@ export default {
     allClientsActive() {
       return this.selectedTree === "";
     },
+    serverTabCount() {
+      return this.agents.filter((a) => a.monitoring_type === "server").length;
+    },
+    workstationTabCount() {
+      return this.agents.filter((a) => a.monitoring_type === "workstation").length;
+    },
     filteredAgents() {
       if (this.tab === "mixed") return this.agents;
       else return this.agents.filter((k) => k.monitoring_type === this.tab);
+    },
+    windowsCount() {
+      return this.filteredAgents.filter((a) => a.plat === "windows").length;
+    },
+    linuxCount() {
+      return this.filteredAgents.filter((a) => a.plat === "linux").length;
+    },
+    darwinCount() {
+      return this.filteredAgents.filter((a) => a.plat === "darwin").length;
     },
     onlineCount() {
       return this.filteredAgents.filter((a) => a.status === "online").length;
@@ -1101,14 +1300,23 @@ export default {
         (a) => map[a.agent_id] && map[a.agent_id].part_of_domain === true,
       ).length;
     },
+    hasAnyTokenFilter() {
+      return String(this.search || "").trim().length > 0;
+    },
+    activeFilterCount() {
+      let c = 0;
+      if (this.filterPatchesPending) c += 1;
+      if (this.filterActionsPending) c += 1;
+      if (this.filterChecksFailing) c += 1;
+      if (this.filterRebootNeeded) c += 1;
+      if (this.filterMaintenance) c += 1;
+      if (this.filterAvailability !== "all") c += 1;
+      if (this.filterPlatform !== "all") c += 1;
+      if (this.filterAdStatus !== "all") c += 1;
+      return c;
+    },
     isFilteringTable() {
-      return (
-        this.filterPatchesPending ||
-        this.filterActionsPending ||
-        this.filterChecksFailing ||
-        this.filterRebootNeeded ||
-        this.filterAvailability !== "all"
-      );
+      return this.activeFilterCount > 0;
     },
     localizedColumns() {
       const labelMap = {

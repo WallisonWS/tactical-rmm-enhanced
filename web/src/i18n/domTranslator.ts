@@ -619,12 +619,26 @@ export function installSiteWideTranslator(currentLocale: Ref<SupportedLocale>) {
   );
 
   let rafId: number | null = null;
-  const observer = new MutationObserver(() => {
+  const pendingRoots = new Set<Element>();
+  const observer = new MutationObserver((mutations) => {
     if (isApplying) return;
+    for (const m of mutations) {
+      m.addedNodes.forEach((n) => {
+        if (n instanceof Element) pendingRoots.add(n);
+        else if (n.parentElement) pendingRoots.add(n.parentElement);
+      });
+    }
+    if (pendingRoots.size === 0) return;
     if (rafId !== null) cancelAnimationFrame(rafId);
     rafId = requestAnimationFrame(() => {
       rafId = null;
-      runFullPass();
+      const batch = Array.from(pendingRoots);
+      pendingRoots.clear();
+      for (const el of batch) {
+        if (el.isConnected && !shouldSkipElement(el)) {
+          translateDomSubtree(el, currentLocale.value);
+        }
+      }
     });
   });
 

@@ -32,8 +32,9 @@
         class="q-mr-md text-caption"
         label="Auto-pausar Mesh ao sair"
       >
-        <q-tooltip>
-          Ao fechar esta janela de controle remoto, pausa o Mesh Agent automaticamente na estação para não bloquear sites de bancos (Warsaw / Topaz)
+        <q-tooltip max-width="340px">
+          <b>Modo Banco automático ao encerrar:</b><br />
+          Quando você fechar esta tela, o serviço <b>Mesh Agent</b> volta para repouso (Sob Demanda) para não ativar bloqueios de bancos (Warsaw / Topaz / GBPlugin). O agente <b>Tactical RMM permanece 100% online</b> e religa o Mesh automaticamente no próximo acesso remoto.
         </q-tooltip>
       </q-checkbox>
       <q-btn
@@ -44,8 +45,9 @@
         icon="account_balance"
         @click="pauseMeshForBanking"
       >
-        <q-tooltip>
-          Coloca o Mesh Agent em repouso (Sob Demanda) para que o funcionário use sites de bancos sem bloqueio, mantendo o monitoramento Tactical RMM 100% Online
+        <q-tooltip max-width="340px">
+          <b>O que este botão faz agora:</b><br />
+          Pausa somente o serviço de tela remota <b>Mesh Agent</b> (modo Manual / Sob Demanda) para liberar imediatamente o acesso a sites bancários (Warsaw / Topaz) sem desligar o monitoramento, alertas ou scripts do <b>Tactical RMM</b>.
         </q-tooltip>
       </q-btn>
       <q-btn

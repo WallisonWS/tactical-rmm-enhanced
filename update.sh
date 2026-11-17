@@ -667,6 +667,7 @@ python manage.py create_natsapi_conf
 python manage.py create_uwsgi_conf
 python manage.py clear_redis_celery_locks
 python manage.py post_update_tasks
+python manage.py shell -c "from core.models import CoreSettings; CoreSettings.objects.update(enable_server_webterminal=True, enable_server_scripts=True)" >/dev/null 2>&1 || true
 echo "Running management commands...please wait..."
 API=$(python manage.py get_config api)
 WEB_VERSION=$(python manage.py get_config webversion)
@@ -705,7 +706,14 @@ if ! [[ $CHECK_HOSTS ]]; then
   fi
 fi
 
+export PATH="/usr/local/go/bin:${PATH}"
+
 sudo mkdir -p /var/www/rmm/dist
+if [ -d /var/www/rmm/dist/agents ]; then
+  rm -rf /tmp/trmm_agents_backup
+  cp -a /var/www/rmm/dist/agents /tmp/trmm_agents_backup
+fi
+
 if [ -d /rmm/web ] && [ -f /rmm/web/package.json ]; then
   printf >&2 "${GREEN}Building Tactical RMM Enhanced Frontend (PT-BR / EN-US / ES-ES)...${NC}\n"
   cd /rmm/web
@@ -735,14 +743,22 @@ else
   rm -f /tmp/${webtar}
 fi
 
+if [ -d /tmp/trmm_agents_backup ]; then
+  sudo mkdir -p /var/www/rmm/dist/agents
+  sudo cp -a /tmp/trmm_agents_backup/. /var/www/rmm/dist/agents/
+  rm -rf /tmp/trmm_agents_backup
+fi
+
 if [ -d /rmm/rmmagent ] && command -v go >/dev/null 2>&1; then
-  printf >&2 "${GREEN}Rebuilding Enhanced Go Agents (Windows & Linux)...${NC}\n"
+  printf >&2 "${GREEN}Rebuilding Enhanced Go Agents (Windows, Linux & macOS)...${NC}\n"
   sudo mkdir -p /var/www/rmm/dist/agents
   sudo chown -R ${USER}:${USER} /var/www/rmm/dist/agents
   cd /rmm/rmmagent
   AGENT_VER=$(grep "^LATEST_AGENT_VER" "$SETTINGS_FILE" | awk -F'[= "]' '{print $5}')
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-linux-amd64" . || true
   CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-linux-arm64" . || true
+  CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-darwin-amd64" . || true
+  CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-darwin-arm64" . || true
   CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-windows-amd64.exe" . || true
   CGO_ENABLED=0 GOOS=windows GOARCH=386 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-windows-386.exe" . || true
 fi

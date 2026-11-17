@@ -97,8 +97,8 @@ export default function () {
         const availTable = Math.max(160, Screen.height - 50 - 40 - 78 - kpiOffset - val);
         state.tableHeight = `${availTable}px`;
 
-        // q-tabs are 37px
-        state.tabHeight = `${Math.max(40, val - 37)}px`;
+        // q-tabs + separator + borders are ~42px
+        state.tabHeight = `${Math.max(40, val - 42)}px`;
       },
       SET_SHOW_KPI_BAR(state, val) {
         state.showKpiBar = val;

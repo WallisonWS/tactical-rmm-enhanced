@@ -11,5 +11,6 @@
 build/Output
 tacticalagent-v*
 
-# Allow WinPTY agent binary (runtime dependency)
+# Allow WinPTY agent binary (runtime dependency) and embedded macOS helper script
 !agent/winpty_bins/**/winpty-agent.exe
+!agent/scripts/*.sh

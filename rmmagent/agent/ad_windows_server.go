@@ -538,20 +538,37 @@ Write-Output "Canal seguro reparado: $rep | Serviço Netlogon reiniciado e W32Ti
 		}
 
 	case "gpupdate_registerdns":
-		_ = exec.Command("ipconfig", "/flushdns").Run()
-		if profile.PartOfDomain {
-			_ = exec.Command("ipconfig", "/registerdns").Run()
-			_ = exec.Command("klist", "purge").Run()
-		}
-		out, err := exec.Command("gpupdate", "/force").CombinedOutput()
+		psCmd := `
+$ProgressPreference = 'SilentlyContinue'
+$cs = Get-CimInstance Win32_ComputerSystem
+$inDom = [bool]$cs.PartOfDomain
+$dom = if ($inDom) { $cs.Domain } else { $cs.Workgroup }
+foreach ($svc in @('w32time','gpsvc')) { Start-Service -Name $svc -ErrorAction SilentlyContinue }
+if ($inDom) { Start-Service -Name 'Netlogon' -ErrorAction SilentlyContinue }
+ipconfig /flushdns | Out-Null
+ipconfig /registerdns | Out-Null
+$timeSync = (w32tm /resync /nowait 2>&1) -join ' '
+$klistStatus = ''
+$domainSummary = "Workgroup ($dom)"
+if ($inDom) {
+  $null = klist -lh 0 -li 0x3e7 purge 2>&1
+  $klistStatus = 'Tickets Kerberos renovados | '
+  $scOk = Test-ComputerSecureChannel -ErrorAction SilentlyContinue
+  $dcLine = (nltest /dsgetdc:$dom 2>$null | Select-String 'DC:') -join ''
+  $domainSummary = "Dominio: $dom | Canal Seguro: $scOk | $($dcLine.Trim())"
+}
+$gpOut = ('N' | gpupdate /force /wait:25 2>&1) -join ' | '
+Write-Output "[$env:COMPUTERNAME] $domainSummary | ${klistStatus}DNS limpo/registrado | Hora: $timeSync | GPO: $gpOut"
+`
+		out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psCmd).CombinedOutput()
 		output = strings.TrimSpace(string(out))
 		if err != nil {
 			success = false
 		}
 		if profile.PartOfDomain {
-			steps = append(steps, "Cache DNS limpo, DNS registrado no AD e GPOs de Domínio atualizadas")
+			steps = append(steps, "Relógio (W32Time), tickets Kerberos, cache DNS, Canal Seguro e GPOs de Domínio sincronizados")
 		} else {
-			steps = append(steps, "Cache DNS limpo e Políticas de Grupo Locais (LGPO) atualizadas na unidade sem AD")
+			steps = append(steps, "Relógio (W32Time), cache DNS e Políticas Locais (LGPO) sincronizados na unidade sem AD")
 		}
 
 	case "sync_standalone_ntp":
@@ -683,7 +700,7 @@ $log += "Computador ingressado com sucesso no domínio Active Directory: $dom"
 
 if ($doRestart) {
   $log += "Reinicialização agendada para 10 segundos para aplicar o ingresso no AD."
-  Start-Process -FilePath "shutdown.exe" -ArgumentList "/r /t 10 /c `"Tactical RMM: Ingresso no Dominio Active Directory ($dom) concluido`"" -NoNewWindow
+  Start-Process -FilePath "shutdown.exe" -ArgumentList ('/r /t 10 /c "Tactical RMM: Ingresso no Dominio Active Directory (' + $dom + ') concluido"') -NoNewWindow
 }
 
 $log -join "` + "\n" + `"

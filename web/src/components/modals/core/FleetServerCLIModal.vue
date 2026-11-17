@@ -22,54 +22,87 @@
       <div class="text-subtitle2 q-mb-xs text-weight-bold">
         Ações Rápidas de 1 Clique (Executar em Toda a Frota Online):
       </div>
-      <div class="row q-gutter-sm">
-        <q-btn
-          unelevated
-          no-caps
-          color="teal-7"
-          icon="account_balance"
-          label="Ativar Modo Compatibilidade Bancária (Sem Bloqueio de Bancos)"
-          :loading="runningPreset === 'banking_mode_enable'"
-          @click="executePreset('banking_mode_enable', 'workstations')"
-        >
-          <q-tooltip>
-            Mantém o monitoramento Tactical RMM 100% Online e coloca o Mesh Agent em Modo Sob Demanda (Manual), evitando bloqueios do Warsaw/Topaz em sites de bancos. Quando você clicar em Assumir Controle, o Mesh liga sozinho!
-          </q-tooltip>
-        </q-btn>
+      <div class="row q-col-gutter-sm">
+        <div class="col-12 col-md-4">
+          <q-card flat bordered class="full-height column justify-between q-pa-sm">
+            <div>
+              <q-btn
+                unelevated
+                no-caps
+                color="teal-7"
+                icon="account_balance"
+                label="Modo Banco (Pausar Mesh)"
+                class="full-width"
+                :loading="runningPreset === 'banking_mode_enable'"
+                @click="executePreset('banking_mode_enable', 'workstations')"
+              >
+                <q-tooltip max-width="340px">
+                  Coloca o serviço Mesh Agent das estações Windows em modo Sob Demanda (Manual). Os sites de banco param de acusar bloqueio (Warsaw/Topaz/GBPlugin) e o monitoramento Tactical RMM segue 100% online.
+                </q-tooltip>
+              </q-btn>
+              <div class="text-caption q-mt-xs" style="line-height: 1.35">
+                Pausa apenas o controle remoto <b>Mesh Agent</b> (Sob Demanda) nas estações Windows para não bloquear internet banking (<b>Warsaw / Topaz</b>). O <b>Tactical RMM continua 100% online</b> e o Mesh religa sozinho ao clicar em Controle Remoto.
+              </div>
+            </div>
+            <div class="q-mt-xs">
+              <q-badge outline color="teal-5">Alvo: Estações de Trabalho Windows</q-badge>
+            </div>
+          </q-card>
+        </div>
 
-        <q-btn
-          unelevated
-          no-caps
-          color="deep-orange-7"
-          icon="wallpaper"
-          label="Remover Trava Papel de Parede (Tela Cinza / GPO)"
-          :loading="runningPreset === 'clean_wallpaper_lock'"
-          @click="executePreset('clean_wallpaper_lock', 'windows')"
-        >
-          <q-tooltip>
-            Remove a trava de registro HKLM/HKEY_USERS e a pasta systemprofile que deixava a tela cinza nos computadores.
-          </q-tooltip>
-        </q-btn>
+        <div class="col-12 col-md-4">
+          <q-card flat bordered class="full-height column justify-between q-pa-sm">
+            <div>
+              <q-btn
+                unelevated
+                no-caps
+                color="indigo-7"
+                icon="sync"
+                label="Sincronizar GPO / AD e DNS"
+                class="full-width"
+                :loading="runningPreset === 'gpupdate_ad_sync'"
+                @click="executePreset('gpupdate_ad_sync', 'windows', 45)"
+              >
+                <q-tooltip max-width="340px">
+                  Executa sincronização completa de Active Directory sem travar aguardando logoff: inicia W32Time/Netlogon/GPSVC, renova tickets Kerberos, limpa/registra DNS, testa Canal Seguro e aplica gpupdate /force.
+                </q-tooltip>
+              </q-btn>
+              <div class="text-caption q-mt-xs" style="line-height: 1.35">
+                Sincroniza relógio (<code>w32tm</code>), renova tickets <b>Kerberos</b> da máquina (<code>klist purge</code>), limpa e registra <b>DNS</b> (<code>flushdns</code> / <code>registerdns</code>), valida o <b>Canal Seguro</b> com o DC e força <code>gpupdate /force</code> sem travar.
+              </div>
+            </div>
+            <div class="q-mt-xs">
+              <q-badge outline color="indigo-4">Alvo: Todos os Computadores Windows</q-badge>
+            </div>
+          </q-card>
+        </div>
 
-        <q-btn
-          unelevated
-          no-caps
-          color="indigo-7"
-          icon="sync"
-          label="Sincronizar GPO / AD e Limpar DNS (gpupdate /force)"
-          :loading="runningPreset === 'gpupdate_ad_sync'"
-          @click="executePreset('gpupdate_ad_sync', 'windows')"
-        />
-
-        <q-btn
-          outline
-          no-caps
-          color="primary"
-          icon="autorenew"
-          label="Restaurar Mesh Contínuo"
-          :loading="runningPreset === 'banking_mode_disable'"
-          @click="executePreset('banking_mode_disable', 'windows')"
-        />
+        <div class="col-12 col-md-4">
+          <q-card flat bordered class="full-height column justify-between q-pa-sm">
+            <div>
+              <q-btn
+                outline
+                no-caps
+                color="primary"
+                icon="autorenew"
+                label="Restaurar Mesh Contínuo"
+                class="full-width"
+                :loading="runningPreset === 'banking_mode_disable'"
+                @click="executePreset('banking_mode_disable', 'windows')"
+              >
+                <q-tooltip max-width="340px">
+                  Reconfigura o serviço Mesh Agent para inicialização Automática contínua em todas as máquinas Windows online.
+                </q-tooltip>
+              </q-btn>
+              <div class="text-caption q-mt-xs" style="line-height: 1.35">
+                Restaura o serviço <b>Mesh Agent</b> para inicialização <b>Automática contínua</b> em segundo plano. Use somente em servidores ou máquinas que não acessem sistemas bancários com proteção Warsaw/Topaz.
+              </div>
+            </div>
+            <div class="q-mt-xs">
+              <q-badge outline color="primary">Alvo: Todos os Computadores Windows</q-badge>
+            </div>
+          </q-card>
+        </div>
       </div>
     </q-card-section>
 
@@ -242,14 +275,15 @@ function extractApiError(err: unknown, fallback: string): string {
   return maybeErr?.response?.data?.error || fallback;
 }
 
-async function executePreset(presetKey: string, defaultTarget: string) {
+async function executePreset(presetKey: string, defaultTarget: string, minTimeout?: number) {
   runningPreset.value = presetKey;
   loading.value = true;
+  const effectiveTimeout = minTimeout ? Math.max(timeoutSec.value, minTimeout) : timeoutSec.value;
   try {
     const res = await runFleetBulkCLI({
       preset: presetKey,
       target: defaultTarget,
-      timeout: timeoutSec.value,
+      timeout: effectiveTimeout,
       only_online: true,
     });
     lastResponse.value = res;

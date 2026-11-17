@@ -32,7 +32,11 @@
             :label="t('itsupport.gpupdate')"
             :loading="adminActionLoading"
             @click="onAdminAction('gpupdate_force')"
-          />
+          >
+            <q-tooltip max-width="320px">
+              Garante os serviços GPSVC/W32Time ativos, renova tickets Kerberos da máquina no AD, limpa/registra DNS e executa gpupdate /force sem travar.
+            </q-tooltip>
+          </q-btn>
           <q-btn
             dense
             color="teal"
@@ -194,7 +198,11 @@
                 label="GPO / LGPO + DNS"
                 :loading="adActionLoading"
                 @click="onADAction('gpupdate_registerdns')"
-              />
+              >
+                <q-tooltip max-width="320px">
+                  Sincroniza horário W32Time, renova tickets Kerberos da máquina, limpa e registra DNS, valida Canal Seguro com o DC e aplica gpupdate /force completo.
+                </q-tooltip>
+              </q-btn>
               <q-btn
                 dense
                 outline
