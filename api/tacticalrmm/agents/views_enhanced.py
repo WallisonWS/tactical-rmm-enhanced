@@ -2059,6 +2059,1063 @@ class FleetSyncAndCleanupView(APIView):
         )
 
 
+_AD_AUDIT_PS_SCRIPT = r"""[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ErrorActionPreference = 'Stop'
+try {
+    $rootDse = [ADSI]"LDAP://RootDSE"
+    $defaultNC = [string]$rootDse.defaultNamingContext
+    if (-not $defaultNC) {
+        @{ ok = $false; error = "Este computador nao esta ingressado em um dominio Active Directory (RootDSE defaultNamingContext vazio)." } | ConvertTo-Json -Compress
+        exit 0
+    }
+    $dcParts = @()
+    $dnTokens = [regex]::Split($defaultNC, '(?<!\\),')
+    foreach ($tok in $dnTokens) {
+        if ($tok -match '^DC=(.+)$') { $dcParts += ($Matches[1] -replace '\\(.)', '$1') }
+    }
+    $domainDns = ($dcParts -join '.').ToLower()
+    if (-not $domainDns) { $domainDns = ([string]$env:USERDNSDOMAIN).ToLower() }
+
+    $searchRoot = [ADSI]"LDAP://$defaultNC"
+    $searcher = New-Object System.DirectoryServices.DirectorySearcher($searchRoot)
+    $searcher.Filter = "(&(objectCategory=computer)(objectClass=computer))"
+    $searcher.PageSize = 1000
+    $searcher.SearchScope = [System.DirectoryServices.SearchScope]::Subtree
+    $propsToLoad = @("name","dnshostname","distinguishedname","operatingsystem","operatingsystemversion","description","useraccountcontrol","lastlogontimestamp","whencreated")
+    foreach ($p in $propsToLoad) { [void]$searcher.PropertiesToLoad.Add($p) }
+
+    function Get-AdProp($entry, [string]$prop) {
+        if ($entry.Properties.Contains($prop) -and $entry.Properties[$prop].Count -gt 0) {
+            return $entry.Properties[$prop][0]
+        }
+        return $null
+    }
+
+    $items = New-Object System.Collections.ArrayList
+    $results = $null
+    try {
+        $results = $searcher.FindAll()
+        foreach ($res in $results) {
+            $name = [string](Get-AdProp $res "name")
+            if (-not $name) { continue }
+            $dnsHost = [string](Get-AdProp $res "dnshostname")
+            $dn = [string](Get-AdProp $res "distinguishedname")
+            $osName = [string](Get-AdProp $res "operatingsystem")
+            $osVer = [string](Get-AdProp $res "operatingsystemversion")
+            $desc = [string](Get-AdProp $res "description")
+
+            $uacObj = Get-AdProp $res "useraccountcontrol"
+            $uac = if ($null -ne $uacObj) { [int64]$uacObj } else { 0 }
+            $enabled = (($uac -band 2) -eq 0)
+            $isDc = (($uac -band 8192) -ne 0)
+
+            $lastLogonIso = ""
+            $llObj = Get-AdProp $res "lastlogontimestamp"
+            if ($null -ne $llObj) {
+                $ft = [int64]$llObj
+                if ($ft -gt 0 -and $ft -lt 9223372036854775807) {
+                    try { $lastLogonIso = [datetime]::FromFileTimeUtc($ft).ToString("yyyy-MM-ddTHH:mm:ssZ") } catch {}
+                }
+            }
+
+            $createdIso = ""
+            $crObj = Get-AdProp $res "whencreated"
+            if ($crObj -is [datetime]) {
+                try { $createdIso = $crObj.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") } catch {}
+            }
+
+            $parentNames = New-Object System.Collections.ArrayList
+            $parentRaw = New-Object System.Collections.ArrayList
+            if ($dn) {
+                $parts = [regex]::Split($dn, '(?<!\\),')
+                if ($parts.Length -gt 1) {
+                    for ($idx = $parts.Length - 1; $idx -ge 1; $idx--) {
+                        $seg = $parts[$idx]
+                        if ($seg -notmatch '^DC=' -and $seg -match '^(?:OU|CN)=(.+)$') {
+                            [void]$parentRaw.Add($seg)
+                            [void]$parentNames.Add(($Matches[1] -replace '\\(.)', '$1'))
+                        }
+                    }
+                }
+            }
+
+            $isRootObj = ($parentNames.Count -eq 0)
+            $isDefaultCont = $false
+            $folderGroup = if ($isRootObj) { $domainDns } else { [string]$parentNames[0] }
+            $folderPath = if ($isRootObj) { $domainDns } else { ($parentNames.ToArray() -join " / ") }
+            if (-not $isRootObj -and ([string]$parentRaw[0] -like "CN=*")) {
+                $isDefaultCont = $true
+            }
+
+            [void]$items.Add([pscustomobject]@{
+                name = $name
+                dns_hostname = $dnsHost
+                distinguished_name = $dn
+                folder_group = $folderGroup
+                folder_path = $folderPath
+                is_root_domain = $isRootObj
+                is_default_container = $isDefaultCont
+                enabled = $enabled
+                is_dc = $isDc
+                operating_system = $osName
+                os_version = $osVer
+                description = $desc
+                last_logon = $lastLogonIso
+                when_created = $createdIso
+            })
+        }
+    } finally {
+        if ($null -ne $results) { $results.Dispose() }
+        $searcher.Dispose()
+    }
+
+    @{
+        ok = $true
+        domain = $domainDns
+        netbios = [string]$env:USERDOMAIN
+        default_nc = $defaultNC
+        probe_host = [string]$env:COMPUTERNAME
+        total = $items.Count
+        computers = @($items.ToArray())
+    } | ConvertTo-Json -Depth 4 -Compress
+} catch {
+    @{ ok = $false; error = $_.Exception.Message } | ConvertTo-Json -Compress
+}
+"""
+
+
+def _wrap_ps_utf8_b64(script: str) -> str:
+    b64 = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    return (
+        "& ([scriptblock]::Create("
+        "[System.Text.Encoding]::UTF8.GetString("
+        f"[Convert]::FromBase64String('{b64}')"
+        ")))"
+    )
+
+
+def _pick_domain_probe_agent(user, preferred_agent_id=None):
+    from tacticalrmm.constants import AGENT_DEFER, AgentPlat
+    from tacticalrmm.permissions import _has_perm_on_agent
+
+    win_agents = list(
+        Agent.objects.filter_by_role(user)
+        .filter(plat=AgentPlat.WINDOWS)
+        .select_related("site__client")
+        .defer(*AGENT_DEFER)
+    )
+
+    ranked = []
+    for ag in win_agents:
+        if ag.status != AGENT_STATUS_ONLINE:
+            continue
+        prof = _extract_wmi_profile(ag)
+        ad_info = prof.get("ad_info") if isinstance(prof.get("ad_info"), dict) else {}
+        domain_role = int(ad_info.get("domain_role_code") or 0)
+        part_of_domain = bool(ad_info.get("part_of_domain"))
+        domain_name = str(ad_info.get("domain") or "")
+        is_dc = domain_role >= 4
+        if is_dc:
+            tier = 0
+        elif ag.monitoring_type == "server" and part_of_domain:
+            tier = 1
+        elif ag.monitoring_type == "server":
+            tier = 2
+        elif part_of_domain:
+            tier = 3
+        else:
+            tier = 4
+
+        ranked.append(
+            (
+                tier,
+                ag.hostname.lower(),
+                ag,
+                {
+                    "agent_id": ag.agent_id,
+                    "hostname": ag.hostname,
+                    "client": ag.site.client.name,
+                    "site": ag.site.name,
+                    "monitoring_type": ag.monitoring_type,
+                    "domain": domain_name,
+                    "is_dc": is_dc,
+                    "part_of_domain": part_of_domain,
+                },
+            )
+        )
+
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    available_probes = [item[3] for item in ranked]
+    selected = ranked[0][2] if ranked else None
+
+    if preferred_agent_id:
+        for _, _, ag, _ in ranked:
+            if ag.agent_id == preferred_agent_id and _has_perm_on_agent(
+                user, ag.agent_id
+            ):
+                selected = ag
+                break
+
+    return selected, available_probes
+
+
+class FleetADDirectoryAuditView(APIView):
+    """
+    GET/POST /agents/ad-directory-audit/
+    Queries Active Directory directly via LDAP://RootDSE (DirectorySearcher) from an online
+    domain probe agent (preferring Domain Controllers / Windows Servers) and cross-references
+    ALL AD computer objects (CRD, Computadores, Computers, Domain Root, sub-OUs) against
+    Tactical RMM agents to list missing or broken computers.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _run_audit(self, request):
+        from tacticalrmm.constants import AGENT_DEFER
+        from tacticalrmm.helpers import notify_error
+        from tacticalrmm.permissions import _has_perm, _has_perm_on_agent
+
+        if not _has_perm(request, "can_list_agents"):
+            return notify_error("Permissão insuficiente para listar agentes/AD.")
+
+        preferred_id = (
+            request.query_params.get("probe_agent_id")
+            if request.method == "GET"
+            else request.data.get("probe_agent_id")
+        )
+        probe, available_probes = _pick_domain_probe_agent(
+            request.user, preferred_agent_id=preferred_id
+        )
+        if not probe:
+            return notify_error(
+                "Nenhum servidor ou computador Windows online encontrado para consultar o Active Directory."
+            )
+        if not _has_perm_on_agent(request.user, probe.agent_id):
+            return notify_error("Sem permissão no servidor consultado.")
+
+        cmd_payload = _wrap_ps_utf8_b64(_AD_AUDIT_PS_SCRIPT)
+        raw = asyncio.run(
+            probe.nats_cmd(
+                {
+                    "func": "rawcmd",
+                    "timeout": 60,
+                    "payload": {"command": cmd_payload, "shell": "powershell"},
+                },
+                timeout=65,
+            )
+        )
+        if raw in ("timeout", "natsdown", "error") or not raw:
+            return Response(
+                {
+                    "ok": False,
+                    "error": f"Falha ao consultar Active Directory via '{probe.hostname}' (resposta: {raw}).",
+                    "probe_agent": {
+                        "agent_id": probe.agent_id,
+                        "hostname": probe.hostname,
+                    },
+                    "available_probes": available_probes,
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        raw_str = str(raw).strip()
+        start_idx = raw_str.find("{")
+        end_idx = raw_str.rfind("}")
+        if start_idx == -1 or end_idx <= start_idx:
+            return Response(
+                {
+                    "ok": False,
+                    "error": f"Retorno inesperado do agente '{probe.hostname}': {raw_str[:400]}",
+                    "probe_agent": {
+                        "agent_id": probe.agent_id,
+                        "hostname": probe.hostname,
+                    },
+                    "available_probes": available_probes,
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        try:
+            ad_data = json.loads(raw_str[start_idx : end_idx + 1])
+        except Exception as exc:
+            return Response(
+                {
+                    "ok": False,
+                    "error": f"Erro ao decodificar resposta LDAP JSON de '{probe.hostname}': {exc}",
+                    "available_probes": available_probes,
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        if not ad_data.get("ok"):
+            return Response(
+                {
+                    "ok": False,
+                    "error": ad_data.get("error")
+                    or "Erro ao consultar Active Directory.",
+                    "probe_agent": {
+                        "agent_id": probe.agent_id,
+                        "hostname": probe.hostname,
+                    },
+                    "available_probes": available_probes,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Build fast lookup dictionary across all Tactical RMM agents visible to user
+        all_agents = list(
+            Agent.objects.filter_by_role(request.user)
+            .select_related("site__client")
+            .defer(*AGENT_DEFER)
+        )
+        tactical_lookup: Dict[str, Agent] = {}
+
+        def _prefer_agent(existing: Agent, candidate: Agent) -> Agent:
+            ex_online = 1 if existing.status == AGENT_STATUS_ONLINE else 0
+            ca_online = 1 if candidate.status == AGENT_STATUS_ONLINE else 0
+            if ca_online != ex_online:
+                return candidate if ca_online > ex_online else existing
+            if candidate.last_seen and existing.last_seen:
+                return (
+                    candidate
+                    if candidate.last_seen > existing.last_seen
+                    else existing
+                )
+            return existing
+
+        for ag in all_agents:
+            keys = set()
+            if ag.hostname:
+                h_up = ag.hostname.strip().upper()
+                keys.add(h_up)
+                keys.add(h_up.split(".")[0])
+            comp_sys = _flatten_wmi_section((ag.wmi_detail or {}).get("comp_sys"))
+            for field in ("Name", "DNSHostName", "Caption"):
+                val = str(comp_sys.get(field) or "").strip().upper()
+                if val:
+                    keys.add(val)
+                    keys.add(val.split(".")[0])
+            for k in keys:
+                if k in tactical_lookup:
+                    tactical_lookup[k] = _prefer_agent(tactical_lookup[k], ag)
+                else:
+                    tactical_lookup[k] = ag
+
+        now_utc = djangotime.now()
+        ad_computers_raw = ad_data.get("computers") or []
+        if isinstance(ad_computers_raw, dict):
+            ad_computers_raw = [ad_computers_raw]
+
+        rows: List[Dict[str, Any]] = []
+        folders: Dict[str, Dict[str, Any]] = {}
+
+        total_enabled = 0
+        present_cnt = 0
+        online_cnt = 0
+        offline_cnt = 0
+        missing_cnt = 0
+        missing_enabled_cnt = 0
+        missing_active_90d_cnt = 0
+        default_container_missing_cnt = 0
+        root_domain_missing_cnt = 0
+
+        for item in ad_computers_raw:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            dns_host = str(item.get("dns_hostname") or "").strip()
+            dn = str(item.get("distinguished_name") or "").strip()
+            folder_group = str(
+                item.get("folder_group") or ad_data.get("domain") or "AD"
+            ).strip()
+            folder_path = str(item.get("folder_path") or folder_group).strip()
+            enabled = bool(item.get("enabled", True))
+            is_dc = bool(item.get("is_dc", False))
+            is_default_cont = bool(item.get("is_default_container", False))
+            is_root_obj = bool(item.get("is_root_domain", False))
+            os_name = str(item.get("operating_system") or "").strip()
+            os_ver = str(item.get("os_version") or "").strip()
+            desc = str(item.get("description") or "").strip()
+            last_logon = str(item.get("last_logon") or "").strip()
+
+            days_since_logon = None
+            if last_logon:
+                with suppress(Exception):
+                    from datetime import datetime as dt_cls
+
+                    parsed = dt_cls.fromisoformat(last_logon.replace("Z", "+00:00"))
+                    days_since_logon = max(0, int((now_utc - parsed).days))
+
+            lookup_keys = [name.upper()]
+            if dns_host:
+                lookup_keys.append(dns_host.upper())
+                lookup_keys.append(dns_host.split(".")[0].upper())
+
+            matched: Agent | None = None
+            for lk in lookup_keys:
+                if lk in tactical_lookup:
+                    matched = tactical_lookup[lk]
+                    break
+
+            in_tactical = matched is not None
+            if matched is not None:
+                sync_state = matched.status
+            else:
+                sync_state = "missing"
+
+            if enabled:
+                total_enabled += 1
+            if in_tactical:
+                present_cnt += 1
+                if sync_state == AGENT_STATUS_ONLINE:
+                    online_cnt += 1
+                else:
+                    offline_cnt += 1
+            else:
+                missing_cnt += 1
+                if enabled:
+                    missing_enabled_cnt += 1
+                if enabled and days_since_logon is not None and days_since_logon <= 90:
+                    missing_active_90d_cnt += 1
+                if is_default_cont and enabled:
+                    default_container_missing_cnt += 1
+                if is_root_obj and enabled:
+                    root_domain_missing_cnt += 1
+
+            f_bucket = folders.setdefault(
+                folder_group,
+                {
+                    "folder": folder_group,
+                    "total": 0,
+                    "enabled": 0,
+                    "in_tactical": 0,
+                    "online": 0,
+                    "offline_or_overdue": 0,
+                    "missing": 0,
+                    "missing_enabled": 0,
+                    "missing_active_90d": 0,
+                    "is_default_container": is_default_cont,
+                    "is_root_domain": is_root_obj,
+                },
+            )
+            f_bucket["total"] += 1
+            if enabled:
+                f_bucket["enabled"] += 1
+            if in_tactical:
+                f_bucket["in_tactical"] += 1
+                if sync_state == AGENT_STATUS_ONLINE:
+                    f_bucket["online"] += 1
+                else:
+                    f_bucket["offline_or_overdue"] += 1
+            else:
+                f_bucket["missing"] += 1
+                if enabled:
+                    f_bucket["missing_enabled"] += 1
+                if enabled and days_since_logon is not None and days_since_logon <= 90:
+                    f_bucket["missing_active_90d"] += 1
+
+            rows.append(
+                {
+                    "name": name,
+                    "dns_hostname": dns_host,
+                    "distinguished_name": dn,
+                    "folder_group": folder_group,
+                    "folder_path": folder_path,
+                    "is_root_domain": is_root_obj,
+                    "is_default_container": is_default_cont,
+                    "enabled": enabled,
+                    "is_dc": is_dc,
+                    "operating_system": os_name,
+                    "os_version": os_ver,
+                    "description": desc,
+                    "last_logon": last_logon,
+                    "days_since_logon": days_since_logon,
+                    "in_tactical": in_tactical,
+                    "sync_state": sync_state,
+                    "agent_id": matched.agent_id if matched else None,
+                    "tactical_hostname": matched.hostname if matched else None,
+                    "tactical_client": matched.site.client.name if matched else None,
+                    "tactical_site": matched.site.name if matched else None,
+                    "tactical_site_id": matched.site_id if matched else None,
+                    "tactical_version": matched.version if matched else None,
+                    "tactical_last_seen": (
+                        matched.last_seen.isoformat()
+                        if (matched and matched.last_seen)
+                        else None
+                    ),
+                }
+            )
+
+        rows.sort(
+            key=lambda r: (
+                1 if r["in_tactical"] else 0,
+                0 if r["enabled"] else 1,
+                r["folder_group"].lower(),
+                r["name"].lower(),
+            )
+        )
+        folder_summary = sorted(
+            folders.values(),
+            key=lambda f: (-f["missing_enabled"], -f["total"], f["folder"].lower()),
+        )
+
+        diagnostics: List[str] = []
+        domain_name = ad_data.get("domain") or ""
+        if default_container_missing_cnt > 0:
+            diagnostics.append(
+                f"Há {default_container_missing_cnt} computador(es) habilitado(s) na pasta padrão 'Computers' (CN=Computers). "
+                "Containers padrão do AD NÃO aplicam GPOs vinculadas a OUs automaticamente — use 'Push Remoto' abaixo, "
+                "mova essas máquinas para uma OU (ex: 'Computadores' ou 'CRD') ou vincule a GPO na raiz do domínio."
+            )
+        if root_domain_missing_cnt > 0:
+            diagnostics.append(
+                f"Há {root_domain_missing_cnt} computador(es) diretamente na raiz '{domain_name}'. "
+                "Para receberem GPO automaticamente sem mover para uma OU, a GPO precisa estar vinculada na raiz do domínio."
+            )
+        if missing_enabled_cnt > 0:
+            diagnostics.append(
+                "Dica GPO: baixe a versão corrigida do 'Install-TacticalRMM.ps1' nesta janela — ele agora baixa o binário local do seu servidor RMM "
+                "e executa '-m gpoinstall' diretamente sem depender do GitHub ou Inno Setup '/VERYSILENT'."
+            )
+
+        return Response(
+            {
+                "ok": True,
+                "domain": domain_name,
+                "netbios": ad_data.get("netbios") or "",
+                "default_nc": ad_data.get("default_nc") or "",
+                "probe_agent": {
+                    "agent_id": probe.agent_id,
+                    "hostname": probe.hostname,
+                    "client": probe.site.client.name,
+                    "site": probe.site.name,
+                },
+                "available_probes": available_probes,
+                "summary": {
+                    "total_ad": len(rows),
+                    "enabled_ad": total_enabled,
+                    "disabled_ad": len(rows) - total_enabled,
+                    "present_in_tactical": present_cnt,
+                    "online_in_tactical": online_cnt,
+                    "offline_in_tactical": offline_cnt,
+                    "missing_from_tactical": missing_cnt,
+                    "missing_enabled": missing_enabled_cnt,
+                    "missing_active_90d": missing_active_90d_cnt,
+                    "default_container_missing": default_container_missing_cnt,
+                    "root_domain_missing": root_domain_missing_cnt,
+                },
+                "folder_summary": folder_summary,
+                "diagnostics": diagnostics,
+                "computers": rows,
+                "timestamp": now_utc.isoformat(),
+            }
+        )
+
+    def get(self, request):
+        return self._run_audit(request)
+
+    def post(self, request):
+        return self._run_audit(request)
+
+
+class FleetADPushInstallView(APIView):
+    """
+    POST /agents/ad-push-install/
+    Remotely deploys the Tactical RMM agent from an online AD Server / Probe Agent to
+    selected Active Directory hostnames using WinRM (5985) with automatic fallback to
+    SMB ADMIN$ + schtasks (/RU SYSTEM /RL HIGHEST), pulling directly from the local RMM server.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        import datetime as dt
+        from django.conf import settings
+        from knox.models import AuthToken
+        from accounts.models import User
+        from agents.utils import get_agent_url
+        from clients.models import Site
+        from core.utils import token_is_valid
+        from tacticalrmm.constants import AgentPlat, GoArch
+        from tacticalrmm.helpers import notify_error
+        from tacticalrmm.permissions import (
+            _has_perm,
+            _has_perm_on_agent,
+            _has_perm_on_site,
+        )
+
+        if not (
+            _has_perm(request, "can_install_agents")
+            and _has_perm(request, "can_send_cmd")
+        ):
+            return notify_error("Permissão insuficiente para instalar agentes remotamente.")
+
+        site_id = request.data.get("site_id")
+        if not site_id:
+            return notify_error("Selecione o Cliente / Site de destino no Tactical RMM.")
+        try:
+            site = Site.objects.select_related("client").get(pk=int(site_id))
+        except (ValueError, TypeError, Site.DoesNotExist):
+            return notify_error("Site de destino inválido.")
+
+        if not _has_perm_on_site(request.user, site.pk):
+            return notify_error("Sem permissão neste Site.")
+
+        raw_hosts = request.data.get("hostnames") or []
+        if not isinstance(raw_hosts, list) or not raw_hosts:
+            return notify_error("Selecione ao menos um computador do AD.")
+
+        clean_hosts: List[str] = []
+        seen_hosts = set()
+        host_re = re.compile(r"^[A-Za-z0-9._-]+$")
+        for h in raw_hosts:
+            val = str(h or "").strip()
+            if not val or not host_re.match(val) or val.startswith("-"):
+                continue
+            key = val.upper()
+            if key not in seen_hosts:
+                seen_hosts.add(key)
+                clean_hosts.append(val)
+        if not clean_hosts:
+            return notify_error("Nenhum hostname válido informado.")
+        if len(clean_hosts) > 20:
+            return notify_error(
+                "Por segurança e estabilidade, envie no máximo 20 computadores por lote."
+            )
+
+        preferred_id = request.data.get("probe_agent_id")
+        probe, _ = _pick_domain_probe_agent(
+            request.user, preferred_agent_id=preferred_id
+        )
+        if not probe:
+            return notify_error(
+                "Nenhum servidor ou agente Windows online disponível para executar o Push."
+            )
+        if not _has_perm_on_agent(request.user, probe.agent_id):
+            return notify_error("Sem permissão no servidor de origem selecionado.")
+
+        installer_user = User.objects.filter(is_installer_user=True).first()
+        if not installer_user:
+            return notify_error("Usuário instalador (is_installer_user) não encontrado.")
+
+        try:
+            expires_h = max(1, min(24, int(request.data.get("expires", 4))))
+        except (ValueError, TypeError):
+            expires_h = 4
+        _, token = AuthToken.objects.create(
+            user=installer_user, expiry=dt.timedelta(hours=expires_h)
+        )
+
+        raw_agent_type = str(request.data.get("agent_type") or "both").lower()
+        if raw_agent_type not in ("both", "workstation", "server"):
+            raw_agent_type = "both"
+
+        rdp_flag = " --rdp" if int(request.data.get("rdp", 1)) else ""
+        ping_flag = " --ping" if int(request.data.get("ping", 1)) else ""
+        power_flag = " --power" if int(request.data.get("power", 0)) else ""
+        banking_mode = bool(request.data.get("banking_mode", False))
+        force_reinstall = bool(request.data.get("force_reinstall", False))
+
+        api_url = str(request.data.get("api") or "").strip().rstrip("/")
+        if not api_url:
+            api_host = request.get_host()
+            api_url = f"{request.scheme}://{api_host}".rstrip("/")
+
+        version = settings.LATEST_AGENT_VER
+        cors_origins = getattr(settings, "CORS_ORIGIN_WHITELIST", [])
+        if cors_origins:
+            base_web = cors_origins[0].rstrip("/")
+        else:
+            base_web = f"{request.scheme}://{request.get_host()}".rstrip("/")
+
+        local_win_amd64 = f"{base_web}/agents/tacticalagent-v{version}-windows-amd64.exe"
+        local_win_386 = f"{base_web}/agents/tacticalagent-v{version}-windows-386.exe"
+        codesign_token, is_valid = token_is_valid()
+        win_url = get_agent_url(
+            goarch=GoArch.AMD64,
+            plat=AgentPlat.WINDOWS,
+            token=codesign_token if is_valid else "",
+        )
+
+        win_banking_snippet = (
+            f"\nif ($atype -eq 'workstation') {{ {WINDOWS_MESH_BANKING_PAUSE_CMD} }}"
+            if banking_mode
+            else ""
+        )
+        gpo_install_args = (
+            f"-m gpoinstall -api '{api_url}' -client-id {site.client_id} -site-id {site.pk} "
+            f"-agent-type $atype -auth '{token}' -silent -gpo"
+            f"{rdp_flag}{ping_flag}{power_flag}"
+        )
+
+        # Target-side self-contained installer script (runs as SYSTEM on each target machine)
+        target_install_script = f"""$ErrorActionPreference = 'Continue'
+$Folder = 'C:\\ProgramData\\TacticalRMM'
+$LogFile = "$Folder\\gpo-install.log"
+New-Item -Path $Folder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+function Write-PushLog([string]$m) {{
+    try {{
+        $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        Add-Content -Path $LogFile -Value "[$ts] $m" -Encoding UTF8 -ErrorAction SilentlyContinue
+    }} catch {{}}
+}}
+
+$Force = {'$true' if force_reinstall else '$false'}
+$TacticalSvc = Get-Service -Name 'tacticalrmm' -ErrorAction SilentlyContinue
+if (-not $TacticalSvc) {{ $TacticalSvc = Get-Service -Name 'tacticalagent' -ErrorAction SilentlyContinue }}
+$InstalledExe = 'C:\\Program Files\\TacticalAgent\\tacticalrmm.exe'
+if (-not (Test-Path $InstalledExe)) {{ $InstalledExe = 'C:\\Program Files\\TacticalAgent\\tacticalagent.exe' }}
+$RegProp = Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\TacticalRMM' -ErrorAction SilentlyContinue
+
+if ((-not $Force) -and $TacticalSvc -and (Test-Path $InstalledExe) -and $RegProp -and $RegProp.AgentID) {{
+    if ($TacticalSvc.Status -ne 'Running') {{
+        Start-Service -Name $TacticalSvc.Name -ErrorAction SilentlyContinue
+    }}
+    Write-Output "ALREADY_REGISTERED AgentID=$($RegProp.AgentID)"
+    exit 0
+}}
+
+Write-PushLog "Iniciando Push Deploy remoto (origem AD) em $env:COMPUTERNAME..."
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+$osType = if ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1) {{ 'workstation' }} else {{ 'server' }}
+$atype = if ('{raw_agent_type}' -eq 'both') {{ $osType }} else {{ '{raw_agent_type}' }}
+$localUrl = if ([Environment]::Is64BitOperatingSystem) {{ '{local_win_amd64}' }} else {{ '{local_win_386}' }}
+$dst = "$env:TEMP\\tacticalagent-push-setup.exe"
+$downloadedLocal = $false
+try {{
+    Invoke-WebRequest -Uri $localUrl -OutFile $dst -UseBasicParsing -TimeoutSec 45
+    if ((Test-Path $dst) -and ((Get-Item $dst).Length -gt 1048576)) {{ $downloadedLocal = $true }}
+}} catch {{
+    Write-PushLog "Falha ao baixar URL local ($localUrl): $($_.Exception.Message)"
+    $downloadedLocal = $false
+}}
+
+if (-not $downloadedLocal) {{
+    Invoke-WebRequest -Uri '{win_url}' -OutFile $dst -UseBasicParsing -TimeoutSec 60
+    Start-Process -FilePath $dst -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait
+    Start-Sleep -Seconds 5
+}}
+
+$exe = 'C:\\Program Files\\TacticalAgent\\tacticalrmm.exe'
+if (-not (Test-Path $exe)) {{ $exe = 'C:\\Program Files\\TacticalAgent\\tacticalagent.exe' }}
+if ((-not $downloadedLocal) -and (Test-Path $exe)) {{
+    & $exe {gpo_install_args} 2>&1 | Out-String | ForEach-Object {{ if ($_.Trim()) {{ Write-PushLog $_.Trim() }} }}
+}} else {{
+    & $dst {gpo_install_args} 2>&1 | Out-String | ForEach-Object {{ if ($_.Trim()) {{ Write-PushLog $_.Trim() }} }}
+}}{win_banking_snippet}
+Remove-Item -Path $dst -Force -ErrorAction SilentlyContinue
+
+$FinalReg = Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\TacticalRMM' -ErrorAction SilentlyContinue
+if ($FinalReg -and $FinalReg.AgentID) {{
+    Write-PushLog "Push Deploy OK AgentID=$($FinalReg.AgentID)"
+    Write-Output "OK AgentID=$($FinalReg.AgentID)"
+    exit 0
+}} else {{
+    Write-PushLog "Push Deploy finalizado sem AgentID gravado."
+    Write-Output "WARN No AgentID written"
+    exit 2
+}}
+"""
+        remote_b64 = base64.b64encode(target_install_script.encode("utf-8")).decode(
+            "ascii"
+        )
+
+        username = str(request.data.get("username") or "").strip()
+        password = str(request.data.get("password") or "")
+        # JSON-encode payload passed via B64 so credentials never touch shell string parsing
+        runner_config = json.dumps(
+            {
+                "hosts": clean_hosts,
+                "remote_b64": remote_b64,
+                "user": username,
+                "pass": password,
+            },
+            ensure_ascii=False,
+        )
+        cfg_b64 = base64.b64encode(runner_config.encode("utf-8")).decode("ascii")
+
+        probe_runner_ps = rf"""[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ErrorActionPreference = 'Continue'
+$cfgJson = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{cfg_b64}'))
+$cfg = $cfgJson | ConvertFrom-Json
+$hosts = @($cfg.hosts)
+$remoteB64 = [string]$cfg.remote_b64
+$rawUser = [string]$cfg.user
+$rawPass = [string]$cfg.pass
+
+$cred = $null
+if ($rawUser -and $rawPass) {{
+    $sec = ConvertTo-SecureString -String $rawPass -AsPlainText -Force
+    $cred = New-Object System.Management.Automation.PSCredential($rawUser, $sec)
+}}
+
+$workerScript = {{
+    param([string]$h, [string]$b64, $cred, [string]$rawUser, [string]$rawPass)
+    $ErrorActionPreference = 'Continue'
+
+    function Test-TcpPort([string]$targetHost, [int]$port, [int]$ms) {{
+        $c = New-Object System.Net.Sockets.TcpClient
+        try {{
+            $ar = $c.BeginConnect($targetHost, $port, $null, $null)
+            if ($ar.AsyncWaitHandle.WaitOne($ms, $false)) {{
+                $c.EndConnect($ar)
+                return $true
+            }}
+            return $false
+        }} catch {{
+            return $false
+        }} finally {{
+            $c.Close()
+        }}
+    }}
+
+    $resolvedIp = ""
+    try {{
+        $addrs = [System.Net.Dns]::GetHostAddresses($h) | Where-Object {{ $_.AddressFamily -eq 'InterNetwork' }}
+        if ($addrs) {{ $resolvedIp = $addrs[0].IPAddressToString }}
+    }} catch {{
+        return [pscustomobject]@{{
+            hostname = $h
+            ip = ""
+            success = $false
+            method = "DNS"
+            status = "offline_dns"
+            detail = "Host nao resolve no DNS (computador possivelmente desligado ou obsoleto no AD)."
+        }}
+    }}
+
+    $winrmOpen = Test-TcpPort $h 5985 1100
+    $smbOpen = Test-TcpPort $h 445 1100
+    if ((-not $winrmOpen) -and (-not $smbOpen)) {{
+        return [pscustomobject]@{{
+            hostname = $h
+            ip = $resolvedIp
+            success = $false
+            method = "TCP"
+            status = "unreachable"
+            detail = "Sem resposta nas portas WinRM (5985) e SMB (445) — PC desligado ou firewall bloqueando gerenciamento remoto."
+        }}
+    }}
+
+    $winrmErr = ""
+    if ($winrmOpen) {{
+        try {{
+            $icParams = @{{
+                ComputerName = $h
+                ErrorAction = 'Stop'
+                ArgumentList = @($b64)
+                ScriptBlock = {{
+                    param($innerB64)
+                    $code = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($innerB64))
+                    & ([scriptblock]::Create($code))
+                }}
+            }}
+            if ($null -ne $cred) {{ $icParams['Credential'] = $cred }}
+            $outLines = Invoke-Command @icParams
+            $outText = (($outLines | Out-String) -replace '\s+', ' ').Trim()
+            if ($outText -match 'ALREADY_REGISTERED') {{
+                return [pscustomobject]@{{
+                    hostname = $h
+                    ip = $resolvedIp
+                    success = $true
+                    method = "WinRM"
+                    status = "already_installed"
+                    detail = $outText
+                }}
+            }} elseif ($outText -match 'OK AgentID=') {{
+                return [pscustomobject]@{{
+                    hostname = $h
+                    ip = $resolvedIp
+                    success = $true
+                    method = "WinRM"
+                    status = "installed"
+                    detail = $outText
+                }}
+            }} else {{
+                $winrmErr = "WinRM executou com aviso: $outText"
+            }}
+        }} catch {{
+            $winrmErr = $_.Exception.Message
+        }}
+    }}
+
+    if ($smbOpen) {{
+        $drvName = "TRMM" + ([guid]::NewGuid().ToString("N").Substring(0, 8))
+        try {{
+            net use "\\$h\ADMIN$" /delete /y 2>$null | Out-Null
+            $ndParams = @{{
+                Name = $drvName
+                PSProvider = 'FileSystem'
+                Root = "\\$h\ADMIN$"
+                ErrorAction = 'Stop'
+            }}
+            if ($null -ne $cred) {{ $ndParams['Credential'] = $cred }}
+            [void](New-PSDrive @ndParams)
+            $tempDir = "${{drvName}}:\Temp"
+            if (-not (Test-Path $tempDir)) {{ New-Item -Path $tempDir -ItemType Directory -Force | Out-Null }}
+            $remotePs = "$tempDir\trmm-push-install.ps1"
+            $scriptBody = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))
+            [System.IO.File]::WriteAllText($remotePs, $scriptBody, (New-Object System.Text.UTF8Encoding($false)))
+
+            $tn = "TacticalRMM_ADPush"
+            $tr = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\Windows\Temp\trmm-push-install.ps1"
+            $stCreate = @("/Create", "/S", $h)
+            $stRun = @("/Run", "/S", $h)
+            $stDel = @("/Delete", "/S", $h)
+            if ($rawUser -and $rawPass) {{
+                $stCreate += @("/U", $rawUser, "/P", $rawPass)
+                $stRun += @("/U", $rawUser, "/P", $rawPass)
+                $stDel += @("/U", $rawUser, "/P", $rawPass)
+            }}
+            $stCreate += @("/TN", $tn, "/TR", $tr, "/SC", "ONCE", "/ST", "00:00", "/RL", "HIGHEST", "/RU", "SYSTEM", "/F")
+            $stRun += @("/TN", $tn)
+            $stDel += @("/TN", $tn, "/F")
+
+            $createOut = (& schtasks.exe @stCreate 2>&1 | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) {{
+                return [pscustomobject]@{{
+                    hostname = $h
+                    ip = $resolvedIp
+                    success = $false
+                    method = "SMB+SchTasks"
+                    status = "failed"
+                    detail = "schtasks /Create falhou: $createOut" + ($(if ($winrmErr) {{ " | WinRM: $winrmErr" }} else {{ "" }}))
+                }}
+            }}
+            $runOut = (& schtasks.exe @stRun 2>&1 | Out-String).Trim()
+            Start-Sleep -Seconds 6
+            & schtasks.exe @stDel 2>$null | Out-Null
+            return [pscustomobject]@{{
+                hostname = $h
+                ip = $resolvedIp
+                success = $true
+                method = "SMB+SchTasks"
+                status = "dispatched"
+                detail = "Instalador disparado como SYSTEM via SMB/RPC ($runOut). Aguarde ~30s no painel."
+            }}
+        }} catch {{
+            return [pscustomobject]@{{
+                hostname = $h
+                ip = $resolvedIp
+                success = $false
+                method = "SMB+SchTasks"
+                status = "failed"
+                detail = "Erro SMB (ADMIN): $($_.Exception.Message)" + ($(if ($winrmErr) {{ " | WinRM: $winrmErr" }} else {{ "" }}))
+            }}
+        }} finally {{
+            Remove-PSDrive -Name $drvName -Force -ErrorAction SilentlyContinue
+        }}
+    }}
+
+    return [pscustomobject]@{{
+        hostname = $h
+        ip = $resolvedIp
+        success = $false
+        method = "WinRM"
+        status = "failed"
+        detail = $winrmErr
+    }}
+}}
+
+$pool = [runspacefactory]::CreateRunspacePool(1, 5)
+$pool.Open()
+$jobs = @()
+try {{
+    foreach ($target in $hosts) {{
+        $ps = [powershell]::Create()
+        $ps.RunspacePool = $pool
+        [void]$ps.AddScript($workerScript).AddArgument([string]$target).AddArgument($remoteB64).AddArgument($cred).AddArgument($rawUser).AddArgument($rawPass)
+        $jobs += [pscustomobject]@{{ PS = $ps; Handle = $ps.BeginInvoke(); Host = $target }}
+    }}
+    $results = @()
+    foreach ($j in $jobs) {{
+        try {{
+            $res = $j.PS.EndInvoke($j.Handle)
+            if ($res) {{ $results += $res }}
+        }} catch {{
+            $results += [pscustomobject]@{{
+                hostname = $j.Host
+                ip = ""
+                success = $false
+                method = "Runner"
+                status = "failed"
+                detail = $_.Exception.Message
+            }}
+        }} finally {{
+            $j.PS.Dispose()
+        }}
+    }}
+    @{{ ok = $true; results = @($results) }} | ConvertTo-Json -Depth 4 -Compress
+}} finally {{
+    $rawPass = $null
+    $cred = $null
+    $cfgJson = $null
+    $pool.Close()
+    $pool.Dispose()
+}}
+"""
+        cmd_payload = _wrap_ps_utf8_b64(probe_runner_ps)
+        raw_out = asyncio.run(
+            probe.nats_cmd(
+                {
+                    "func": "rawcmd",
+                    "timeout": 85,
+                    "payload": {"command": cmd_payload, "shell": "powershell"},
+                },
+                timeout=92,
+            )
+        )
+        if raw_out in ("timeout", "natsdown", "error") or not raw_out:
+            return notify_error(
+                f"Falha ao executar Push Remoto a partir de '{probe.hostname}' (resposta: {raw_out})."
+            )
+
+        out_str = str(raw_out).strip()
+        s_idx = out_str.find("{")
+        e_idx = out_str.rfind("}")
+        if s_idx == -1 or e_idx <= s_idx:
+            return notify_error(
+                f"Retorno inesperado do servidor '{probe.hostname}': {out_str[:400]}"
+            )
+
+        try:
+            parsed = json.loads(out_str[s_idx : e_idx + 1])
+        except Exception as exc:
+            return notify_error(
+                f"Erro ao interpretar resultado do Push Remoto: {exc}"
+            )
+
+        results_list = parsed.get("results") or []
+        if isinstance(results_list, dict):
+            results_list = [results_list]
+
+        succeeded = sum(1 for r in results_list if r.get("success"))
+        AuditLog.objects.create(
+            username=request.user.username,
+            agent=probe.hostname,
+            agent_id=probe.agent_id,
+            object_type="agent",
+            action="agent_install",
+            message=f"AD Push Deploy ({site.client.name}/{site.name}) para {len(clean_hosts)} host(s): {succeeded} sucesso(s).",
+            debug_info={"ip": getattr(request, "_client_ip", "")},
+        )
+
+        return Response(
+            {
+                "ok": True,
+                "probe_agent": probe.hostname,
+                "client": site.client.name,
+                "site": site.name,
+                "total": len(results_list),
+                "succeeded": succeeded,
+                "failed": len(results_list) - succeeded,
+                "results": results_list,
+            }
+        )
+
+
 class FleetBulkCLIView(APIView):
     """
     POST /agents/fleet-bulk-cli/

@@ -82,7 +82,11 @@ if ($connectresult.TcpTestSucceeded -eq $true -or $X -ge 3) {
             $altExe = Join-Path $targetDir 'tacticalagent.exe'
             if (Test-Path $altExe) { $targetExe = $altExe }
         }
-        Start-Process -FilePath $targetExe -ArgumentList $installArgs -NoNewWindow -Wait
+        if (Test-Path $targetExe) {
+            Start-Process -FilePath $targetExe -ArgumentList $installArgs -NoNewWindow -Wait
+        } else {
+            Start-Process -FilePath $downloadedFile -ArgumentList $installArgs -NoNewWindow -Wait
+        }
         if ($bankingSafe -eq 1 -and ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1)) {
             Set-Service -Name 'Mesh Agent' -StartupType Manual -ErrorAction SilentlyContinue
             Stop-Service -Name 'Mesh Agent' -Force -ErrorAction SilentlyContinue

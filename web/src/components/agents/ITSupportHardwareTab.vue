@@ -171,6 +171,14 @@
               />
               <q-btn
                 dense
+                size="sm"
+                color="indigo-7"
+                icon="account_tree"
+                label="Auditar AD Completo (Faltantes no Tactical)"
+                @click="showFullAdAuditModal = true"
+              />
+              <q-btn
+                dense
                 outline
                 size="sm"
                 color="primary"
@@ -799,6 +807,13 @@
           </q-card-actions>
         </q-card>
       </q-dialog>
+
+      <q-dialog v-model="showFullAdAuditModal">
+        <ADDirectoryAuditModal
+          :initial-probe-agent-id="selectedAgentId"
+          @close="showFullAdAuditModal = false"
+        />
+      </q-dialog>
     </div>
   </div>
 </template>
@@ -830,6 +845,7 @@ import {
   type FleetADAuditAgentItem,
 } from "@/api/enhanced";
 import { notifySuccess, notifyError } from "@/utils/notify";
+import ADDirectoryAuditModal from "@/components/modals/agents/ADDirectoryAuditModal.vue";
 
 const props = defineProps<{
   agentId?: string;
@@ -861,6 +877,7 @@ const fleetAdFilterMode = ref<"outside" | "inside" | "all">("outside");
 const fleetAdSearch = ref("");
 
 const showJoinAdModal = ref(false);
+const showFullAdAuditModal = ref(false);
 const showJoinAdPassword = ref(false);
 const joiningAdLoading = ref(false);
 const joinAdTargetAgentId = ref("");

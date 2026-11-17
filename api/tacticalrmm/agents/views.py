@@ -936,15 +936,36 @@ def install_agent(request):
             else ""
         )
 
+        cors_origins = getattr(settings, "CORS_ORIGIN_WHITELIST", [])
+        if cors_origins:
+            base_web = cors_origins[0].rstrip("/")
+        else:
+            host = (
+                request.get_host()
+                if hasattr(request, "get_host")
+                else settings.ALLOWED_HOSTS[0]
+            )
+            base_web = f"{request.scheme}://{host}".rstrip("/")
+
+        local_win_amd64 = f"{base_web}/agents/tacticalagent-v{version}-windows-amd64.exe"
+        local_win_386 = f"{base_web}/agents/tacticalagent-v{version}-windows-386.exe"
+        gpo_install_args = (
+            f"-m gpoinstall -api '{api_url}' -client-id {client_id} -site-id {site_id} "
+            f"-agent-type $atype -auth '{token}' -silent -gpo"
+            f"{rdp_flag}{ping_flag}{power_flag}{insec_flag}"
+        )
+
         win_ps_oneliner = (
-            f"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; "
+            f"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13; "
             f"$osType = if ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1) {{ 'workstation' }} else {{ 'server' }}; "
             f"$atype = if ('{raw_agent_type}' -eq 'both') {{ $osType }} else {{ '{effective_agent_type}' }}; "
+            f"$localUrl = if ([Environment]::Is64BitOperatingSystem) {{ '{local_win_amd64}' }} else {{ '{local_win_386}' }}; "
             f"$dst = \"$env:TEMP\\tacticalagent-setup.exe\"; "
-            f"Invoke-WebRequest -Uri '{win_url}' -OutFile $dst -UseBasicParsing; "
-            f"Start-Process -FilePath $dst -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait; "
-            f"Start-Sleep -Seconds 5; "
-            f"& 'C:\\Program Files\\TacticalAgent\\tacticalrmm.exe' -m install --api '{api_url}' --client-id {client_id} --site-id {site_id} --agent-type $atype --auth '{token}' -silent{rdp_flag}{ping_flag}{power_flag}{insec_flag}"
+            f"$downloadedLocal = $false; "
+            f"try {{ Invoke-WebRequest -Uri $localUrl -OutFile $dst -UseBasicParsing -TimeoutSec 45; if ((Test-Path $dst) -and ((Get-Item $dst).Length -gt 1048576)) {{ $downloadedLocal = $true }} }} catch {{ $downloadedLocal = $false }}; "
+            f"if (-not $downloadedLocal) {{ Invoke-WebRequest -Uri '{win_url}' -OutFile $dst -UseBasicParsing; Start-Process -FilePath $dst -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait; Start-Sleep -Seconds 5 }}; "
+            f"$exe = 'C:\\Program Files\\TacticalAgent\\tacticalrmm.exe'; if (-not (Test-Path $exe)) {{ $exe = 'C:\\Program Files\\TacticalAgent\\tacticalagent.exe' }}; "
+            f"if ((-not $downloadedLocal) -and (Test-Path $exe)) {{ & $exe {gpo_install_args} }} else {{ & $dst {gpo_install_args} }}"
             f"{win_banking_suffix}"
         )
 
@@ -976,27 +997,74 @@ def install_agent(request):
             else ""
         )
 
-        ad_gpo_script = f"""$ErrorActionPreference = "SilentlyContinue"
-$Domain = ([System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().DomainName)
-if (-not $Domain) {{ $Domain = "SEU-DOMINIO" }}
+        ad_gpo_script = f"""$ErrorActionPreference = "Continue"
 $Folder = "C:\\ProgramData\\TacticalRMM"
-$NetInstaller = "\\\\$Domain\\NETLOGON\\TacticalRMM\\tactical-agent.exe"
-$LocalInstaller = "$Folder\\tactical-agent.exe"
+$LogFile = "$Folder\\gpo-install.log"
+New-Item -Path $Folder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+function Write-GpoLog([string]$Msg) {{
+    try {{
+        $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        Add-Content -Path $LogFile -Value "[$ts] $Msg" -Encoding UTF8 -ErrorAction SilentlyContinue
+    }} catch {{}}
+}}
 
-New-Item -Path $Folder -ItemType Directory -Force | Out-Null
+$TacticalSvc = Get-Service -Name "tacticalrmm" -ErrorAction SilentlyContinue
+if (-not $TacticalSvc) {{ $TacticalSvc = Get-Service -Name "tacticalagent" -ErrorAction SilentlyContinue }}
+$InstalledExe = "C:\\Program Files\\TacticalAgent\\tacticalrmm.exe"
+if (-not (Test-Path $InstalledExe)) {{ $InstalledExe = "C:\\Program Files\\TacticalAgent\\tacticalagent.exe" }}
+$RegProp = Get-ItemProperty -Path "HKLM:\\SOFTWARE\\TacticalRMM" -ErrorAction SilentlyContinue
 
-$Tactical = Get-Service -Name "tacticalrmm" -ErrorAction SilentlyContinue
-if ($Tactical) {{
-    if ($Tactical.Status -ne 'Running') {{ Start-Service -Name "tacticalrmm" -ErrorAction SilentlyContinue }}{ad_gpo_banking_snippet}
+if ($TacticalSvc -and (Test-Path $InstalledExe) -and $RegProp -and $RegProp.AgentID) {{
+    if ($TacticalSvc.Status -ne 'Running') {{
+        Write-GpoLog "Iniciando servico $($TacticalSvc.Name)..."
+        Start-Service -Name $TacticalSvc.Name -ErrorAction SilentlyContinue
+    }}{ad_gpo_banking_snippet}
     exit 0
 }}
 
-if (Test-Path $NetInstaller) {{
-    Copy-Item -Path $NetInstaller -Destination $LocalInstaller -Force
-    Start-Process -FilePath $LocalInstaller -ArgumentList "-silent" -Wait -NoNewWindow
+Write-GpoLog "Iniciando instalacao/reparo GPO em $env:COMPUTERNAME..."
+$Domain = ([System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().DomainName)
+$ArchBin = if ([Environment]::Is64BitOperatingSystem) {{ "tacticalagent-v{version}-windows-amd64.exe" }} else {{ "tacticalagent-v{version}-windows-386.exe" }}
+$NetCandidates = @()
+if ($Domain) {{
+    $NetCandidates = @(
+        "\\\\$Domain\\NETLOGON\\TacticalRMM\\$ArchBin",
+        "\\\\$Domain\\NETLOGON\\TacticalRMM\\tactical-agent.exe"
+    )
+}}
+$NetInstaller = $NetCandidates | Where-Object {{ Test-Path $_ }} | Select-Object -First 1
+$LocalInstaller = "$Folder\\tactical-agent.exe"
+
+if ($NetInstaller) {{
+    Write-GpoLog "Usando instalador de rede NETLOGON: $NetInstaller"
+    Copy-Item -Path $NetInstaller -Destination $LocalInstaller -Force -ErrorAction SilentlyContinue
+    $osType = if ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1) {{ 'workstation' }} else {{ 'server' }}
+    $atype = if ('{raw_agent_type}' -eq 'both') {{ $osType }} else {{ '{effective_agent_type}' }}
+    & $LocalInstaller {gpo_install_args} 2>&1 | Out-String | ForEach-Object {{ if ($_.Trim()) {{ Write-GpoLog $_.Trim() }} }}
+    $PostReg = Get-ItemProperty -Path "HKLM:\\SOFTWARE\\TacticalRMM" -ErrorAction SilentlyContinue
+    if (-not ($PostReg -and $PostReg.AgentID)) {{
+        Start-Process -FilePath $LocalInstaller -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait -NoNewWindow -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 4
+        if (Test-Path "C:\\Program Files\\TacticalAgent\\tacticalrmm.exe") {{
+            & "C:\\Program Files\\TacticalAgent\\tacticalrmm.exe" {gpo_install_args}
+        }}
+    }}
     Remove-Item $LocalInstaller -Force -ErrorAction SilentlyContinue{ad_gpo_banking_snippet}
 }} else {{
-    {win_ps_oneliner}
+    Write-GpoLog "Baixando agente diretamente do servidor RMM ({base_web})..."
+    try {{
+        {win_ps_oneliner}
+    }} catch {{
+        Write-GpoLog "ERRO na instalacao via HTTP: $($_.Exception.Message)"
+        exit 1
+    }}
+}}
+
+$FinalReg = Get-ItemProperty -Path "HKLM:\\SOFTWARE\\TacticalRMM" -ErrorAction SilentlyContinue
+if ($FinalReg -and $FinalReg.AgentID) {{
+    Write-GpoLog "Instalacao concluida com sucesso. AgentID=$($FinalReg.AgentID)"
+}} else {{
+    Write-GpoLog "AVISO: Instalacao executada, mas HKLM:\\SOFTWARE\\TacticalRMM\\AgentID ainda nao foi gravado."
 }}
 """
 

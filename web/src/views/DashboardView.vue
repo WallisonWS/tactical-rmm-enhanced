@@ -419,6 +419,20 @@
                     Verifica todos os agentes offline/vencidos via NATS em tempo real, remove duplicatas de máquinas formatadas e atualiza todos os contadores
                   </q-tooltip>
                 </q-chip>
+                <q-chip
+                  clickable
+                  dense
+                  size="12px"
+                  color="indigo-7"
+                  text-color="white"
+                  icon="account_tree"
+                  @click="showADDirectoryAuditModal = true"
+                >
+                  Auditoria AD
+                  <q-tooltip>
+                    Consulta o Active Directory (pastas CRD, Computadores, Computers, sub-OUs e raiz do domínio) e mostra computadores faltantes no Tactical RMM com Push Remoto em 1 clique
+                  </q-tooltip>
+                </q-chip>
               </div>
 
               <q-space />
@@ -687,6 +701,11 @@
     <q-dialog v-model="showInstallAgentModal" @hide="closeInstallAgent">
       <InstallAgent @close="closeInstallAgent" :sitepk="parseInt(sitePk)" />
     </q-dialog>
+
+    <!-- active directory full audit modal -->
+    <q-dialog v-model="showADDirectoryAuditModal">
+      <ADDirectoryAuditModal @close="showADDirectoryAuditModal = false" />
+    </q-dialog>
   </q-page>
 </template>
 
@@ -703,6 +722,7 @@ import ClientsForm from "@/components/clients/ClientsForm.vue";
 import SitesForm from "@/components/clients/SitesForm.vue";
 import DeleteClient from "@/components/clients/DeleteClient.vue";
 import InstallAgent from "@/components/modals/agents/InstallAgent.vue";
+import ADDirectoryAuditModal from "@/components/modals/agents/ADDirectoryAuditModal.vue";
 import AlertTemplateAdd from "@/components/modals/alerts/AlertTemplateAdd.vue";
 import IntegrationsContextMenu from "@/components/ui/IntegrationsContextMenu.vue";
 
@@ -719,6 +739,7 @@ export default {
     AgentTable,
     SubTableTabs,
     InstallAgent,
+    ADDirectoryAuditModal,
     IntegrationsContextMenu,
   },
   // allow child components to refresh table
@@ -735,6 +756,7 @@ export default {
   data() {
     return {
       showInstallAgentModal: false,
+      showADDirectoryAuditModal: false,
       sitePk: null,
       savedSidebarWidth: 15,
       innerModel: (this.$q.screen.height - 82) / 2,

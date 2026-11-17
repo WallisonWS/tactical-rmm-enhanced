@@ -48,6 +48,9 @@
               <q-item clickable v-close-popup @click="showInstallAgent = true">
                 <q-item-section>{{ t("filebar.installAgent") }}</q-item-section>
               </q-item>
+              <q-item clickable v-close-popup @click="showADDirectoryAuditModal = true">
+                <q-item-section>Auditoria AD × Tactical (Computadores Faltantes)</q-item-section>
+              </q-item>
               <q-item clickable v-close-popup @click="showDeployments">
                 <q-item-section>{{ t("filebar.manageDeployments") }}</q-item-section>
               </q-item>
@@ -292,6 +295,10 @@
       <q-dialog v-model="showFleetCLIModal">
         <FleetServerCLIModal @close="showFleetCLIModal = false" />
       </q-dialog>
+      <!-- AD Directory Audit Modal -->
+      <q-dialog v-model="showADDirectoryAuditModal">
+        <ADDirectoryAuditModal @close="showADDirectoryAuditModal = false" />
+      </q-dialog>
     </q-bar>
   </div>
 </template>
@@ -319,6 +326,7 @@ import CodeSign from "@/components/modals/coresettings/CodeSign.vue";
 import PermissionsManager from "@/components/accounts/PermissionsManager.vue";
 import FleetReportsModal from "@/components/modals/reports/FleetReportsModal.vue";
 import FleetServerCLIModal from "@/components/modals/core/FleetServerCLIModal.vue";
+import ADDirectoryAuditModal from "@/components/modals/agents/ADDirectoryAuditModal.vue";
 import { t } from "@/i18n";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -336,6 +344,7 @@ export default {
     CodeSign,
     FleetReportsModal,
     FleetServerCLIModal,
+    ADDirectoryAuditModal,
   },
   data() {
     return {
@@ -347,6 +356,7 @@ export default {
       showCodeSign: false,
       showFleetReportsModal: false,
       showFleetCLIModal: false,
+      showADDirectoryAuditModal: false,
       fleetReportType: "all",
     };
   },

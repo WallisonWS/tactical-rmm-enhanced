@@ -24,6 +24,16 @@ urlpatterns = [
         name="fleet_bulk_cli",
     ),
     path(
+        "ad-directory-audit/",
+        views_enhanced.FleetADDirectoryAuditView.as_view(),
+        name="fleet_ad_directory_audit",
+    ),
+    path(
+        "ad-push-install/",
+        views_enhanced.FleetADPushInstallView.as_view(),
+        name="fleet_ad_push_install",
+    ),
+    path(
         "<agent:agent_id>/telemetry/",
         views_enhanced.AgentLiveTelemetryView.as_view(),
         name="agent_live_telemetry",

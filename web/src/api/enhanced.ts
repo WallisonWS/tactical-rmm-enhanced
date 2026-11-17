@@ -706,3 +706,131 @@ export async function pauseAgentMeshForBanking(agentId: string, keepalive = fals
   return typeof data === "string" ? data : "Modo Banco ativado com sucesso.";
 }
 
+export interface ADDirectoryComputer {
+  name: string;
+  dns_hostname: string;
+  distinguished_name: string;
+  folder_group: string;
+  folder_path: string;
+  is_root_domain: boolean;
+  is_default_container: boolean;
+  enabled: boolean;
+  is_dc: boolean;
+  operating_system: string;
+  os_version: string;
+  description: string;
+  last_logon: string;
+  days_since_logon: number | null;
+  in_tactical: boolean;
+  sync_state: "online" | "offline" | "overdue" | "missing";
+  agent_id: string | null;
+  tactical_hostname: string | null;
+  tactical_client: string | null;
+  tactical_site: string | null;
+  tactical_site_id: number | null;
+  tactical_version: string | null;
+  tactical_last_seen: string | null;
+}
+
+export interface ADDirectoryFolderSummary {
+  folder: string;
+  total: number;
+  enabled: number;
+  in_tactical: number;
+  online: number;
+  offline_or_overdue: number;
+  missing: number;
+  missing_enabled: number;
+  missing_active_90d: number;
+  is_default_container: boolean;
+  is_root_domain: boolean;
+}
+
+export interface ADDirectoryProbeInfo {
+  agent_id: string;
+  hostname: string;
+  client: string;
+  site: string;
+  monitoring_type?: string;
+  domain?: string;
+  is_dc?: boolean;
+  part_of_domain?: boolean;
+}
+
+export interface ADDirectoryAuditReport {
+  ok: boolean;
+  error?: string;
+  domain: string;
+  netbios: string;
+  default_nc: string;
+  probe_agent: ADDirectoryProbeInfo;
+  available_probes: ADDirectoryProbeInfo[];
+  summary: {
+    total_ad: number;
+    enabled_ad: number;
+    disabled_ad: number;
+    present_in_tactical: number;
+    online_in_tactical: number;
+    offline_in_tactical: number;
+    missing_from_tactical: number;
+    missing_enabled: number;
+    missing_active_90d: number;
+    default_container_missing: number;
+    root_domain_missing: number;
+  };
+  folder_summary: ADDirectoryFolderSummary[];
+  diagnostics: string[];
+  computers: ADDirectoryComputer[];
+  timestamp: string;
+}
+
+export interface ADPushInstallResultItem {
+  hostname: string;
+  ip: string;
+  success: boolean;
+  method: string;
+  status: string;
+  detail: string;
+}
+
+export interface ADPushInstallResponse {
+  ok: boolean;
+  probe_agent: string;
+  client: string;
+  site: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: ADPushInstallResultItem[];
+}
+
+export async function fetchADDirectoryAudit(
+  probeAgentId?: string,
+): Promise<ADDirectoryAuditReport> {
+  const params = probeAgentId ? { probe_agent_id: probeAgentId } : undefined;
+  const { data } = await axios.get("/agents/ad-directory-audit/", { params });
+  return data;
+}
+
+export async function pushInstallADComputers(payload: {
+  hostnames: string[];
+  site_id: number;
+  probe_agent_id?: string;
+  agent_type?: "both" | "workstation" | "server";
+  rdp?: number;
+  ping?: number;
+  power?: number;
+  banking_mode?: boolean;
+  force_reinstall?: boolean;
+  username?: string;
+  password?: string;
+  api?: string;
+}): Promise<ADPushInstallResponse> {
+  const { data } = await axios.post("/agents/ad-push-install/", {
+    api: payload.api || getBaseUrl(),
+    ...payload,
+  });
+  return data;
+}
+
+
