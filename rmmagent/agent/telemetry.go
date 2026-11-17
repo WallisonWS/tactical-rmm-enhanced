@@ -109,8 +109,9 @@ func (a *Agent) GetLiveTelemetrySnapshot() LiveTelemetrySnapshot {
 	snap.NeedsReboot = rebootReq
 	snap.ProcessCount = len(a.GetProcsRPC())
 	bt := a.BootTime()
-	if bt > 0 && uint64(time.Now().Unix()) > bt {
-		snap.UptimeSeconds = uint64(time.Now().Unix()) - bt
+	nowUnix := time.Now().Unix()
+	if bt > 0 && nowUnix > bt {
+		snap.UptimeSeconds = uint64(nowUnix - bt)
 	}
 
 	return snap

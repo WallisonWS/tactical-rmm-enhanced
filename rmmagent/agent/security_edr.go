@@ -157,10 +157,10 @@ $admins = (Get-LocalGroupMember -Group 'Administrators' | Select-Object -ExpandP
 		lowerName := strings.ToLower(p.Name)
 		if strings.Contains(lowerName, "mimikatz") || strings.Contains(lowerName, "xmrig") || strings.Contains(lowerName, "ncat") {
 			report.SuspiciousProcesses = append(report.SuspiciousProcesses, SuspiciousProcRec{
-				PID:    p.PID,
+				PID:    int32(p.Pid),
 				Name:   p.Name,
 				Reason: "Known offensive/mining binary signature",
-				MemMB:  p.Memory / (1024 * 1024),
+				MemMB:  p.MemBytes / (1024 * 1024),
 				CPUPct: p.CPU,
 			})
 			report.SecurityScore -= 25

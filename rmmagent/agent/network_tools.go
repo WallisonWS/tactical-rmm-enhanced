@@ -100,7 +100,7 @@ func (a *Agent) GetActiveConnections() []NetConnectionInfo {
 
 	procMap := make(map[int32]string)
 	for _, p := range a.GetProcsRPC() {
-		procMap[p.PID] = p.Name
+		procMap[int32(p.Pid)] = p.Name
 	}
 
 	lines := strings.Split(out[0], "\n")
