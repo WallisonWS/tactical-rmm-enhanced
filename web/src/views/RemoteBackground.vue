@@ -36,8 +36,47 @@
         </div>
       </q-tab>
       <q-space />
+      <q-badge
+        v-if="natsOnline !== null"
+        :color="natsOnline ? 'positive' : 'negative'"
+        class="q-mr-xs text-caption"
+        :label="natsOnline ? 'NATS: Online' : 'NATS: Inacessível'"
+      />
+      <q-btn
+        v-if="natsOnline === false || meshNeedCheck"
+        dense
+        flat
+        size="sm"
+        color="warning"
+        icon="refresh"
+        label="Reconectar"
+        no-caps
+        class="q-mr-xs"
+        @click="reconnectSession"
+      />
       <LanguageSwitcher />
     </q-tabs>
+    <q-banner
+      v-if="diagnosticReason && (natsOnline === false || (usingLegacyMesh && meshConnected === false))"
+      dense
+      class="bg-negative text-white q-py-xs q-px-md"
+    >
+      <template v-slot:avatar>
+        <q-icon :name="natsOnline ? 'sync_problem' : 'cloud_off'" />
+      </template>
+      {{ diagnosticReason }}
+      <template v-slot:action>
+        <q-btn flat dense no-caps label="Testar Novamente" @click="reconnectSession" />
+        <q-btn
+          v-if="usingLegacyMesh"
+          flat
+          dense
+          no-caps
+          label="Recuperar Mesh"
+          @click="repairLegacyMesh"
+        />
+      </template>
+    </q-banner>
     <q-separator />
     <q-tab-panels v-show="tab !== 'filebrowser'" v-model="tab">
       <q-tab-panel name="terminal" class="q-pa-none">
@@ -48,7 +87,8 @@
           :terminalDefaults="terminalDefaults"
         />
         <iframe
-          v-else
+          v-else-if="terminal"
+          :key="`term-${meshFrameKey}`"
           allow="clipboard-read; clipboard-write"
           :src="terminal"
           :style="{
@@ -101,6 +141,7 @@
         fileBrowserDefaultsLoaded &&
         fileBrowserMode === 'legacy'
       "
+      :key="`file-${meshFrameKey}`"
       allow="clipboard-read; clipboard-write"
       :src="file"
       :style="{
@@ -141,16 +182,17 @@
 
 <script>
 // composition imports
-import { ref, computed, watch, onMounted, onBeforeUnmount, defineAsyncComponent } from "vue";
+import { ref, computed, watch, onMounted, defineAsyncComponent } from "vue";
 import { useRoute } from "vue-router";
 import { useQuasar, useMeta } from "quasar";
 import {
   fetchAgentMeshCentralURLs,
   fetchAgentTerminalDefaults,
   fetchAgentFileBrowserDefaults,
+  sendAgentRecoverMesh,
 } from "@/api/agents";
 import { fetchDashboardInfo } from "@/api/core";
-import { pauseAgentMeshForBanking } from "@/api/enhanced";
+import { notifyError, notifySuccess } from "@/utils/notify";
 import { syncDarkModeWithSavedPalette } from "@/utils/themePalettes";
 
 // ui imports
@@ -198,16 +240,54 @@ export default {
     let fileBrowserDefaultsPromise = null;
 
     const agent_id = computed(() => params.agent_id);
-    const isWinWorkstation = ref(false);
+    const natsOnline = ref(null);
+    const meshConnected = ref(null);
+    const diagnosticReason = ref("");
+    const meshFrameKey = ref(0);
+    const usingLegacyMesh = computed(
+      () =>
+        (tab.value === "terminal" && terminalMode.value === "legacy") ||
+        (tab.value === "filebrowser" && fileBrowserMode.value === "legacy"),
+    );
+    const meshNeedCheck = computed(() => usingLegacyMesh.value && meshConnected.value === false);
 
-    async function getMeshURLs() {
-      const data = await fetchAgentMeshCentralURLs(params.agent_id);
-      terminal.value = data.terminal;
-      file.value = data.file;
-      isWinWorkstation.value = data.monitoring_type === "workstation" && data.plat === "windows";
-      useMeta({
-        title: `${data.hostname} - ${data.client} - ${data.site} | Remote Background`,
-      });
+    async function getMeshURLs(wake = false) {
+      try {
+        const data = await fetchAgentMeshCentralURLs(params.agent_id, wake ? { wake: 1 } : { wake: 0 });
+        if (!data) return;
+        terminal.value = data.terminal;
+        file.value = data.file;
+        meshFrameKey.value += 1;
+        natsOnline.value = typeof data.nats_online === "boolean" ? data.nats_online : null;
+        meshConnected.value = typeof data.mesh_connected === "boolean" ? data.mesh_connected : null;
+        diagnosticReason.value = data.diagnostic_reason || "";
+        useMeta({
+          title: `${data.hostname} - ${data.client} - ${data.site} | Remote Background`,
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function reconnectSession() {
+      await getMeshURLs(usingLegacyMesh.value);
+      await getTerminalDefaults();
+      if (tab.value === "filebrowser") {
+        retryFileBrowserDefaults();
+      }
+    }
+
+    async function repairLegacyMesh() {
+      $q.loading.show({ message: "Reparando Mesh Agent..." });
+      try {
+        const msg = await sendAgentRecoverMesh(params.agent_id);
+        await getMeshURLs(true);
+        notifySuccess(msg);
+      } catch (e) {
+        notifyError("Falha ao contatar agente via NATS para recuperar Mesh.");
+      } finally {
+        $q.loading.hide();
+      }
     }
 
     async function getDashInfo() {
@@ -323,27 +403,18 @@ export default {
       }
     });
 
-    function handlePageHide() {
-      if (isWinWorkstation.value) {
-        pauseAgentMeshForBanking(String(params.agent_id), true).catch(() => {});
+    // When legacy Mesh mode is required, wake & verify Mesh Agent automatically
+    watch(usingLegacyMesh, (needsLegacy) => {
+      if (needsLegacy && meshConnected.value !== true) {
+        getMeshURLs(true);
       }
-    }
+    });
 
     // vue lifecycle hooks
     onMounted(() => {
       getDashInfo();
-      getMeshURLs();
+      getMeshURLs(false);
       getTerminalDefaults();
-      if (typeof window !== "undefined") {
-        window.addEventListener("pagehide", handlePageHide);
-      }
-    });
-
-    onBeforeUnmount(() => {
-      if (typeof window !== "undefined") {
-        window.removeEventListener("pagehide", handlePageHide);
-      }
-      handlePageHide();
     });
 
     return {
@@ -360,6 +431,14 @@ export default {
       fileBrowserDefaultsLoaded,
       fileBrowserMaxUploadFileSizeBytes,
       retryFileBrowserDefaults,
+      natsOnline,
+      meshConnected,
+      diagnosticReason,
+      meshFrameKey,
+      usingLegacyMesh,
+      meshNeedCheck,
+      reconnectSession,
+      repairLegacyMesh,
       t,
     };
   },

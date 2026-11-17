@@ -430,8 +430,13 @@ import PendingActions from "@/components/logs/PendingActions.vue";
 import AgentActionMenu from "@/components/agents/AgentActionMenu.vue";
 import { runURLAction } from "@/api/core";
 import { runTakeControl, runRemoteBackground, fetchAgent } from "@/api/agents";
-import { fleetDomainMap, manageAgentRDP, downloadNativeRDPFile } from "@/api/enhanced";
-import { notifySuccess } from "@/utils/notify";
+import {
+  fleetDomainMap,
+  manageAgentRDP,
+  downloadNativeRDPFile,
+  resolveFirstReachableHost,
+} from "@/api/enhanced";
+import { notifySuccess, notifyWarning } from "@/utils/notify";
 import { t } from "@/i18n";
 import { capitalize } from "@vue/shared";
 
@@ -460,36 +465,41 @@ export default {
     runTakeControl,
     runRemoteBackground,
     async quickConnectRDP(row) {
+      let rdpConfirmed = false;
       try {
-        await manageAgentRDP(row.agent_id, { action: "enable" });
+        await manageAgentRDP(row.agent_id, "enable_rdp", false);
+        rdpConfirmed = true;
       } catch (e) {
-        // Proceed to download RDP file even if NATS call times out
+        rdpConfirmed = false;
       }
-      let targetHost = "";
-      const rawRowIps = String(row.local_ips || row.local_ip || "");
-      targetHost =
-        rawRowIps
-          .split(",")
-          .map((s) => s.trim())
-          .find((ip) => ip && !ip.startsWith("127.")) || "";
+      let targetHost = resolveFirstReachableHost(
+        row.local_ips || row.local_ip,
+        "",
+        "",
+      );
       if (!targetHost) {
         try {
           const detail = await fetchAgent(row.agent_id);
-          const detailIps = String(detail?.local_ips || detail?.local_ip || "");
-          targetHost =
-            detailIps
-              .split(",")
-              .map((s) => s.trim())
-              .find((ip) => ip && !ip.startsWith("127.")) || "";
+          targetHost = resolveFirstReachableHost(
+            detail?.local_ips || detail?.local_ip,
+            row.hostname,
+            detail?.public_ip,
+          );
         } catch (e) {
-          // fallback to hostname
+          targetHost = row.hostname;
         }
       }
       if (!targetHost) {
         targetHost = row.hostname;
       }
       downloadNativeRDPFile(row.hostname, targetHost, 3389);
-      notifySuccess(`Conexão RDP (${targetHost}) habilitada e arquivo ${row.hostname}.rdp baixado!`);
+      if (rdpConfirmed) {
+        notifySuccess(`Conexão RDP (${targetHost}) habilitada e arquivo ${row.hostname}.rdp baixado!`);
+      } else {
+        notifyWarning(
+          `Agente não respondeu via NATS para habilitar o TermService; arquivo ${row.hostname}.rdp baixado com IP ${targetHost}.`,
+        );
+      }
     },
     domainInfoFor(agent_id) {
       const map = fleetDomainMap.value || {};

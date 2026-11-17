@@ -347,6 +347,7 @@ import {
   repairAgentHALink,
   manageAgentRDP,
   downloadNativeRDPFile,
+  resolveFirstReachableHost,
   runAgentAdminAction,
   sendAgentITSupportMessage,
 } from "@/api/enhanced";
@@ -712,9 +713,9 @@ export default {
     }
 
     function quickDownloadRDP(agent) {
-      const targetIp = agent.local_ips || agent.hostname || agent.public_ip || "127.0.0.1";
+      const targetIp = resolveFirstReachableHost(agent.local_ips, agent.hostname, agent.public_ip);
       downloadNativeRDPFile(agent.hostname || targetIp, targetIp, 3389);
-      notifySuccess(`Arquivo ${agent.hostname || targetIp}.rdp baixado!`);
+      notifySuccess(`Arquivo ${agent.hostname || targetIp}.rdp baixado (${targetIp})!`);
     }
 
     async function quickAdminAction(agent, action) {

@@ -939,7 +939,7 @@ class AgentHALinkWatchdogView(APIView):
         agent = get_object_or_404(Agent, agent_id=agent_id)
         r = asyncio.run(agent.nats_cmd({"func": "ha_mesh_repair"}, timeout=25))
         if r in ("timeout", "natsdown"):
-            # Traditional Agent backwards-compatibility: try native synchronous "recover" RPC first
+            # Traditional Agent backwards-compatibility: try native synchronous "recover" RPC
             if r == "timeout":
                 native_rec = asyncio.run(
                     agent.nats_cmd(
@@ -948,6 +948,14 @@ class AgentHALinkWatchdogView(APIView):
                     )
                 )
                 if native_rec == "ok":
+                    with suppress(Exception):
+                        from agents.utils import ensure_agent_mesh_connection
+                        from core.utils import get_core_settings
+
+                        agent.refresh_from_db(fields=["mesh_node_id"])
+                        ensure_agent_mesh_connection(
+                            agent, request.user, get_core_settings(), wake_if_needed=False, wait_for_mesh=True
+                        )
                     AuditLog.objects.create(
                         username=request.user.username,
                         agent=agent.hostname,
@@ -965,16 +973,13 @@ class AgentHALinkWatchdogView(APIView):
                             "timestamp": djangotime.now().isoformat(),
                         }
                     )
-            # Fallback to NATS async recovercmd if synchronous repair timed out
-            with suppress(Exception):
-                asyncio.run(
-                    agent.nats_cmd(
-                        {"func": "recovercmd", "recoverycommand": "mesh"},
-                        wait=False,
-                    )
-                )
             return Response(
-                {"error": f"Não foi possível contatar {agent.hostname} via NATS ({r}). Comando assíncrono de recuperação Mesh enfileirado."},
+                {
+                    "error": (
+                        f"Não foi possível contatar {agent.hostname} via NATS ({r}). "
+                        "Verifique se o computador está ligado e conectado à rede/VPN."
+                    )
+                },
                 status=status.HTTP_504_GATEWAY_TIMEOUT,
             )
 
@@ -984,6 +989,13 @@ class AgentHALinkWatchdogView(APIView):
                 actions = list(r.get("actions_taken") or [])
                 actions.append("MeshNodeID sincronizado automaticamente entre Agente, API e MeshCentral")
                 r["actions_taken"] = actions
+        with suppress(Exception):
+            from agents.utils import ensure_agent_mesh_connection
+            from core.utils import get_core_settings
+
+            ensure_agent_mesh_connection(
+                agent, request.user, get_core_settings(), wake_if_needed=False, wait_for_mesh=True
+            )
 
         AuditLog.objects.create(
             username=request.user.username,
@@ -1046,9 +1058,28 @@ class AgentRDPManagerView(APIView):
 
     def post(self, request, agent_id: str) -> Response:
         agent = get_object_or_404(Agent, agent_id=agent_id)
-        action = request.data.get("action", "enable_rdp")
+        raw_action = request.data.get("action", "enable_rdp")
+        if isinstance(raw_action, dict):
+            raw_action = raw_action.get("action", "enable_rdp")
+        action_alias = {
+            "enable": "enable_rdp",
+            "enable_rdp": "enable_rdp",
+            "disable": "disable_rdp",
+            "disable_rdp": "disable_rdp",
+            "restart": "restart_rdp",
+            "restart_rdp": "restart_rdp",
+            "logoff": "logoff_session",
+            "logoff_session": "logoff_session",
+        }
+        action = action_alias.get(str(raw_action).strip().lower())
+        if not action:
+            return Response(
+                {"error": f"Ação RDP inválida: {raw_action}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         enforce_nla = request.data.get("enforce_nla", True)
-        session_id = str(request.data.get("session_id", ""))
+        session_id = str(request.data.get("session_id", "")).strip()
 
         if agent.plat == "windows":
             nla_val = "1" if enforce_nla else "0"
@@ -1073,6 +1104,11 @@ class AgentRDPManagerView(APIView):
                     "Write-Output 'Serviço TermService reiniciado com sucesso.'"
                 )
             else:
+                if not session_id.isdigit():
+                    return Response(
+                        {"error": "ID da sessão inválido para encerramento de sessão RDP."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 ps_rdp = f"logoff {session_id}; Write-Output 'Sessão {session_id} encerrada.'"
 
             raw_out = asyncio.run(
@@ -1883,9 +1919,12 @@ class AgentLANDiscoveryView(APIView):
 class FleetSyncAndCleanupView(APIView):
     """
     POST /agents/fleet-sync/
-    1) Pings all offline/overdue agents via NATS concurrently and updates last_seen for any live agent.
+    1) Pings ALL visible agents via NATS concurrently to verify real-time reachability:
+       - Stamps fresh last_seen on any responsive agent (waking offline/overdue ones).
+       - Double-checks unresponsive 'online' agents and marks genuinely unreachable ones offline
+         so stale green 'online' indicators match actual NATS connectivity.
     2) Deduplicates stale/reformatted duplicate hostnames in the same site when a newer online agent exists.
-    3) Clears Redis caches and returns updated real-time counts (total, online, offline, overdue, reboot).
+    3) Clears Redis caches and returns updated real-time counts.
     """
 
     permission_classes = [IsAuthenticated]
@@ -1893,41 +1932,71 @@ class FleetSyncAndCleanupView(APIView):
     def post(self, request) -> Response:
         deduplicate = bool(request.data.get("deduplicate", True))
         wake_overdue = bool(request.data.get("wake_overdue", True))
+        verify_online = bool(request.data.get("verify_online", True))
 
         all_agents = list(
             Agent.objects.filter_by_role(request.user).select_related("site__client")
         )
         recovered_agents: list[str] = []
+        demoted_agents: list[str] = []
         deduplicated_agents: list[str] = []
 
-        # 1. Ping offline/overdue agents via NATS to immediately mark reachable ones as online
-        if wake_overdue:
-            candidates = [a for a in all_agents if a.status != AGENT_STATUS_ONLINE]
+        # 1. Probe real-time NATS connectivity across offline/overdue and (optionally) online agents
+        candidates = [
+            a for a in all_agents if verify_online or a.status != AGENT_STATUS_ONLINE
+        ]
 
-            async def _ping_candidates(agent_list: list[Agent]) -> list[Agent]:
-                sem = asyncio.Semaphore(35)
-                alive: list[Agent] = []
+        async def _probe_candidates(
+            agent_list: list[Agent],
+        ) -> tuple[list[Agent], list[Agent]]:
+            sem = asyncio.Semaphore(40)
+            alive: list[Agent] = []
+            unreachable_online: list[Agent] = []
 
-                async def _check_one(ag: Agent) -> None:
-                    async with sem:
+            async def _check_one(ag: Agent) -> None:
+                was_online = ag.status == AGENT_STATUS_ONLINE
+                if not was_online and not wake_overdue:
+                    return
+                async with sem:
+                    res = "timeout"
+                    with suppress(Exception):
+                        res = await ag.nats_cmd({"func": "ping"}, timeout=2.5)
+                    if res == "pong":
+                        alive.append(ag)
+                    elif was_online and verify_online and res == "timeout":
+                        # Confirm with one quick retry so a momentary glitch isn't demoted
+                        retry_res = "timeout"
                         with suppress(Exception):
-                            res = await ag.nats_cmd({"func": "ping"}, timeout=3)
-                            if res == "pong":
-                                alive.append(ag)
-                                with suppress(Exception):
-                                    await ag.nats_cmd({"func": "sync"}, wait=False)
+                            retry_res = await ag.nats_cmd({"func": "ping"}, timeout=2.0)
+                        if retry_res == "pong":
+                            alive.append(ag)
+                        elif retry_res == "timeout":
+                            unreachable_online.append(ag)
 
-                await asyncio.gather(*[_check_one(a) for a in agent_list])
-                return alive
+            await asyncio.gather(*[_check_one(a) for a in agent_list])
+            return alive, unreachable_online
 
-            if candidates:
-                with suppress(Exception):
-                    alive_list = asyncio.run(_ping_candidates(candidates))
-                    now_ts = djangotime.now()
-                    for ag in alive_list:
-                        ag.last_seen = now_ts
-                        ag.save(update_fields=["last_seen"])
+        if candidates:
+            with suppress(Exception):
+                alive_list, unreachable_online_list = asyncio.run(
+                    _probe_candidates(candidates)
+                )
+                now_ts = djangotime.now()
+                for ag in alive_list:
+                    was_disconnected = ag.status != AGENT_STATUS_ONLINE
+                    ag.last_seen = now_ts
+                    ag.save(update_fields=["last_seen"])
+                    if was_disconnected:
                         recovered_agents.append(ag.hostname)
+
+                for ag in unreachable_online_list:
+                    # Push last_seen just past offline_time (keeping above overdue_time when valid)
+                    offset_min = max(int(ag.offline_time or 4) + 1, 5)
+                    if ag.overdue_time and ag.overdue_time > ag.offline_time + 1:
+                        offset_min = min(offset_min, int(ag.overdue_time) - 1)
+                    ag.last_seen = now_ts - djangotime.timedelta(minutes=offset_min)
+                    ag.save(update_fields=["last_seen"])
+                    demoted_agents.append(ag.hostname)
 
         # 2. Deduplicate reformatted computers with identical hostname in the same site
         if deduplicate:
@@ -1981,6 +2050,8 @@ class FleetSyncAndCleanupView(APIView):
                 "reboot_needed": reboot_cnt,
                 "recovered_count": len(recovered_agents),
                 "recovered_hostnames": recovered_agents,
+                "demoted_count": len(demoted_agents),
+                "demoted_hostnames": demoted_agents,
                 "deduplicated_count": len(deduplicated_agents),
                 "deduplicated_hostnames": deduplicated_agents,
                 "timestamp": djangotime.now().isoformat(),

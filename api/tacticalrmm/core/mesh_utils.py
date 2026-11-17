@@ -200,3 +200,244 @@ class MeshSync:
             "userid": mesh_user_id,
         }
         self.mesh_action(payload=payload, wait=False)
+
+
+async def _ws_recv_action(ws, expected_action: str, timeout_s: float = 5.0) -> dict[str, Any]:
+    """Read messages from an open MeshCentral WebSocket until expected_action arrives."""
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            return {}
+        raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+        data = json.loads(raw)
+        if isinstance(data, dict) and data.get("action") == expected_action:
+            return data
+
+
+def _find_node_in_nodes_map(nodes_map: Any, target_node_id: str) -> dict[str, Any] | None:
+    if not isinstance(nodes_map, dict):
+        return None
+    for _, node_list in nodes_map.items():
+        if not isinstance(node_list, list):
+            continue
+        for node in node_list:
+            if isinstance(node, dict) and node.get("_id") == target_node_id:
+                return node
+    return None
+
+
+async def a_get_mesh_node_live_state(
+    uri: str,
+    hex_node_id: str,
+    *,
+    mesh_user_id: str | None = None,
+    mesh_username: str | None = None,
+    mesh_display_name: str | None = None,
+    mesh_email: str | None = None,
+    sync_user: bool = False,
+    open_timeout: float = 2.5,
+) -> dict[str, Any]:
+    """
+    Query MeshCentral over a single fast WebSocket for node registration, live agent
+    connectivity (`conn`), and optional synchronous user permission grant.
+    """
+    state: dict[str, Any] = {
+        "mesh_reachable": False,
+        "node_found": False,
+        "mesh_connected": False,
+        "conn": 0,
+        "user_linked": False,
+        "rights_synced": False,
+    }
+    if not hex_node_id or hex_node_id == "error":
+        return state
+
+    target_node_id = (
+        hex_node_id if hex_node_id.startswith("node//") else f"node//{hex_node_id}"
+    )
+
+    try:
+        async with websockets.connect(
+            uri,
+            max_size=TRMM_WS_MAX_SIZE,
+            open_timeout=open_timeout,
+            close_timeout=2,
+            ping_interval=20,
+        ) as ws:
+            state["mesh_reachable"] = True
+            await ws.send(json.dumps({"action": "nodes", "responseid": "meshctrl"}))
+            nodes_resp = await _ws_recv_action(ws, "nodes", timeout_s=4.5)
+            node = _find_node_in_nodes_map(nodes_resp.get("nodes"), target_node_id)
+            if not node:
+                return state
+
+            state["node_found"] = True
+            try:
+                conn_val = int(node.get("conn") or 0)
+            except (TypeError, ValueError):
+                conn_val = 0
+            state["conn"] = conn_val
+            state["mesh_connected"] = bool(conn_val & 1)
+
+            links = node.get("links") if isinstance(node.get("links"), dict) else {}
+            if mesh_user_id:
+                state["user_linked"] = mesh_user_id in links
+
+            if sync_user and mesh_user_id and mesh_username and not state["user_linked"]:
+                try:
+                    await ws.send(
+                        json.dumps({"action": "users", "responseid": "meshctrl"})
+                    )
+                    users_resp = await _ws_recv_action(ws, "users", timeout_s=4.0)
+                    existing_users = {
+                        u.get("_id")
+                        for u in (users_resp.get("users") or [])
+                        if isinstance(u, dict) and u.get("_id")
+                    }
+                    if mesh_user_id not in existing_users and mesh_email:
+                        await ws.send(
+                            json.dumps(
+                                {
+                                    "action": "adduser",
+                                    "username": mesh_username,
+                                    "email": mesh_email,
+                                    "pass": make_mesh_password(),
+                                    "resetNextLogin": False,
+                                    "randomPassword": False,
+                                    "removeEvents": False,
+                                    "emailVerified": True,
+                                    "responseid": "meshctrl",
+                                }
+                            )
+                        )
+                        if mesh_display_name:
+                            await ws.send(
+                                json.dumps(
+                                    {
+                                        "action": "edituser",
+                                        "id": mesh_user_id,
+                                        "realname": mesh_display_name,
+                                        "responseid": "meshctrl",
+                                    }
+                                )
+                            )
+                        await asyncio.sleep(0.15)
+
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "action": "adddeviceuser",
+                                "nodeid": target_node_id,
+                                "usernames": [mesh_username],
+                                "rights": 4088024,
+                                "remove": False,
+                                "responseid": "meshctrl",
+                            }
+                        )
+                    )
+                    await asyncio.sleep(0.15)
+                    state["rights_synced"] = True
+                    state["user_linked"] = True
+                except Exception as exc:
+                    logger.debug(
+                        f"Synchronous Mesh permission grant skipped for {target_node_id}: {exc}"
+                    )
+
+            return state
+    except Exception as exc:
+        logger.debug(f"Live Mesh state query failed for {target_node_id}: {exc}")
+        return state
+
+
+def get_mesh_node_live_state(
+    uri: str,
+    hex_node_id: str,
+    *,
+    mesh_user_id: str | None = None,
+    mesh_username: str | None = None,
+    mesh_display_name: str | None = None,
+    mesh_email: str | None = None,
+    sync_user: bool = False,
+) -> dict[str, Any]:
+    return asyncio.run(
+        a_get_mesh_node_live_state(
+            uri,
+            hex_node_id,
+            mesh_user_id=mesh_user_id,
+            mesh_username=mesh_username,
+            mesh_display_name=mesh_display_name,
+            mesh_email=mesh_email,
+            sync_user=sync_user,
+        )
+    )
+
+
+async def a_poll_mesh_node_connected(
+    uri: str,
+    hex_node_id: str,
+    *,
+    mesh_user_id: str | None = None,
+    mesh_username: str | None = None,
+    mesh_display_name: str | None = None,
+    mesh_email: str | None = None,
+    sync_user: bool = False,
+    max_wait_s: float = 7.0,
+    poll_interval_s: float = 0.85,
+) -> dict[str, Any]:
+    """Poll MeshCentral until the agent connects or max_wait_s elapses."""
+    deadline = asyncio.get_running_loop().time() + max_wait_s
+    last_state: dict[str, Any] = {
+        "mesh_reachable": False,
+        "node_found": False,
+        "mesh_connected": False,
+        "conn": 0,
+        "user_linked": False,
+        "rights_synced": False,
+    }
+    first = True
+    while True:
+        last_state = await a_get_mesh_node_live_state(
+            uri,
+            hex_node_id,
+            mesh_user_id=mesh_user_id,
+            mesh_username=mesh_username,
+            mesh_display_name=mesh_display_name,
+            mesh_email=mesh_email,
+            sync_user=sync_user if (first or last_state.get("rights_synced") is False) else False,
+        )
+        first = False
+        if not last_state["mesh_reachable"]:
+            return last_state
+        if last_state["node_found"] and last_state["mesh_connected"]:
+            return last_state
+        if asyncio.get_running_loop().time() >= deadline:
+            return last_state
+        await asyncio.sleep(poll_interval_s)
+
+
+def poll_mesh_node_connected(
+    uri: str,
+    hex_node_id: str,
+    *,
+    mesh_user_id: str | None = None,
+    mesh_username: str | None = None,
+    mesh_display_name: str | None = None,
+    mesh_email: str | None = None,
+    sync_user: bool = False,
+    max_wait_s: float = 7.0,
+    poll_interval_s: float = 0.85,
+) -> dict[str, Any]:
+    return asyncio.run(
+        a_poll_mesh_node_connected(
+            uri,
+            hex_node_id,
+            mesh_user_id=mesh_user_id,
+            mesh_username=mesh_username,
+            mesh_display_name=mesh_display_name,
+            mesh_email=mesh_email,
+            sync_user=sync_user,
+            max_wait_s=max_wait_s,
+            poll_interval_s=poll_interval_s,
+        )
+    )

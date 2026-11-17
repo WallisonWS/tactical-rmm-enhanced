@@ -968,11 +968,12 @@ export default {
     async runFullFleetSync() {
       this.$q.loading.show({ message: "Sincronizando 100% dos agentes via NATS e limpando duplicatas..." });
       try {
-        const res = await syncAndCleanupFleet({ deduplicate: true, wake_overdue: true });
+        const res = await syncAndCleanupFleet({ deduplicate: true, wake_overdue: true, verify_online: true });
         await this.$store.dispatch("refreshDashboard");
         useDashboardStore().triggerSummaryRefresh();
+        const demotedPart = res.demoted_count ? `, Falso-online corrigidos: ${res.demoted_count}` : "";
         this.notifySuccess(
-          `Sincronização concluída! Online: ${res.online} | Offline: ${res.offline} | Vencidos: ${res.overdue} (Reativados: ${res.recovered_count}, Duplicatas limpas: ${res.deduplicated_count})`,
+          `Sincronização concluída! Online: ${res.online} | Offline: ${res.offline} | Vencidos: ${res.overdue} (Reativados: ${res.recovered_count}${demotedPart}, Duplicatas limpas: ${res.deduplicated_count})`,
         );
       } catch (e) {
         this.$store.dispatch("refreshDashboard");

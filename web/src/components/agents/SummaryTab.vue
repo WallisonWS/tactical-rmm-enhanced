@@ -363,11 +363,12 @@ import {
 import {
   manageAgentRDP,
   downloadNativeRDPFile,
+  resolveFirstReachableHost,
   joinAgentToADDomain,
   fetchFleetExecutiveSummary,
   fleetDomainMap,
 } from "@/api/enhanced";
-import { notifySuccess, notifyError } from "@/utils/notify";
+import { notifySuccess, notifyError, notifyWarning } from "@/utils/notify";
 import { fetchCustomFields } from "@/api/core";
 
 // ui imports
@@ -433,21 +434,28 @@ export default {
     async function connectNativeRDP() {
       if (!summary.value) return;
       rdpConnecting.value = true;
+      let rdpConfirmed = false;
       try {
         await manageAgentRDP(selectedAgent.value, "enable_rdp", false);
+        rdpConfirmed = true;
       } catch (e) {
-        // Proceed to download .rdp file even if remote command was skipped
+        rdpConfirmed = false;
       } finally {
         rdpConnecting.value = false;
       }
-      const rawIps = String(summary.value.local_ips || "");
-      const firstIp =
-        rawIps
-          .split(",")[0]
-          .split("/")[0]
-          .trim() || summary.value.hostname;
+      const firstIp = resolveFirstReachableHost(
+        summary.value.local_ips,
+        summary.value.hostname,
+        summary.value.public_ip,
+      );
       downloadNativeRDPFile(summary.value.hostname, firstIp, 3389);
-      notifySuccess(`Conexão RDP (${firstIp}) habilitada e arquivo ${summary.value.hostname}.rdp baixado!`);
+      if (rdpConfirmed) {
+        notifySuccess(`Conexão RDP (${firstIp}) habilitada e arquivo ${summary.value.hostname}.rdp baixado!`);
+      } else {
+        notifyWarning(
+          `Agente não respondeu via NATS para habilitar o TermService; arquivo ${summary.value.hostname}.rdp baixado com IP ${firstIp}.`,
+        );
+      }
     }
 
     async function submitJoinAd() {

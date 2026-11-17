@@ -327,11 +327,16 @@ async function sendScript() {
   ret.value = null;
   loading.value = true;
 
-  ret.value = await runScript(props.agent.agent_id, state.value);
-  loading.value = false;
-  if (state.value.output === "forget") {
-    onDialogHide();
-    if (ret.value) notifySuccess(ret.value);
+  try {
+    ret.value = await runScript(props.agent.agent_id, state.value);
+    if (state.value.output === "forget") {
+      onDialogHide();
+      if (ret.value) notifySuccess(ret.value);
+    }
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loading.value = false;
   }
 }
 

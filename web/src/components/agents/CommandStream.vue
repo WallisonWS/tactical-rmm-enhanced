@@ -16,6 +16,7 @@ import {
   onMounted,
   onUnmounted,
   watchEffect,
+  watch,
   nextTick,
   computed,
 } from "vue";
@@ -45,17 +46,36 @@ const { send, data, reset, close, status } = useAgentCmdWSConnection(
 const outputText = ref("");
 const streamContainer = useTemplateRef<HTMLElement>("streamContainer");
 let firstChunk = false;
+let sentCommand = false;
+let noOutputTimer: ReturnType<typeof setTimeout> | null = null;
 
 const hasText = computed(() => outputText.value.trim() !== "");
 
+function clearNoOutputTimer() {
+  if (noOutputTimer) {
+    clearTimeout(noOutputTimer);
+    noOutputTimer = null;
+  }
+}
+
 watchEffect(() => {
   if (data.value.length) {
-    outputText.value = data.value.map((msg) => msg.output).join("\n");
-    emit("updateOutput", outputText.value);
+    clearNoOutputTimer();
+    const textChunks = data.value
+      .map((msg) => msg.output)
+      .filter((o): o is string => typeof o === "string" && o.length > 0);
+    if (textChunks.length) {
+      outputText.value = textChunks.join("\n");
+      emit("updateOutput", outputText.value);
+    }
 
-    if (!firstChunk && data.value.length > 0) {
+    if (!firstChunk && textChunks.length > 0) {
       firstChunk = true;
       emit("streamLoaded");
+    }
+
+    if (data.value.some((msg) => msg.done === true)) {
+      emit("streamClosed");
     }
 
     nextTick(() => {
@@ -66,27 +86,54 @@ watchEffect(() => {
   }
 });
 
-watchEffect(() => {
-  if (status.value === "CLOSED") emit("streamClosed");
-});
+watch(
+  status,
+  (st) => {
+    if (st === "OPEN" && !sentCommand) {
+      sentCommand = true;
+      send(
+        JSON.stringify({
+          shell: props.shell,
+          cmd: props.cmd,
+          timeout: props.timeout,
+          run_as_user: props.run_as_user,
+          custom_shell: props.custom_shell,
+          stream: true,
+          cmd_id: cmdId,
+        }),
+      );
+      clearNoOutputTimer();
+      noOutputTimer = setTimeout(
+        () => {
+          if (!firstChunk) {
+            outputText.value = "[ERRO] O agente não respondeu via NATS no tempo limite.";
+            emit("updateOutput", outputText.value);
+            emit("streamClosed");
+          }
+        },
+        (Math.max(10, props.timeout) + 5) * 1000,
+      );
+    } else if (st === "CLOSED") {
+      clearNoOutputTimer();
+      if (!firstChunk) {
+        outputText.value = "[ERRO] Conexão WebSocket encerrada antes de receber resposta do agente.";
+        emit("updateOutput", outputText.value);
+      }
+      emit("streamClosed");
+    }
+  },
+  { immediate: true },
+);
 
 onMounted(() => {
   outputText.value = "";
   reset();
-  send(
-    JSON.stringify({
-      shell: props.shell,
-      cmd: props.cmd,
-      timeout: props.timeout,
-      run_as_user: props.run_as_user,
-      custom_shell: props.custom_shell,
-      stream: true,
-      cmd_id: cmdId,
-    }),
-  );
 });
 
-onUnmounted(close);
+onUnmounted(() => {
+  clearNoOutputTimer();
+  close();
+});
 </script>
 
 <style scoped>

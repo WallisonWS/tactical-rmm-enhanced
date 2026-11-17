@@ -446,6 +446,7 @@ func (a *Agent) RecoverMesh() {
 	a.Logger.Infoln("Attempting mesh recovery")
 	if !trmm.FileExists(a.MeshSystemEXE) && runtime.GOOS == "linux" {
 		a.ReinstallMesh()
+		time.Sleep(2 * time.Second)
 		a.SyncMeshNodeID(true)
 		return
 	}
@@ -456,18 +457,23 @@ func (a *Agent) RecoverMesh() {
 		opts.Command = "systemctl stop meshagent.service"
 		a.CmdV2(opts)
 		a.ForceKillMesh()
-		opts.Command = "systemctl start meshagent.service"
+		opts.Command = "systemctl unmask meshagent.service >/dev/null 2>&1 || true; systemctl enable meshagent.service >/dev/null 2>&1 || true; systemctl start meshagent.service"
 		a.CmdV2(opts)
 		time.Sleep(2 * time.Second)
 		if _, err := a.getMeshNodeID(); err != nil {
 			a.ReinstallMesh()
+			opts.Command = "systemctl start meshagent.service"
+			a.CmdV2(opts)
+			time.Sleep(2 * time.Second)
 		}
 	case "darwin":
 		opts.Command = "launchctl kickstart -k system/meshagent"
 		a.CmdV2(opts)
+		time.Sleep(2 * time.Second)
 	default:
 		opts.Command = "systemctl restart meshagent.service"
 		a.CmdV2(opts)
+		time.Sleep(2 * time.Second)
 	}
 	a.SyncMeshNodeID(true)
 }

@@ -57,7 +57,7 @@ class GetEditActionService(APIView):
         agent = get_object_or_404(Agent, agent_id=agent_id)
         data = {"func": "winsvcdetail", "payload": {"name": svcname}}
         r = asyncio.run(agent.nats_cmd(data, timeout=10))
-        if r == "timeout":
+        if r in ("timeout", "natsdown"):
             return notify_error("Unable to contact the agent")
 
         return Response(r)

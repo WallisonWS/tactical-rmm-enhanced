@@ -318,16 +318,29 @@ export async function fetchAgentRDPStatus(agentId: string): Promise<CorporateRDP
 
 export async function manageAgentRDP(
   agentId: string,
-  action: "enable_rdp" | "disable_rdp" | "restart_rdp" | "logoff_session",
+  action: "enable_rdp" | "disable_rdp" | "restart_rdp" | "logoff_session" | { action: string },
   enforceNLA = true,
   sessionId = "",
 ) {
+  const normalizedAction = typeof action === "object" && action !== null ? action.action : action;
   const { data } = await axios.post(`/agents/${agentId}/rdp/`, {
-    action,
+    action: normalizedAction,
     enforce_nla: enforceNLA,
     session_id: sessionId,
   });
   return data;
+}
+
+export function resolveFirstReachableHost(
+  rawIps?: string | null,
+  hostname?: string | null,
+  publicIp?: string | null,
+): string {
+  const candidates = String(rawIps || "")
+    .split(",")
+    .map((s) => s.split("/")[0].trim())
+    .filter((ip) => ip && !ip.startsWith("127.") && ip !== "::1");
+  return candidates[0] || String(hostname || "").trim() || String(publicIp || "").trim();
 }
 
 export function downloadNativeRDPFile(hostname: string, hostAddress: string, port = 3389) {
@@ -627,6 +640,8 @@ export interface FleetSyncResult {
   reboot_needed: number;
   recovered_count: number;
   recovered_hostnames: string[];
+  demoted_count?: number;
+  demoted_hostnames?: string[];
   deduplicated_count: number;
   deduplicated_hostnames: string[];
   timestamp: string;

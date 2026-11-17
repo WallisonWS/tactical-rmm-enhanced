@@ -24,7 +24,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from agents.utils import WINDOWS_MESH_BANKING_PAUSE_CMD, get_agent_url
+from agents.utils import (
+    WINDOWS_MESH_BANKING_PAUSE_CMD,
+    ensure_agent_mesh_connection,
+    get_agent_url,
+)
 from core.models import CoreSettings
 from core.permissions import RunServerScriptPerms
 from core.tasks import sync_mesh_perms_task
@@ -311,6 +315,13 @@ class GetUpdateDeleteAgent(APIView):
                     {"default_shell_custom": "Custom shell path must be provided."}
                 )
 
+            offline_time = attrs.get("offline_time", getattr(agent, "offline_time", 4))
+            overdue_time = attrs.get("overdue_time", getattr(agent, "overdue_time", 30))
+            if offline_time is not None and overdue_time is not None and overdue_time <= offline_time:
+                raise serializers.ValidationError(
+                    {"overdue_time": "Overdue time must be greater than offline time."}
+                )
+
             attrs["default_shell"] = shell
             return attrs
 
@@ -478,10 +489,26 @@ class WebVNC(APIView):
             Agent.objects.select_related("site__client").defer(*AGENT_DEFER),
             agent_id=agent_id,
         )
-        if agent.hex_mesh_node_id == "error":
-            return notify_error("Missing mesh node id")
-
         core = get_core_settings()
+        conn_info = ensure_agent_mesh_connection(
+            agent,
+            request.user,
+            core,
+            wake_if_needed=True,
+            wait_for_mesh=True,
+        )
+
+        if agent.hex_mesh_node_id == "error":
+            return notify_error(
+                conn_info.get("diagnostic_reason")
+                or "Mesh Node ID ausente ou inválido. Execute Recuperar Conexão Mesh primeiro."
+            )
+
+        if conn_info.get("mesh_reachable") and not conn_info.get("mesh_connected"):
+            return notify_error(
+                conn_info.get("diagnostic_reason")
+                or "Mesh Agent desconectado neste computador. Execute Recuperar Conexão Mesh."
+            )
 
         uri = get_mesh_ws_url()
         ms = MeshSync(uri)
@@ -511,6 +538,8 @@ class WebVNC(APIView):
             "vnc": vnc_url,
             "client": agent.client.name,
             "site": agent.site.name,
+            "nats_online": conn_info.get("nats_online", False),
+            "mesh_connected": conn_info.get("mesh_connected", False),
         }
         return Response(ret)
 
@@ -525,36 +554,14 @@ class AgentMeshCentral(APIView):
             agent_id=agent_id,
         )
         core = get_core_settings()
-
-        # Ensure Mesh Agent service is started on Windows if it was stopped (e.g. Banking Compatibility Mode)
-        if agent.plat == AgentPlat.WINDOWS:
-            try:
-                asyncio.run(
-                    agent.nats_cmd(
-                        {
-                            "func": "rawcmd",
-                            "timeout": 8,
-                            "payload": {
-                                "command": "Set-Service -Name 'Mesh Agent' -StartupType Manual -ErrorAction SilentlyContinue; Start-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue",
-                                "shell": "powershell",
-                            },
-                        },
-                        timeout=6,
-                    )
-                )
-            except Exception:
-                try:
-                    asyncio.run(
-                        agent.nats_cmd(
-                            {
-                                "func": "winsvcaction",
-                                "payload": {"name": "mesh agent", "action": "start"},
-                            },
-                            wait=False,
-                        )
-                    )
-                except Exception:
-                    pass
+        wake = str(request.query_params.get("wake", "1")).lower() not in ("0", "false")
+        conn_info = ensure_agent_mesh_connection(
+            agent,
+            request.user,
+            core,
+            wake_if_needed=wake,
+            wait_for_mesh=wake,
+        )
 
         user = (
             request.user.mesh_user_id
@@ -582,7 +589,17 @@ class AgentMeshCentral(APIView):
             "control": control,
             "terminal": terminal,
             "file": file,
-            "status": agent.status,
+            "status": conn_info["live_status"],
+            "db_status": conn_info["db_status"],
+            "nats_online": conn_info["nats_online"],
+            "nats_broker_down": conn_info["nats_broker_down"],
+            "mesh_reachable": conn_info["mesh_reachable"],
+            "mesh_node_found": conn_info["mesh_node_found"],
+            "mesh_connected": conn_info["mesh_connected"],
+            "mesh_service_status": conn_info["mesh_service_status"],
+            "needs_recovery": conn_info["needs_recovery"],
+            "diagnostic_reason": conn_info["diagnostic_reason"],
+            "mesh_node_id": agent.mesh_node_id or "",
             "monitoring_type": agent.monitoring_type,
             "plat": agent.plat,
             "client": agent.client.name,
@@ -617,6 +634,37 @@ class AgentMeshCentral(APIView):
         r = asyncio.run(agent.nats_cmd(data, timeout=90))
         if r != "ok":
             return notify_error("Unable to contact the agent")
+
+        # Refresh agent's mesh_node_id from DB in case SyncMeshNodeID updated it during recovery,
+        # then synchronously ensure MeshCentral user permissions and connection readiness without
+        # altering the nats_cmd call contract tested by test_recover_mesh.
+        with suppress(Exception):
+            agent.refresh_from_db(fields=["mesh_node_id"])
+            core = get_core_settings()
+            if core.sync_mesh_with_trmm and agent.hex_mesh_node_id != "error":
+                from core.mesh_utils import build_mesh_display_name, poll_mesh_node_connected
+                from core.utils import make_alpha_numeric
+                from tacticalrmm.helpers import make_random_password
+
+                uri = get_mesh_ws_url()
+                poll_mesh_node_connected(
+                    uri,
+                    agent.hex_mesh_node_id,
+                    mesh_user_id=request.user.mesh_user_id,
+                    mesh_username=request.user.mesh_username,
+                    mesh_display_name=build_mesh_display_name(
+                        first_name=getattr(request.user, "first_name", ""),
+                        last_name=getattr(request.user, "last_name", ""),
+                        company_name=getattr(core, "mesh_company_name", ""),
+                    ),
+                    mesh_email=(
+                        f"{make_alpha_numeric(getattr(request.user, 'username', 'user'))}."
+                        f"{make_random_password(len=6)}@tacticalrmm-do-not-change-{make_random_password(len=5)}.local"
+                    ),
+                    sync_user=True,
+                    max_wait_s=5.0,
+                    poll_interval_s=0.85,
+                )
 
         sync_mesh_perms_task.delay()
         return Response(f"Repaired mesh agent on {agent.hostname}")
@@ -667,6 +715,9 @@ def ping(request, agent_id):
         r = asyncio.run(agent.nats_cmd({"func": "ping"}, timeout=2))
         if r == "pong":
             status = AGENT_STATUS_ONLINE
+            with suppress(Exception):
+                agent.last_seen = djangotime.now()
+                agent.save(update_fields=["last_seen"])
             break
         else:
             attempts += 1
@@ -734,7 +785,7 @@ def send_raw_cmd(request, agent_id):
 
     r = asyncio.run(agent.nats_cmd(data, timeout=timeout + 2))
 
-    if r == "timeout":
+    if r in ("timeout", "natsdown"):
         return notify_error("Unable to contact the agent")
 
     AuditLog.audit_raw_command(

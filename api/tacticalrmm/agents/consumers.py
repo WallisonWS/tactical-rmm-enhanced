@@ -218,6 +218,8 @@ class TerminalStreamConsumer(AsyncJsonWebsocketConsumer):
         self.killed = False
         self.started = False
         self.message_id = 0
+        self._first_output_received = False
+        self._startup_watchdog_task = None
         self._start_lock = asyncio.Lock()
         self.nc = None
         self.sub = None
@@ -253,6 +255,12 @@ class TerminalStreamConsumer(AsyncJsonWebsocketConsumer):
         await self.accept()
 
     async def disconnect(self, close_code):
+        if self._startup_watchdog_task and not self._startup_watchdog_task.done():
+            self._startup_watchdog_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._startup_watchdog_task
+            self._startup_watchdog_task = None
+
         if self.group_name:
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
@@ -324,11 +332,42 @@ class TerminalStreamConsumer(AsyncJsonWebsocketConsumer):
                 self.nc = None
                 raise
 
+    async def _watch_terminal_startup(self, timeout_s: float = 8.5):
+        """Notify the frontend clearly if the agent fails to open the PTY session via NATS."""
+        try:
+            await asyncio.sleep(timeout_s)
+            if self._first_output_received or not self.started:
+                return
+            agent_reachable = False
+            with contextlib.suppress(Exception):
+                if self.nc is not None and not self.nc.is_closed:
+                    pong = await self.nc.request(
+                        self.agent_id, msgpack.dumps({"func": "ping"}), timeout=2.5
+                    )
+                    if msgpack.loads(pong.data) == "pong":
+                        agent_reachable = True
+            self.started = False
+            err_msg = (
+                "O terminal no agente demorou para responder mesmo com NATS ativo. Tente reiniciar o terminal ou recuperar o serviço do agente."
+                if agent_reachable
+                else "Agente offline ou inacessível via NATS no momento (sem resposta). Use 'Sincronizar 100%' ou verifique se o computador está ligado."
+            )
+            await self._send_terminal_error(err_msg, code="terminal_start_failed")
+        except asyncio.CancelledError:
+            return
+
     async def _start_terminal(self, content):
         async with self._start_lock:
             if self.started:
                 return
             self.started = True
+            self._first_output_received = False
+
+        if self._startup_watchdog_task and not self._startup_watchdog_task.done():
+            self._startup_watchdog_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._startup_watchdog_task
+            self._startup_watchdog_task = None
 
         agent = await Agent.objects.aget(agent_id=self.agent_id)
 
@@ -355,6 +394,9 @@ class TerminalStreamConsumer(AsyncJsonWebsocketConsumer):
             await self._ensure_nats()
 
             async def message_handler(msg):
+                self._first_output_received = True
+                if self._startup_watchdog_task and not self._startup_watchdog_task.done():
+                    self._startup_watchdog_task.cancel()
                 try:
                     try:
                         obj = msgpack.loads(msg.data)
@@ -449,6 +491,10 @@ class TerminalStreamConsumer(AsyncJsonWebsocketConsumer):
                     "run_as_user": run_as_user,
                 }
             )
+            if not self._first_output_received:
+                self._startup_watchdog_task = asyncio.create_task(
+                    self._watch_terminal_startup(timeout_s=8.5)
+                )
 
         except InvalidTerminalShellError as e:
             logger.warning(

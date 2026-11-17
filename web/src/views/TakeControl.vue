@@ -1,10 +1,22 @@
 <template>
   <div>
     <q-bar>
-      <span class="text-caption">
-        TRMM Agent Status:
-        <q-badge :color="statusColor" :label="status" />
+      <span class="text-caption q-mr-sm">
+        Status do Agente TRMM:
+        <q-badge :color="statusColor" :label="status || '...'" />
       </span>
+      <q-badge
+        v-if="natsOnline !== null"
+        :color="natsOnline ? 'positive' : 'negative'"
+        class="q-mr-xs text-caption"
+        :label="natsOnline ? 'NATS: Online' : 'NATS: Inacessível'"
+      />
+      <q-badge
+        v-if="meshConnected !== null"
+        :color="meshConnected ? 'teal-7' : 'warning'"
+        class="q-mr-sm text-caption"
+        :label="meshConnected ? 'Mesh: Conectado' : 'Mesh: Desconectado'"
+      />
       <q-space />
       <q-btn
         class="q-mr-md"
@@ -59,14 +71,76 @@
       />
       <q-space />
     </q-bar>
-    <div class="q-video" :style="{ height: `${$q.screen.height - 26}px` }">
+    <div class="q-video relative-position" :style="{ height: `${$q.screen.height - 26}px` }">
       <iframe
-        v-show="control"
+        v-if="control && (meshConnected !== false || forceShowIframe)"
+        :key="iframeKey"
         :src="control"
         allow="clipboard-read; clipboard-write"
         allowfullscreen
         frameborder="0"
       ></iframe>
+      <div
+        v-else-if="!loadingConn"
+        class="column flex-center fit q-pa-lg text-center"
+        style="background: #111827; color: #f8fafc"
+      >
+        <q-icon
+          :name="natsOnline ? 'sync_problem' : 'cloud_off'"
+          size="56px"
+          :color="natsOnline ? 'warning' : 'negative'"
+          class="q-mb-md"
+        />
+        <div class="text-h6 q-mb-sm">
+          {{
+            natsOnline
+              ? "Agente Tactical Online — Mesh Agent ainda não conectado"
+              : "Computador inacessível via NATS neste momento"
+          }}
+        </div>
+        <div class="text-body2 text-grey-4 q-mb-md" style="max-width: 620px; line-height: 1.5">
+          {{
+            diagnosticReason ||
+            "Não foi possível estabelecer a sessão MeshCentral automaticamente para este computador."
+          }}
+        </div>
+        <div v-if="meshServiceStatus && meshServiceStatus !== 'Unknown'" class="text-caption text-grey-5 q-mb-md">
+          Serviço Mesh no endpoint: <b>{{ meshServiceStatus }}</b>
+        </div>
+        <div class="row q-gutter-sm justify-center">
+          <q-btn
+            color="primary"
+            icon="refresh"
+            label="Testar e Reconectar"
+            no-caps
+            @click="getMeshURLs"
+          />
+          <q-btn
+            color="negative"
+            icon="fas fa-first-aid"
+            label="Recuperar / Reinstalar Mesh"
+            no-caps
+            @click="repairMeshCentral"
+          />
+          <q-btn
+            v-if="agentPlat === 'windows'"
+            color="indigo-6"
+            icon="desktop_windows"
+            label="Conectar RDP (.rdp)"
+            no-caps
+            :loading="rdpConnecting"
+            @click="connectNativeRDP"
+          />
+          <q-btn
+            v-if="control"
+            flat
+            color="grey-4"
+            label="Abrir Iframe Mesh assim mesmo"
+            no-caps
+            @click="forceShowIframe = true"
+          />
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -80,18 +154,26 @@ import { useMeta, useQuasar } from "quasar";
 import { fetchAgentMeshCentralURLs, sendAgentRecoverMesh, fetchAgent } from "@/api/agents";
 import { fetchDashboardInfo } from "@/api/core";
 import { sendAgentServiceAction } from "@/api/services";
-import { manageAgentRDP, downloadNativeRDPFile, pauseAgentMeshForBanking } from "@/api/enhanced";
+import {
+  manageAgentRDP,
+  downloadNativeRDPFile,
+  pauseAgentMeshForBanking,
+  resolveFirstReachableHost,
+} from "@/api/enhanced";
 import { syncDarkModeWithSavedPalette } from "@/utils/themePalettes";
-import { notifySuccess, notifyError } from "@/utils/notify";
+import { notifySuccess, notifyError, notifyWarning } from "@/utils/notify";
 
 export default {
   name: "TakeControl",
   setup() {
     const isWorkstation = ref(false);
     const autoPauseOnExit = ref(true);
+    let didPauseOnExit = false;
 
     function handlePageHide() {
+      if (didPauseOnExit) return;
       if (isWorkstation.value && autoPauseOnExit.value) {
+        didPauseOnExit = true;
         pauseAgentMeshForBanking(String(params.agent_id), true).catch(() => {});
       }
     }
@@ -127,7 +209,16 @@ export default {
     const control = ref("");
     const status = ref(null);
     const agentHostname = ref("");
+    const agentPlat = ref("windows");
     const rdpConnecting = ref(false);
+    const natsOnline = ref(null);
+    const meshConnected = ref(null);
+    const meshServiceStatus = ref("");
+    const diagnosticReason = ref("");
+    const loadingConn = ref(true);
+    const forceShowIframe = ref(false);
+    const iframeKey = ref(0);
+    let autoRepairTried = false;
 
     const statusColor = computed(() => {
       switch (status.value) {
@@ -146,20 +237,60 @@ export default {
     };
 
     async function getMeshURLs() {
-      $q.loading.show();
+      didPauseOnExit = false;
+      loadingConn.value = true;
+      forceShowIframe.value = false;
+      $q.loading.show({ message: "Verificando NATS e conectando ao Mesh Agent..." });
       try {
         const data = await fetchAgentMeshCentralURLs(params.agent_id);
+        if (!data) {
+          diagnosticReason.value = "Falha ao consultar o servidor Tactical RMM / MeshCentral.";
+          meshConnected.value = false;
+          return;
+        }
         control.value = data.control;
         status.value = data.status;
         isWorkstation.value = data.monitoring_type === "workstation" && data.plat === "windows";
         agentHostname.value = data.hostname || "";
+        agentPlat.value = data.plat || "windows";
+        natsOnline.value = typeof data.nats_online === "boolean" ? data.nats_online : null;
+        meshConnected.value = typeof data.mesh_connected === "boolean" ? data.mesh_connected : null;
+        meshServiceStatus.value = data.mesh_service_status || "";
+        diagnosticReason.value = data.diagnostic_reason || "";
+        iframeKey.value += 1;
+
         useMeta({
           title: `${data.hostname} - ${data.client} - ${data.site} | Take Control`,
         });
+
+        // If NATS is reachable but Mesh binary/registration is broken/missing, attempt 1 auto-repair seamlessly
+        if (data.nats_online && data.mesh_connected === false && data.needs_recovery && !autoRepairTried) {
+          autoRepairTried = true;
+          $q.loading.show({ message: "Mesh Agent dessincronizado — executando reparo automático..." });
+          try {
+            await sendAgentRecoverMesh(params.agent_id);
+            const retried = await fetchAgentMeshCentralURLs(params.agent_id);
+            if (retried) {
+              control.value = retried.control;
+              status.value = retried.status;
+              natsOnline.value = typeof retried.nats_online === "boolean" ? retried.nats_online : null;
+              meshConnected.value = typeof retried.mesh_connected === "boolean" ? retried.mesh_connected : null;
+              meshServiceStatus.value = retried.mesh_service_status || "";
+              diagnosticReason.value = retried.diagnostic_reason || "";
+              iframeKey.value += 1;
+            }
+          } catch (recErr) {
+            console.error(recErr);
+          }
+        }
       } catch (e) {
         console.error(e);
+        meshConnected.value = false;
+        diagnosticReason.value = "Erro ao conectar ao endpoint de Controle Remoto.";
+      } finally {
+        loadingConn.value = false;
+        $q.loading.hide();
       }
-      $q.loading.hide();
     }
 
     async function getDashInfo() {
@@ -169,59 +300,69 @@ export default {
     }
 
     async function repairMeshCentral() {
+      didPauseOnExit = false;
       control.value = "";
-      $q.loading.show({ message: "Attempting to repair Mesh Agent" });
+      $q.loading.show({ message: "Reparando e sincronizando Mesh Agent..." });
       try {
         const data = await sendAgentRecoverMesh(params.agent_id);
         await getMeshURLs();
         setTimeout(() => {
           notifySuccess(data);
-        }, 500);
+        }, 300);
       } catch (e) {
         console.error(e);
+        notifyError("Não foi possível contatar o agente via NATS para recuperar o Mesh.");
       }
       $q.loading.hide();
     }
 
     async function restartMeshService() {
-      $q.loading.show({ message: "Restarting Mesh Agent" });
-      const data = {
-        sv_action: "restart",
-      };
-
+      didPauseOnExit = false;
+      $q.loading.show({ message: "Reiniciando serviço Mesh Agent..." });
       try {
-        await sendAgentServiceAction(params.agent_id, "mesh agent", data);
+        if (agentPlat.value === "windows") {
+          await sendAgentServiceAction(params.agent_id, "mesh agent", { sv_action: "restart" });
+        } else {
+          await sendAgentRecoverMesh(params.agent_id);
+        }
         control.value = "";
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
         await getMeshURLs();
-        notifySuccess("Mesh agent service was restarted");
+        if (meshConnected.value !== false) {
+          notifySuccess("Serviço Mesh Agent reiniciado e conectado!");
+        }
       } catch (e) {
         console.error(e);
+        notifyError("Falha ao reiniciar o Mesh Agent.");
       }
-
       $q.loading.hide();
     }
 
     async function connectNativeRDP() {
       rdpConnecting.value = true;
+      let rdpConfirmed = false;
       try {
-        await manageAgentRDP(params.agent_id, { action: "enable" });
+        await manageAgentRDP(params.agent_id, "enable_rdp", false);
+        rdpConfirmed = true;
       } catch (e) {
-        // Proceed to download RDP file even if agent NATS call times out
+        rdpConfirmed = false;
       }
       try {
         const agentData = await fetchAgent(params.agent_id);
-        const rawIps = String(agentData?.local_ips || agentData?.local_ip || "");
-        const firstIp =
-          rawIps
-            .split(",")
-            .map((s) => s.trim())
-            .find((ip) => ip && !ip.startsWith("127.")) ||
-          agentData?.hostname ||
-          agentHostname.value;
+        const targetHost = resolveFirstReachableHost(
+          agentData?.local_ips || agentData?.local_ip,
+          agentData?.hostname || agentHostname.value,
+          agentData?.public_ip,
+        );
         const hostLabel = agentData?.hostname || agentHostname.value || "workstation";
-        downloadNativeRDPFile(hostLabel, firstIp, 3389);
-        notifySuccess(`Conexão RDP (${firstIp}) habilitada e arquivo ${hostLabel}.rdp baixado!`);
+        downloadNativeRDPFile(hostLabel, targetHost, 3389);
+        if (rdpConfirmed) {
+          notifySuccess(`RDP habilitado em ${hostLabel} (${targetHost}) e arquivo .rdp baixado!`);
+        } else {
+          notifyWarning(
+            `Agente não respondeu via NATS para ativar o TermService; arquivo ${hostLabel}.rdp baixado com IP ${targetHost}.`,
+          );
+        }
       } catch (e) {
         if (agentHostname.value) {
           downloadNativeRDPFile(agentHostname.value, agentHostname.value, 3389);
@@ -237,6 +378,9 @@ export default {
       $q.loading.show({ message: "Ativando Modo Compatibilidade Bancária (Mesh Sob Demanda)..." });
       try {
         const msg = await pauseAgentMeshForBanking(String(params.agent_id), false);
+        didPauseOnExit = true;
+        meshConnected.value = false;
+        diagnosticReason.value = "Mesh Agent pausado em Modo Banco (Sob Demanda). Clique em 'Testar e Reconectar' quando desejar reassumir a tela.";
         notifySuccess(
           msg ||
             "Modo Compatibilidade Bancária ativado! O funcionário já pode acessar os bancos normalmente e o monitoramento Tactical continua Online.",
@@ -257,8 +401,17 @@ export default {
       rdpConnecting,
       isWorkstation,
       autoPauseOnExit,
+      natsOnline,
+      meshConnected,
+      meshServiceStatus,
+      diagnosticReason,
+      loadingConn,
+      forceShowIframe,
+      iframeKey,
+      agentPlat,
 
       // methods
+      getMeshURLs,
       repairMeshCentral,
       restartMeshService,
       connectNativeRDP,

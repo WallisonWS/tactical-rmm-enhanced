@@ -255,10 +255,10 @@ class Agent(BaseAuditModel):
         overdue = now - djangotime.timedelta(minutes=self.overdue_time)
 
         if self.last_seen is not None:
-            if (self.last_seen < offline) and (self.last_seen > overdue):
-                return AGENT_STATUS_OFFLINE
-            elif (self.last_seen < offline) and (self.last_seen < overdue):
+            if self.last_seen <= overdue:
                 return AGENT_STATUS_OVERDUE
+            elif self.last_seen < offline:
+                return AGENT_STATUS_OFFLINE
             else:
                 return AGENT_STATUS_ONLINE
         else:
@@ -999,7 +999,11 @@ class Agent(BaseAuditModel):
             )
             return
 
+        received_any = False
+
         async def message_handler(msg):
+            nonlocal received_any
+            received_any = True
             try:
                 obj = msgpack.loads(msg.data)
                 payload: dict[str, object] = {"cmd_id": cmd_id}
@@ -1032,9 +1036,10 @@ class Agent(BaseAuditModel):
 
         sub = None
         try:
+            # Subscribe before publishing so early fast-returning agent output is never missed
+            sub = await nc.subscribe(output_subject, cb=message_handler)
             await nc.publish(self.agent_id, msgpack.dumps(data))
             await nc.flush()
-            sub = await nc.subscribe(output_subject, cb=message_handler)
         except Exception as e:
             logger.exception(
                 "NATS publish/subscribe failed for agent %s", self.agent_id
@@ -1047,6 +1052,19 @@ class Agent(BaseAuditModel):
                     "output": f"[ERROR] NATS publish/subscribe failed: {e}",
                 },
             )
+            await channel_layer.group_send(
+                group,
+                {
+                    "type": "stream_output",
+                    "cmd_id": cmd_id,
+                    "done": True,
+                },
+            )
+            if sub is not None:
+                try:
+                    await sub.unsubscribe()
+                except Exception:
+                    pass
             try:
                 await nc.close()
             except Exception:
@@ -1056,6 +1074,16 @@ class Agent(BaseAuditModel):
         try:
             if stop_evt is None:
                 await asyncio.sleep(timeout)
+                if timeout > 0 and not received_any:
+                    await channel_layer.group_send(
+                        group,
+                        {
+                            "type": "stream_output",
+                            "cmd_id": cmd_id,
+                            "output": f"[ERROR] O agente não respondeu ao comando no tempo limite ({timeout}s).",
+                            "done": True,
+                        },
+                    )
             else:
                 waiter_stop = asyncio.create_task(stop_evt.wait())
                 waiter_sleep = asyncio.create_task(asyncio.sleep(timeout))
@@ -1064,6 +1092,16 @@ class Agent(BaseAuditModel):
                 )
                 for p in pending:
                     p.cancel()
+                if waiter_sleep in done and not stop_evt.is_set() and timeout > 0 and not received_any:
+                    await channel_layer.group_send(
+                        group,
+                        {
+                            "type": "stream_output",
+                            "cmd_id": cmd_id,
+                            "output": f"[ERROR] O agente não respondeu ao comando no tempo limite ({timeout}s).",
+                            "done": True,
+                        },
+                    )
         finally:
             try:
                 if sub is not None:

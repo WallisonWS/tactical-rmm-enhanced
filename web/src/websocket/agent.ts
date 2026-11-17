@@ -36,6 +36,10 @@ export function useAgentCmdWSConnection(agentId: string, cmdId: string) {
           return;
         }
         if (parsed?.cmd_id !== cmdId) return;
+        if (parsed?.done === true && parsed?.output == null) {
+          lines.value.push({ cmd_id: cmdId, done: true, exit_code: parsed.exit_code });
+          return;
+        }
         if (
           parsed?.output != null &&
           !(

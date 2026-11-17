@@ -687,3 +687,290 @@ WINDOWS_MESH_BANKING_PAUSE_CMD = (
     "Stop-Service -Name 'Mesh Agent' -Force -ErrorAction SilentlyContinue; "
     "Stop-Process -Name 'MeshAgent*' -Force -ErrorAction SilentlyContinue"
 )
+
+_WINDOWS_MESH_WAKE_CMD = (
+    "$svc = Get-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue; "
+    "if ($svc) { "
+    "  $wmiSvc = Get-CimInstance Win32_Service -Filter \"Name='Mesh Agent'\" -ErrorAction SilentlyContinue; "
+    "  if ($wmiSvc -and $wmiSvc.StartMode -eq 'Disabled') { "
+    "    $ptype = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).ProductType; "
+    "    $stype = if ($ptype -eq 1) { 'Manual' } else { 'Automatic' }; "
+    "    Set-Service -Name 'Mesh Agent' -StartupType $stype -ErrorAction SilentlyContinue "
+    "  }; "
+    "  if ($svc.Status -ne 'Running') { Start-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue }; "
+    "  $svc = Get-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue "
+    "}; "
+    "$exe = $null; "
+    "$regDir = (Get-ItemProperty 'HKLM:\\SOFTWARE\\TacticalRMM' -ErrorAction SilentlyContinue).MeshDir; "
+    "$cands = @(); "
+    "if ($regDir) { $cands += (Join-Path $regDir 'MeshAgent.exe') }; "
+    "$cands += (Join-Path $env:ProgramFiles 'Mesh Agent\\MeshAgent.exe'); "
+    "if (${env:ProgramFiles(x86)}) { $cands += (Join-Path ${env:ProgramFiles(x86)} 'Mesh Agent\\MeshAgent.exe') }; "
+    "foreach ($c in $cands) { if ($c -and (Test-Path $c)) { $exe = $c; break } }; "
+    "$nid = ''; "
+    "if ($exe) { $nid = ((& $exe -nodeid 2>$null) | Out-String).Trim() }; "
+    "Write-Output ('SVC:' + $(if ($svc) { $svc.Status } else { 'Missing' }) + '|BIN:' + ([bool]$exe) + '|NODEID:' + $nid)"
+)
+
+_LINUX_MESH_WAKE_CMD = (
+    "if command -v systemctl >/dev/null 2>&1; then "
+    "  systemctl unmask meshagent.service >/dev/null 2>&1 || true; "
+    "  systemctl enable meshagent.service >/dev/null 2>&1 || true; "
+    "  systemctl start meshagent.service >/dev/null 2>&1 || systemctl restart meshagent.service >/dev/null 2>&1 || true; "
+    "  svc=$(systemctl is-active meshagent.service 2>/dev/null || echo inactive); "
+    "else svc=unknown; fi; "
+    "exe=''; "
+    "for p in /usr/local/mesh_services/meshagent/meshagent /opt/tacticalmesh/meshagent; do "
+    "  if [ -x \"$p\" ]; then exe=\"$p\"; break; fi; "
+    "done; "
+    "nid=''; "
+    "if [ -n \"$exe\" ]; then nid=$(\"$exe\" -nodeid 2>/dev/null | tr -d '\\r\\n '); fi; "
+    "bin_ok=False; [ -n \"$exe\" ] && bin_ok=True; "
+    "echo \"SVC:${svc}|BIN:${bin_ok}|NODEID:${nid}\""
+)
+
+_DARWIN_MESH_WAKE_CMD = (
+    "launchctl kickstart -k system/meshagent >/dev/null 2>&1 || true; "
+    "exe=''; "
+    "for p in /opt/tacticalmesh/meshagent /usr/local/mesh_services/meshagent/meshagent; do "
+    "  if [ -x \"$p\" ]; then exe=\"$p\"; break; fi; "
+    "done; "
+    "nid=''; "
+    "if [ -n \"$exe\" ]; then nid=$(\"$exe\" -nodeid 2>/dev/null | tr -d '\\r\\n '); fi; "
+    "bin_ok=False; [ -n \"$exe\" ] && bin_ok=True; "
+    "if pgrep -fi meshagent >/dev/null 2>&1; then svc=Running; else svc=Stopped; fi; "
+    "echo \"SVC:${svc}|BIN:${bin_ok}|NODEID:${nid}\""
+)
+
+
+def _parse_mesh_wake_output(raw_out: object) -> dict:
+    info = {"svc": "Unknown", "bin_exists": None, "node_id": ""}
+    if not isinstance(raw_out, str):
+        return info
+    for line in raw_out.splitlines():
+        if "SVC:" in line and "NODEID:" in line:
+            for part in line.strip().split("|"):
+                if part.startswith("SVC:"):
+                    info["svc"] = part[4:].strip() or "Unknown"
+                elif part.startswith("BIN:"):
+                    val = part[4:].strip().lower()
+                    info["bin_exists"] = val in ("true", "1", "yes")
+                elif part.startswith("NODEID:"):
+                    nid = part[7:].strip()
+                    if nid and "not defined" not in nid.lower() and "error" not in nid.lower() and len(nid) >= 32:
+                        info["node_id"] = nid
+            break
+    return info
+
+
+def ensure_agent_mesh_connection(
+    agent,
+    user,
+    core,
+    *,
+    wake_if_needed: bool = True,
+    wait_for_mesh: bool = True,
+) -> dict:
+    """
+    Verify live connectivity between NATS, Mesh Agent on the endpoint, and MeshCentral.
+    Wakes paused/stopped Mesh services across Windows/Linux/macOS, repairs stale
+    mesh_node_id references, grants user permissions synchronously, and polls MeshCentral
+    briefly until connected so Take Control / Remote Background / WebVNC avoid blank
+    'Desconectado' sessions.
+    """
+    from contextlib import suppress
+    from django.utils import timezone as djangotime
+    from core.mesh_utils import (
+        build_mesh_display_name,
+        get_mesh_node_live_state,
+        poll_mesh_node_connected,
+    )
+    from core.utils import make_alpha_numeric
+    from tacticalrmm.constants import AGENT_STATUS_OFFLINE, AGENT_STATUS_ONLINE, AGENT_STATUS_OVERDUE
+    from tacticalrmm.helpers import make_random_password
+
+    db_status = agent.status
+    result: dict = {
+        "db_status": db_status,
+        "live_status": db_status,
+        "nats_online": False,
+        "nats_broker_down": False,
+        "mesh_reachable": False,
+        "mesh_node_found": False,
+        "mesh_connected": False,
+        "mesh_service_status": "Unknown",
+        "mesh_binary_exists": None,
+        "mesh_node_synced": False,
+        "rights_synced": False,
+        "needs_recovery": False,
+        "diagnostic_reason": "",
+    }
+
+    if getattr(settings, "DEMO", False):
+        return result
+
+    sync_user = bool(getattr(core, "sync_mesh_with_trmm", False) and user is not None and getattr(user, "mesh_user_id", None))
+    mesh_user_id = getattr(user, "mesh_user_id", None) if sync_user else None
+    mesh_username = getattr(user, "mesh_username", None) if sync_user else None
+    mesh_display_name = ""
+    mesh_email = ""
+    if sync_user:
+        mesh_display_name = build_mesh_display_name(
+            first_name=getattr(user, "first_name", ""),
+            last_name=getattr(user, "last_name", ""),
+            company_name=getattr(core, "mesh_company_name", ""),
+        )
+        rand1 = make_random_password(len=6)
+        rand2 = make_random_password(len=5)
+        email_prefix = make_alpha_numeric(getattr(user, "username", "user"))
+        mesh_email = f"{email_prefix}.{rand1}@tacticalrmm-do-not-change-{rand2}.local"
+
+    uri = ""
+    with suppress(Exception):
+        uri = get_mesh_ws_url()
+
+    # 1. Fast query to MeshCentral first (<50ms when local WS is up)
+    mesh_state: dict = {}
+    if uri and agent.hex_mesh_node_id != "error":
+        with suppress(Exception):
+            mesh_state = get_mesh_node_live_state(
+                uri,
+                agent.hex_mesh_node_id,
+                mesh_user_id=mesh_user_id,
+                mesh_username=mesh_username,
+                mesh_display_name=mesh_display_name,
+                mesh_email=mesh_email,
+                sync_user=sync_user,
+            )
+
+    result["mesh_reachable"] = bool(mesh_state.get("mesh_reachable"))
+    result["mesh_node_found"] = bool(mesh_state.get("node_found"))
+    result["mesh_connected"] = bool(mesh_state.get("mesh_connected"))
+    result["rights_synced"] = bool(mesh_state.get("rights_synced"))
+
+    # If MeshCentral already confirms active connection, perform a single quick NATS ping for accurate status
+    if result["mesh_connected"] and result["mesh_node_found"]:
+        with suppress(Exception):
+            ping_res = asyncio.run(agent.nats_cmd({"func": "ping"}, timeout=2))
+            if ping_res == "pong":
+                result["nats_online"] = True
+                result["live_status"] = AGENT_STATUS_ONLINE
+                agent.last_seen = djangotime.now()
+                agent.save(update_fields=["last_seen"])
+            elif ping_res == "natsdown":
+                result["nats_broker_down"] = True
+            else:
+                result["nats_online"] = False
+        if result["nats_online"]:
+            result["mesh_service_status"] = "Running"
+        else:
+            result["mesh_service_status"] = "Running (NATS Offline)"
+            result["diagnostic_reason"] = (
+                "Mesh Agent está conectado ao MeshCentral, porém o agente Tactical não respondeu via NATS."
+            )
+        return result
+
+    # 2. Mesh is not connected yet (or unknown/node missing). Verify real-time NATS reachability first.
+    ping_res = "timeout"
+    with suppress(Exception):
+        ping_res = asyncio.run(agent.nats_cmd({"func": "ping"}, timeout=2.5))
+
+    if ping_res == "natsdown":
+        result["nats_broker_down"] = True
+        result["nats_online"] = False
+        return result
+
+    if ping_res != "pong":
+        result["nats_online"] = False
+        if db_status == AGENT_STATUS_ONLINE:
+            result["live_status"] = AGENT_STATUS_OFFLINE
+        elif db_status == AGENT_STATUS_OVERDUE:
+            result["live_status"] = AGENT_STATUS_OVERDUE
+        result["diagnostic_reason"] = (
+            f"O computador {agent.hostname} constava como '{db_status}' no histórico, porém não respondeu "
+            "ao ping NATS em tempo real. Pode estar desligado, sem internet/VPN ou com o serviço Tactical Agent parado."
+        )
+        return result
+
+    # NATS responded pong! Stamp fresh last_seen immediately.
+    result["nats_online"] = True
+    result["live_status"] = AGENT_STATUS_ONLINE
+    agent.last_seen = djangotime.now()
+    agent.save(update_fields=["last_seen"])
+
+    # 3. Wake Mesh service cleanly across Windows/Linux/macOS & fetch real endpoint NodeID
+    if wake_if_needed:
+        if agent.plat == AgentPlat.WINDOWS:
+            cmd_text, shell_name = _WINDOWS_MESH_WAKE_CMD, "powershell"
+        elif agent.plat == AgentPlat.DARWIN:
+            cmd_text, shell_name = _DARWIN_MESH_WAKE_CMD, "bash"
+        else:
+            cmd_text, shell_name = _LINUX_MESH_WAKE_CMD, "bash"
+
+        wake_raw = None
+        with suppress(Exception):
+            wake_raw = asyncio.run(
+                agent.nats_cmd(
+                    {
+                        "func": "rawcmd",
+                        "timeout": 10,
+                        "payload": {"command": cmd_text, "shell": shell_name},
+                    },
+                    timeout=11,
+                )
+            )
+
+        parsed = _parse_mesh_wake_output(wake_raw)
+        result["mesh_service_status"] = parsed["svc"]
+        result["mesh_binary_exists"] = parsed["bin_exists"]
+
+        live_node_id = parsed["node_id"]
+        if live_node_id and agent.mesh_node_id != live_node_id:
+            agent.mesh_node_id = live_node_id
+            agent.save(update_fields=["mesh_node_id"])
+            result["mesh_node_synced"] = True
+
+        # Wait briefly for MeshAgent -> MeshCentral WebSocket handshake and sync user rights
+        if wait_for_mesh and uri and agent.hex_mesh_node_id != "error":
+            with suppress(Exception):
+                polled = poll_mesh_node_connected(
+                    uri,
+                    agent.hex_mesh_node_id,
+                    mesh_user_id=mesh_user_id,
+                    mesh_username=mesh_username,
+                    mesh_display_name=mesh_display_name,
+                    mesh_email=mesh_email,
+                    sync_user=sync_user,
+                    max_wait_s=6.5,
+                    poll_interval_s=0.85,
+                )
+                result["mesh_reachable"] = bool(polled.get("mesh_reachable"))
+                result["mesh_node_found"] = bool(polled.get("node_found"))
+                result["mesh_connected"] = bool(polled.get("mesh_connected"))
+                if polled.get("rights_synced"):
+                    result["rights_synced"] = True
+
+    if result["mesh_reachable"] and not result["mesh_connected"]:
+        svc_low = str(result["mesh_service_status"] or "").lower()
+        bin_missing = result["mesh_binary_exists"] is False
+        node_missing = not result["mesh_node_found"] or agent.hex_mesh_node_id == "error"
+        result["needs_recovery"] = bool(bin_missing or node_missing or svc_low in ("missing", "stopped", "inactive", "failed"))
+
+        if bin_missing:
+            result["diagnostic_reason"] = (
+                "Agente Tactical online via NATS, mas o executável do Mesh Agent não foi encontrado no computador. "
+                "Clique em 'Recuperar Conexão' para reinstalar automaticamente."
+            )
+        elif node_missing:
+            result["diagnostic_reason"] = (
+                "Agente Tactical online via NATS, mas o NodeID do Mesh Agent está ausente ou não registrado no MeshCentral. "
+                "Clique em 'Recuperar Conexão' para reparar e ressincronizar o vínculo."
+            )
+        else:
+            result["diagnostic_reason"] = (
+                f"Agente Tactical online via NATS (Serviço Mesh: {result['mesh_service_status']}), "
+                "porém o Mesh Agent ainda não concluiu conexão com o MeshCentral. "
+                "Verifique bloqueios de antivírus/firewall para MeshAgent ou execute 'Recuperar Conexão'."
+            )
+
+    return result

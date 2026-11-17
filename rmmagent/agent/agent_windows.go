@@ -847,32 +847,37 @@ func (a *Agent) installMesh(meshbin, exe, proxy string) (string, error) {
 	a.Logger.Debugln("Sleeping for 5")
 	time.Sleep(5 * time.Second)
 
-	meshSuccess := false
-
-	for !meshSuccess {
-		a.Logger.Debugln("Getting mesh node id")
+	const maxAttempts = 12
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		a.Logger.Debugf("Getting mesh node id (attempt %d/%d)", attempt, maxAttempts)
 		pMesh, pErr := CMD(exe, []string{"-nodeid"}, int(30), false)
 		if pErr != nil {
 			a.Logger.Errorln(pErr)
-			time.Sleep(5 * time.Second)
+			if attempt < maxAttempts {
+				time.Sleep(5 * time.Second)
+			}
 			continue
 		}
-		if pMesh[1] != "" {
+		if strings.TrimSpace(pMesh[1]) != "" {
 			a.Logger.Errorln(pMesh[1])
-			time.Sleep(5 * time.Second)
+			if attempt < maxAttempts {
+				time.Sleep(5 * time.Second)
+			}
 			continue
 		}
 		meshNodeID = StripAll(pMesh[0])
 		a.Logger.Debugln("Node id:", meshNodeID)
-		if strings.Contains(strings.ToLower(meshNodeID), "not defined") {
+		if meshNodeID == "" || strings.Contains(strings.ToLower(meshNodeID), "not defined") {
 			a.Logger.Errorln(meshNodeID)
-			time.Sleep(5 * time.Second)
+			if attempt < maxAttempts {
+				time.Sleep(5 * time.Second)
+			}
 			continue
 		}
-		meshSuccess = true
+		return meshNodeID, nil
 	}
 
-	return meshNodeID, nil
+	return "", errors.New("timed out waiting for mesh agent node id")
 }
 
 // ChecksRunning prevents duplicate checks from running
@@ -1254,11 +1259,16 @@ func (a *Agent) InstallDeno(force bool) {
 
 func (a *Agent) RecoverMesh() {
 	a.Logger.Infoln("Attempting mesh recovery")
-	defer CMD("net", []string{"start", a.MeshSVC}, 60, false)
 
 	_, _ = CMD("net", []string{"stop", a.MeshSVC}, 60, false)
 	a.ForceKillMesh()
 	a.ReinstallMesh()
+
+	// Ensure service is not disabled before starting (preserve Manual on workstations for banking compatibility)
+	_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
+		"if ((Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).ProductType -ne 1) { Set-Service -Name 'Mesh Agent' -StartupType Automatic -ErrorAction SilentlyContinue } else { Set-Service -Name 'Mesh Agent' -StartupType Manual -ErrorAction SilentlyContinue }; Start-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue").Run()
+	_, _ = CMD("net", []string{"start", a.MeshSVC}, 60, false)
+	time.Sleep(2 * time.Second)
 	a.SyncMeshNodeID(true)
 }
 
@@ -1272,12 +1282,12 @@ func (a *Agent) getMeshNodeID() (string, error) {
 	stdout := out[0]
 	stderr := out[1]
 
-	if stderr != "" {
+	if strings.TrimSpace(stderr) != "" {
 		a.Logger.Debugln(stderr)
-		return "", err
+		return "", fmt.Errorf("mesh node id error: %s", strings.TrimSpace(stderr))
 	}
 
-	if stdout == "" || strings.Contains(strings.ToLower(StripAll(stdout)), "not defined") {
+	if StripAll(stdout) == "" || strings.Contains(strings.ToLower(StripAll(stdout)), "not defined") {
 		a.Logger.Debugln("Failed getting mesh node id", stdout)
 		return "", errors.New("failed to get mesh node id")
 	}

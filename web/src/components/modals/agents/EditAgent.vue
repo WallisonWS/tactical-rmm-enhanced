@@ -167,6 +167,10 @@
                         (val) => !!val || '*Required',
                         (val) => val >= 3 || 'Minimum is 3 minutes',
                         (val) => val < 9999999 || 'Maximum is 9999999 minutes',
+                        (val) =>
+                          !agent.offline_time ||
+                          val > agent.offline_time ||
+                          'Must be greater than offline minutes',
                       ]"
                     />
                   </q-card-section>

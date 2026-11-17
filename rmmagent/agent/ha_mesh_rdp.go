@@ -260,7 +260,27 @@ func (a *Agent) RepairMeshAndLink() map[string]interface{} {
 
 	time.Sleep(2 * time.Second)
 
-	// 4. Synchronize MeshNodeID with Tactical RMM API & MeshCentral Server
+	// 4. Reinstall Mesh Agent automatically if binary is missing or NodeID is still invalid
+	if !trmm.FileExists(a.MeshSystemEXE) {
+		a.ReinstallMesh()
+		actions = append(actions, "Binário Mesh Agent ausente: reinstalação automática concluída")
+	} else if _, err := a.getMeshNodeID(); err != nil {
+		a.ForceKillMesh()
+		a.ReinstallMesh()
+		actions = append(actions, "NodeID Mesh inválido após reinício: Mesh Agent reinstalado automaticamente")
+	}
+
+	if runtime.GOOS == "windows" {
+		_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
+			"Start-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue").Run()
+	} else if runtime.GOOS == "darwin" {
+		_ = exec.Command("launchctl", "kickstart", "-k", "system/meshagent").Run()
+	} else {
+		_ = exec.Command("systemctl", "start", "meshagent").Run()
+	}
+	time.Sleep(2 * time.Second)
+
+	// 5. Synchronize MeshNodeID with Tactical RMM API & MeshCentral Server
 	a.SyncMeshNodeID(true)
 	actions = append(actions, "MeshNodeID ressincronizado com a API e MeshCentral (/api/v3/syncmesh/)")
 

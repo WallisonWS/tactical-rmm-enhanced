@@ -114,8 +114,26 @@
       </q-btn>
     </div>
 
-    <div class="terminal-wrapper">
+    <div class="terminal-wrapper relative-position">
       <div ref="xtermContainer" class="xterm-container"></div>
+      <div
+        v-if="terminalError"
+        class="absolute-full column flex-center q-pa-lg text-center"
+        style="background: rgba(15, 23, 42, 0.92); color: #f8fafc; z-index: 20"
+      >
+        <q-icon name="cloud_off" size="48px" color="negative" class="q-mb-sm" />
+        <div class="text-subtitle1 text-weight-medium q-mb-xs">Falha ao conectar ao terminal</div>
+        <div class="text-body2 text-grey-4 q-mb-md" style="max-width: 520px">
+          {{ terminalError }}
+        </div>
+        <q-btn
+          color="primary"
+          icon="refresh"
+          label="Reconectar Terminal"
+          no-caps
+          @click="retryTerminalConnection"
+        />
+      </div>
       <q-inner-loading :showing="loading" color="primary" />
     </div>
   </div>
@@ -204,6 +222,7 @@ const isBuiltInShell = (shell: string): shell is BuiltInShell => {
 };
 
 const loading = ref(false);
+const terminalError = ref("");
 const customShellPath = ref<string | null>(null);
 const showCustomShellDialog = ref(false);
 const customShellInput = ref("");
@@ -251,7 +270,9 @@ const fit = new FitAddon();
 let inputDisposable: { dispose: () => void } | null = null;
 let stopResizeObserver: (() => void) | null = null;
 let stopWSDataWatch: WatchStopHandle | null = null;
+let stopWSStatusWatch: WatchStopHandle | null = null;
 let wsReadyInterval: ReturnType<typeof setInterval> | null = null;
+let startTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
 let startRequested = false;
 let started = false;
@@ -273,6 +294,13 @@ function waitForLayout(): Promise<void> {
   });
 }
 
+function clearStartTimeout() {
+  if (startTimeoutHandle) {
+    clearTimeout(startTimeoutHandle);
+    startTimeoutHandle = null;
+  }
+}
+
 function clearWSReadyInterval() {
   if (wsReadyInterval) {
     clearInterval(wsReadyInterval);
@@ -284,9 +312,12 @@ function cleanupCurrentSession({
   sendKill = true,
 }: { sendKill?: boolean } = {}) {
   clearWSReadyInterval();
+  clearStartTimeout();
 
   stopWSDataWatch?.();
   stopWSDataWatch = null;
+  stopWSStatusWatch?.();
+  stopWSStatusWatch = null;
 
   inputDisposable?.dispose();
   inputDisposable = null;
@@ -307,7 +338,22 @@ function cleanupCurrentSession({
   activeSessionId = null;
 }
 
+function retryTerminalConnection() {
+  if (!term) return;
+  terminalError.value = "";
+  const shellToStart =
+    selectedShell.value === "custom"
+      ? customShellPath.value || (isWindows.value ? "cmd" : "bash")
+      : selectedShell.value || (isWindows.value ? "cmd" : "bash");
+  loading.value = true;
+  term.reset();
+  fit.fit();
+  initWS(shellToStart);
+}
+
 function markSessionReadyAndResize() {
+  clearStartTimeout();
+  terminalError.value = "";
   if (!term || !startRequested || started) return;
 
   started = true;
@@ -337,6 +383,7 @@ function markSessionReadyAndResize() {
 
 function initWS(shell: string) {
   cleanupCurrentSession();
+  terminalError.value = "";
 
   const sessionId = uid();
   activeSessionId = sessionId;
@@ -360,13 +407,16 @@ function initWS(shell: string) {
     if (activeSessionId !== sessionId) return;
 
     if (msg.action === "terminal_error") {
+      clearStartTimeout();
       loading.value = false;
       startRequested = false;
       started = false;
+      const errText = msg.error || msg.data?.error || "Failed to start terminal";
+      terminalError.value = errText;
 
       $q.notify({
         type: "negative",
-        message: msg.error || msg.data?.error || "Failed to start terminal",
+        message: errText,
       });
 
       if (isCustomAttempt) {
@@ -410,6 +460,20 @@ function initWS(shell: string) {
     wsSend(JSON.stringify({ action: "input", data: d }));
   });
 
+  stopWSStatusWatch = watch(wsStatus, (st) => {
+    if (activeSessionId !== sessionId) return;
+    if (st === "CLOSED" && !started) {
+      clearWSReadyInterval();
+      clearStartTimeout();
+      loading.value = false;
+      startRequested = false;
+      if (!terminalError.value) {
+        terminalError.value =
+          "Conexão WebSocket do terminal fechada antes de iniciar. Verifique se o agente está acessível via NATS.";
+      }
+    }
+  });
+
   wsReadyInterval = setInterval(async () => {
     if (activeSessionId !== sessionId) {
       clearWSReadyInterval();
@@ -427,6 +491,16 @@ function initWS(shell: string) {
       startRequested = true;
       started = false;
       loading.value = true;
+
+      clearStartTimeout();
+      startTimeoutHandle = setTimeout(() => {
+        if (activeSessionId === sessionId && !started && startRequested) {
+          loading.value = false;
+          startRequested = false;
+          terminalError.value =
+            "Tempo esgotado aguardando resposta do agente via NATS. O computador pode estar offline, sem VPN ou com serviço tacticalrmm parado.";
+        }
+      }, 12000);
 
       wsSend(
         JSON.stringify({
