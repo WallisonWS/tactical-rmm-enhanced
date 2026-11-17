@@ -527,6 +527,14 @@
                   @click="selectAllMissing"
                 />
                 <q-btn
+                  v-if="pushLoading"
+                  outline
+                  color="negative"
+                  icon="stop_circle"
+                  label="Parar Lote"
+                  @click="pushCancelled = true"
+                />
+                <q-btn
                   unelevated
                   color="deep-orange"
                   icon="install_desktop"
@@ -629,6 +637,7 @@ const downloadingGpo = ref(false);
 const publishingGpo = ref(false);
 const downloadingDcScript = ref(false);
 const pushLoading = ref(false);
+const pushCancelled = ref(false);
 const pushProgressMsg = ref("");
 const pushResults = ref<ADPushInstallResultItem[]>([]);
 
@@ -886,6 +895,7 @@ async function onDownloadAllInOneDcScript() {
 async function runPushInstall(targets: ADDirectoryComputer[], force = false) {
   if (!selectedSite.value || !targets.length) return;
   pushLoading.value = true;
+  pushCancelled.value = false;
   pushProgressMsg.value = "";
   pushResults.value = [];
 
@@ -893,6 +903,7 @@ async function runPushInstall(targets: ADDirectoryComputer[], force = false) {
   const batchSize = 15;
   try {
     for (let i = 0; i < allHostnames.length; i += batchSize) {
+      if (pushCancelled.value) break;
       const batch = allHostnames.slice(i, i + batchSize);
       const batchNum = Math.floor(i / batchSize) + 1;
       const totalBatches = Math.ceil(allHostnames.length / batchSize);
@@ -916,13 +927,14 @@ async function runPushInstall(targets: ADDirectoryComputer[], force = false) {
 
     const okCnt = pushResults.value.filter((r) => r.success).length;
     notifySuccess(
-      `Push concluído: ${okCnt} de ${pushResults.value.length} comando(s) aceito(s). Novos agentes aparecerão no painel em ~30s.`,
+      `${pushCancelled.value ? "Push interrompido pelo usuário" : "Push concluído"}: ${okCnt} de ${pushResults.value.length} comando(s) aceito(s). Novos agentes aparecerão no painel em ~30s.`,
     );
     await store.dispatch("refreshDashboard");
   } catch (e: unknown) {
     notifyError(extractApiError(e, "Falha ao executar Push Remoto."));
   } finally {
     pushLoading.value = false;
+    pushCancelled.value = false;
     pushProgressMsg.value = "";
   }
 }

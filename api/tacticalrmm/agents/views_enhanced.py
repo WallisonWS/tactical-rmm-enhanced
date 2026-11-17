@@ -2227,6 +2227,50 @@ def _wrap_ps_utf8_b64(script: str) -> str:
     )
 
 
+def _run_probe_powershell(
+    probe: Agent, ps_script: str, timeout: int = 90
+) -> Tuple[bool, str]:
+    """
+    Executes a PowerShell script on an online Windows agent via 'runscriptfull'
+    (writes to a temporary .ps1 file, avoiding the 32KB CreateProcessW CLI limit,
+    preserving UTF-8, and surfacing both stdout and stderr for clear diagnostics).
+    """
+    wrapped = _wrap_ps_utf8_b64(ps_script)
+    res = asyncio.run(
+        probe.nats_cmd(
+            {
+                "func": "runscriptfull",
+                "timeout": timeout,
+                "script_args": [],
+                "payload": {"code": wrapped, "shell": "powershell"},
+                "run_as_user": False,
+                "env_vars": [],
+            },
+            timeout=timeout + 8,
+        )
+    )
+    if res in ("timeout", "natsdown", "error") or res is None:
+        return False, str(res or "empty_response")
+
+    if isinstance(res, dict):
+        stdout = str(
+            res.get("stdout") if "stdout" in res else (res.get("Stdout") or "")
+        ).strip()
+        stderr = str(
+            res.get("stderr") if "stderr" in res else (res.get("Stderr") or "")
+        ).strip()
+        if stdout:
+            return True, stdout
+        if stderr:
+            return False, stderr
+        return False, "empty_stdout_stderr"
+
+    txt = str(res).strip()
+    if not txt:
+        return False, "empty_response"
+    return True, txt
+
+
 def _pick_domain_probe_agent(user, preferred_agent_id=None):
     from tacticalrmm.constants import AGENT_DEFER, AgentPlat
     from tacticalrmm.permissions import _has_perm_on_agent
@@ -2343,28 +2387,20 @@ class FleetADDirectoryAuditView(APIView):
         if not _has_perm_on_agent(request.user, probe.agent_id):
             return notify_error("Sem permissão no servidor consultado.")
 
-        cmd_payload = _wrap_ps_utf8_b64(
+        ok_ps, raw = _run_probe_powershell(
+            probe,
             _build_ad_audit_ps_script(
                 ldap_server=ldap_server,
                 username=ldap_username,
                 password=ldap_password,
-            )
+            ),
+            timeout=65,
         )
-        raw = asyncio.run(
-            probe.nats_cmd(
-                {
-                    "func": "rawcmd",
-                    "timeout": 60,
-                    "payload": {"command": cmd_payload, "shell": "powershell"},
-                },
-                timeout=65,
-            )
-        )
-        if raw in ("timeout", "natsdown", "error") or not raw:
+        if not ok_ps:
             return Response(
                 {
                     "ok": False,
-                    "error": f"Falha ao consultar Active Directory via '{probe.hostname}' (resposta: {raw}).",
+                    "error": f"Falha ao consultar Active Directory via '{probe.hostname}' (resposta: {raw[:300]}).",
                     "probe_agent": {
                         "agent_id": probe.agent_id,
                         "hostname": probe.hostname,
@@ -2903,8 +2939,11 @@ $cfg = $cfgJson | ConvertFrom-Json
 $hosts = @($cfg.hosts)
 $remoteB64 = [string]$cfg.remote_b64
 $encB64 = [string]$cfg.enc_b64
-$rawUser = [string]$cfg.user
+$rawUser = ([string]$cfg.user).Trim()
 $rawPass = [string]$cfg.pass
+if ($rawUser -and ($rawUser -notmatch '[\\@]') -and $env:USERDOMAIN) {{
+    $rawUser = "$($env:USERDOMAIN)\$rawUser"
+}}
 
 $cred = $null
 if ($rawUser -and $rawPass) {{
@@ -2958,9 +2997,9 @@ $workerScript = {{
         }}
     }}
 
-    $winrmOpen = Test-TcpPort $targetHost 5985 1100
-    $smbOpen = Test-TcpPort $targetHost 445 1100
-    $wmiOpen = Test-TcpPort $targetHost 135 1100
+    $winrmOpen = Test-TcpPort $targetHost 5985 800
+    $smbOpen = Test-TcpPort $targetHost 445 800
+    $wmiOpen = Test-TcpPort $targetHost 135 800
     if ((-not $winrmOpen) -and (-not $smbOpen) -and (-not $wmiOpen)) {{
         return [pscustomobject]@{{
             hostname = $h
@@ -3152,20 +3191,10 @@ try {{
     $pool.Dispose()
 }}
 """
-        cmd_payload = _wrap_ps_utf8_b64(probe_runner_ps)
-        raw_out = asyncio.run(
-            probe.nats_cmd(
-                {
-                    "func": "rawcmd",
-                    "timeout": 85,
-                    "payload": {"command": cmd_payload, "shell": "powershell"},
-                },
-                timeout=92,
-            )
-        )
-        if raw_out in ("timeout", "natsdown", "error") or not raw_out:
+        ok_ps, raw_out = _run_probe_powershell(probe, probe_runner_ps, timeout=90)
+        if not ok_ps:
             return notify_error(
-                f"Falha ao executar Push Remoto a partir de '{probe.hostname}' (resposta: {raw_out})."
+                f"Falha ao executar Push Remoto a partir de '{probe.hostname}' (resposta: {raw_out[:300]})."
             )
 
         out_str = str(raw_out).strip()
@@ -3637,18 +3666,9 @@ if ($cfg.auto_link_gpo -and (Get-Command New-GPO -ErrorAction SilentlyContinue))
     message = $gpoResult
 }} | ConvertTo-Json -Compress
 """
-        raw = asyncio.run(
-            probe.nats_cmd(
-                {
-                    "func": "rawcmd",
-                    "timeout": 90,
-                    "payload": {"command": _wrap_ps_utf8_b64(publish_ps), "shell": "powershell"},
-                },
-                timeout=95,
-            )
-        )
-        if raw in ("timeout", "natsdown", "error") or not raw:
-            return notify_error(f"Sem resposta do agente '{probe.hostname}': {raw}")
+        ok_ps, raw = _run_probe_powershell(probe, publish_ps, timeout=95)
+        if not ok_ps:
+            return notify_error(f"Sem resposta do agente '{probe.hostname}': {raw[:300]}")
 
         raw_str = str(raw).strip()
         s_i, e_i = raw_str.find("{"), raw_str.rfind("}")
