@@ -4,13 +4,12 @@
     flat
     no-caps
     icon="palette"
-    class="q-mr-xs"
+    class="q-mr-xs trmm-theme-btn"
     data-no-translate="true"
   >
-    <q-tooltip>Temas &amp; Paletas de Cores</q-tooltip>
+    <q-tooltip :delay="350">Temas &amp; Paletas de Cores</q-tooltip>
     <q-menu
       style="min-width: 310px; max-width: 350px; border-radius: 10px"
-      data-no-translate="true"
     >
       <q-list dense class="q-py-xs">
         <q-item-label header class="text-weight-bold row items-center q-py-sm">
@@ -120,6 +119,17 @@ function selectPalette(id: string) {
 </script>
 
 <style scoped>
+.trmm-theme-btn {
+  border-radius: 7px;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  transition: all 0.15s ease;
+}
+.trmm-theme-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.32);
+}
 .theme-card-item {
   border: 1px solid rgba(148, 163, 184, 0.16);
   transition: border-color 0.15s ease, background-color 0.15s ease;

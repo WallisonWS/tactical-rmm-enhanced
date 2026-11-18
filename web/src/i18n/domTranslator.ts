@@ -359,6 +359,79 @@ const EXACT_PHRASES: Array<[string, string, string]> = [
   ["Join AD Domain Now", "Ingressar no Domínio AD Agora", "Unir al Dominio AD Ahora"],
   ["Join Computer to Active Directory Domain", "Ingressar Computador no Domínio Active Directory", "Unir Computadora al Dominio Active Directory"],
   ["Machines Outside Active Directory Report (IT Fleet Audit)", "Relatório de Máquinas Fora do Active Directory (Auditoria de Frota TI)", "Informe de Máquinas Fuera de Active Directory (Auditoría de Flota TI)"],
+
+  // Dashboard Toolbar & Quick Actions
+  ["Disconnected", "Desconectados", "Desconectados"],
+  ["Sync Fleet", "Sincronizar", "Sincronizar"],
+  ["AD Audit", "Auditoria AD", "Auditoría AD"],
+  ["Inventory & Assets", "Inventário & Patrimônio", "Inventario y Activos"],
+  ["Reports", "Relatórios", "Informes"],
+  ["LAN Inventory (Agentless)", "Inventário LAN (Sem Agente)", "Inventario LAN (Sin Agente)"],
+  ["Edit Asset Tag / Sector", "Editar Patrimônio / Setor", "Editar Patrimonio / Sector"],
+  ["Search PC, user, IP...", "Pesquisar PC, usuário, IP...", "Buscar PC, usuario, IP..."],
+
+  // Central CLI Modal
+  ["Central CLI — Bulk Fleet Execution", "Central CLI — Execução em Massa na Frota", "Central CLI — Ejecución Masiva en la Flota"],
+  ["Real-time parallel execution via NATS RPC • Windows, Linux & macOS", "Execução paralela em tempo real via NATS RPC • Windows, Linux & macOS", "Ejecución paralela en tiempo real vía NATS RPC • Windows, Linux y macOS"],
+  ["Linux Terminal (/webterm)", "Terminal Linux (/webterm)", "Terminal Linux (/webterm)"],
+  ["1-Click Quick Actions (Online Fleet)", "Ações Rápidas de 1 Clique (Frota Online)", "Acciones Rápidas de 1 Clic (Flota en Línea)"],
+  ["Safe parallel background execution", "Execução paralela segura em segundo plano", "Ejecución paralela segura en segundo plano"],
+  ["Banking Mode (Pause Mesh)", "Modo Banco (Pausar Mesh)", "Modo Banco (Pausar Mesh)"],
+  ["Warsaw / Topaz Compatibility", "Compatibilidade Warsaw / Topaz", "Compatibilidad Warsaw / Topaz"],
+  ["Enable Banking Mode", "Ativar Modo Banco", "Activar Modo Banco"],
+  ["Windows Workstations", "Estações Windows", "Estaciones Windows"],
+  ["Sync GPO / AD & DNS", "Sincronizar GPO / AD & DNS", "Sincronizar GPO / AD y DNS"],
+  ["Sync AD", "Sincronizar AD", "Sincronizar AD"],
+  ["Windows Fleet", "Frota Windows", "Flota Windows"],
+  ["Restore Continuous Mesh", "Restaurar Mesh Contínuo", "Restaurar Mesh Continuo"],
+  ["24/7 Automatic Startup", "Inicialização Automática 24/7", "Inicio Automático 24/7"],
+  ["Restore Continuous", "Restaurar Contínuo", "Restaurar Continuo"],
+  ["Servers / Windows", "Servidores / Windows", "Servidores / Windows"],
+  ["Custom Command Console", "Console de Comando Personalizado", "Consola de Comandos Personalizados"],
+  ["Quick snippets:", "Modelos prontos:", "Plantillas rápidas:"],
+  ["RMM/Mesh Services", "Serviços RMM/Mesh", "Servicios RMM/Mesh"],
+  ["IP & Gateway", "IP & Gateway", "IP y Puerta de Enlace"],
+  ["Uptime & Boot", "Uptime & Boot", "Tiempo Activo / Inicio"],
+  ["Disk Space", "Espaço em Disco", "Espacio en Disco"],
+  ["Clear Spooler", "Limpar Spooler", "Limpiar Spooler"],
+  ["Execution Target", "Alvo da Execução", "Objetivo de Ejecución"],
+  ["Interpreter / Shell", "Interpretador / Shell", "Intérprete / Shell"],
+  ["Timeout (sec)", "Timeout (seg)", "Tiempo límite (seg)"],
+  ["Run", "Executar", "Ejecutar"],
+  ["Execution Results:", "Resultado da Execução:", "Resultado de Ejecución:"],
+  ["Export Output (.CSV)", "Exportar Saída (.CSV)", "Exportar Salida (.CSV)"],
+  ["Filter computer or output...", "Filtrar computador ou saída...", "Filtrar equipo o salida..."],
+
+  // Inventory & Patrimonio Modal
+  ["General Inventory, Asset Tags & Network Assets Hub", "Central de Inventário Geral, Patrimônio e Ativos/Passivos de Rede", "Central de Inventario General, Patrimonio y Activos de Red"],
+  ["Add Manual Active / Passive", "Incluir Ativo / Passivo Manual", "Incluir Activo / Pasivo Manual"],
+  ["Import CSV / Advanced IP Scanner", "Importar CSV / Advanced IP Scanner", "Importar CSV / Advanced IP Scanner"],
+  ["Total in Scope", "Total na Seleção", "Total en Selección"],
+  ["With Tactical Agent", "Com Agente Tactical", "Con Agente Tactical"],
+  ["Agentless (LAN/Clinical)", "Sem Agente (Rede/Clín.)", "Sin Agente (Red/Clín.)"],
+  ["Medical Equipment", "Equip. Médicos", "Equipos Médicos"],
+  ["Active Network", "Ativos de Rede", "Activos de Red"],
+  ["Passive Network", "Passivos de Rede", "Pasivos de Red"],
+  ["Printers / CCTV", "Impressoras / CFTV", "Impresoras / CCTV"],
+  ["With Asset Tag", "Com Nº Patrimônio", "Con Nº Patrimonio"],
+  ["Companies / Units:", "Empresas / Unidades:", "Empresas / Sedes:"],
+  ["Company / Client", "Empresa / Cliente", "Empresa / Cliente"],
+  ["Unit / Branch", "Unidade / Filial", "Sede / Sucursal"],
+  ["Classification", "Classificação", "Clasificación"],
+  ["Monitoring / Tag", "Monitoramento / Tag", "Monitoreo / Etiqueta"],
+  ["Set Asset Tag", "Definir Patrimônio", "Definir Patrimonio"],
+  ["Asset Tag", "Nº Patrimônio", "Nº Patrimonio"],
+  ["Device / Hostname", "Equipamento / Hostname", "Equipo / Hostname"],
+  ["Company / Unit", "Empresa / Unidade", "Empresa / Sede"],
+  ["Sector / Location", "Setor / Localização", "Sector / Ubicación"],
+  ["Brand / Model / Serial", "Fabricante / Modelo / Série", "Fabricante / Modelo / Serie"],
+  ["Source / Status", "Origem / Status", "Origen / Estado"],
+  ["Search Asset Tag, Name, IP, MAC, Sector...", "Buscar Patrimônio, Nome, IP, MAC, Setor...", "Buscar Patrimonio, Nombre, IP, MAC, Sector..."],
+
+  // Themes Menu
+  ["Themes & Color Palettes", "Temas & Paletas de Cores", "Temas y Paletas de Colores"],
+  ["Dark Themes", "Temas Escuros", "Temas Oscuros"],
+  ["Light Theme", "Tema Claro", "Tema Claro"],
 ];
 
 // Build fast lookup maps for each target locale
@@ -508,20 +581,34 @@ function translateDynamicPatterns(raw: string, locale: SupportedLocale): string 
     if (locale === "es-ES") return `IP Local (LAN):${val}`;
   }
 
-  // 7. Outside AD / In AD quick chips: "Fora do AD (12)", "No AD (83)"
-  const outsideAdMatch = trimmed.match(/^(Fora do AD|Outside AD|Fuera de AD)\s*\((\d+)\)$/i);
+  // 7. Outside AD / In AD quick chips: "Fora do AD (12)", "No AD: 98", "Fora do AD: 81"
+  const outsideAdMatch = trimmed.match(/^(Fora do AD|Outside AD|Fuera de AD)\s*(\(\d+\)|:\s*\d+)$/i);
   if (outsideAdMatch) {
-    const num = outsideAdMatch[2];
-    if (locale === "pt-BR") return `Fora do AD (${num})`;
-    if (locale === "en-US") return `Outside AD (${num})`;
-    if (locale === "es-ES") return `Fuera de AD (${num})`;
+    const suffix = outsideAdMatch[2];
+    if (locale === "pt-BR") return `Fora do AD${suffix.startsWith(":") ? suffix : ` ${suffix}`}`;
+    if (locale === "en-US") return `Outside AD${suffix.startsWith(":") ? suffix : ` ${suffix}`}`;
+    if (locale === "es-ES") return `Fuera de AD${suffix.startsWith(":") ? suffix : ` ${suffix}`}`;
   }
-  const inAdMatch = trimmed.match(/^(No AD|In AD|En AD)\s*\((\d+)\)$/i);
+  const inAdMatch = trimmed.match(/^(No AD|In AD|En AD)\s*(\(\d+\)|:\s*\d+)$/i);
   if (inAdMatch) {
-    const num = inAdMatch[2];
-    if (locale === "pt-BR") return `No AD (${num})`;
-    if (locale === "en-US") return `In AD (${num})`;
-    if (locale === "es-ES") return `En AD (${num})`;
+    const suffix = inAdMatch[2];
+    if (locale === "pt-BR") return `No AD${suffix.startsWith(":") ? suffix : ` ${suffix}`}`;
+    if (locale === "en-US") return `In AD${suffix.startsWith(":") ? suffix : ` ${suffix}`}`;
+    if (locale === "es-ES") return `En AD${suffix.startsWith(":") ? suffix : ` ${suffix}`}`;
+  }
+
+  // 8. Export Excel (N) / Print PDF (N) dynamic counters
+  const exportExcelMatch = trimmed.match(/^(Exportar Excel|Export Excel)\s*\((\d+)\)$/i);
+  if (exportExcelMatch) {
+    const num = exportExcelMatch[2];
+    if (locale === "en-US") return `Export Excel (${num})`;
+    return `Exportar Excel (${num})`;
+  }
+  const printPdfMatch = trimmed.match(/^(Imprimir \/ PDF|Print \/ PDF)\s*\((\d+)\)$/i);
+  if (printPdfMatch) {
+    const num = printPdfMatch[2];
+    if (locale === "en-US") return `Print / PDF (${num})`;
+    return `Imprimir / PDF (${num})`;
   }
 
   return null;

@@ -299,7 +299,7 @@
               </q-tabs>
 
               <!-- 1-Click Quick Filter Pills & Enterprise Actions -->
-              <div class="row items-center wrap trmm-toolbar-group" data-no-translate="true">
+              <div class="row items-center wrap trmm-toolbar-group">
                 <!-- Filter Pills -->
                 <q-btn
                   dense

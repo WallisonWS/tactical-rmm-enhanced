@@ -3,7 +3,7 @@
     <div class="row q-col-gutter-sm items-stretch">
       <!-- Fleet Health Score -->
       <div class="col-12 col-sm-6 col-md-2">
-        <q-card flat bordered class="full-height">
+        <q-card flat bordered class="full-height trmm-kpi-card">
           <q-card-section class="q-pa-sm row items-center no-wrap">
             <q-circular-progress
               show-value
@@ -29,11 +29,13 @@
 
       <!-- Availability % -->
       <div class="col-12 col-sm-6 col-md-2">
-        <q-card flat bordered class="full-height">
+        <q-card flat bordered class="full-height trmm-kpi-card">
           <q-card-section class="q-pa-sm">
             <div class="row items-center justify-between">
               <span class="text-caption text-grey">{{ t("kpi.availability") }}</span>
-              <q-icon name="fas fa-signal" color="positive" size="xs" />
+              <span class="trmm-kpi-icon trmm-kpi-icon--positive">
+                <q-icon name="cell_tower" color="positive" size="15px" />
+              </span>
             </div>
             <div class="text-h6 text-weight-bold">
               {{ summary.availability_percent }}%
@@ -49,11 +51,13 @@
 
       <!-- Patch Compliance -->
       <div class="col-12 col-sm-6 col-md-2">
-        <q-card flat bordered class="full-height">
+        <q-card flat bordered class="full-height trmm-kpi-card">
           <q-card-section class="q-pa-sm">
             <div class="row items-center justify-between">
               <span class="text-caption text-grey">{{ t("kpi.patchCompliance") }}</span>
-              <q-icon name="system_update" color="primary" size="xs" />
+              <span class="trmm-kpi-icon trmm-kpi-icon--primary">
+                <q-icon name="verified" color="primary" size="15px" />
+              </span>
             </div>
             <div class="text-h6 text-weight-bold">
               {{ summary.patch_compliance_percent }}%
@@ -67,11 +71,13 @@
 
       <!-- Active Alerts & Failing Checks -->
       <div class="col-12 col-sm-6 col-md-3">
-        <q-card flat bordered class="full-height">
+        <q-card flat bordered class="full-height trmm-kpi-card">
           <q-card-section class="q-pa-sm">
             <div class="row items-center justify-between">
               <span class="text-caption text-grey">{{ t("kpi.activeAlerts") }}</span>
-              <q-icon name="notifications_active" color="warning" size="xs" />
+              <span class="trmm-kpi-icon trmm-kpi-icon--warning">
+                <q-icon name="notifications_active" color="warning" size="15px" />
+              </span>
             </div>
             <div class="row items-center q-gutter-x-sm q-mt-xs">
               <q-badge color="negative" class="q-pa-xs">
@@ -94,10 +100,13 @@
 
       <!-- Quick Fleet Actions & AD Status -->
       <div class="col-12 col-md-3">
-        <q-card flat bordered class="full-height">
+        <q-card flat bordered class="full-height trmm-kpi-card">
           <q-card-section class="q-pa-sm flex items-center justify-between full-height">
             <div>
-              <div class="text-caption text-grey">Active Directory &amp; Workgroup</div>
+              <div class="row items-center q-gutter-x-xs">
+                <q-icon name="hub" color="teal-4" size="14px" />
+                <span class="text-caption text-grey">Active Directory &amp; Workgroup</span>
+              </div>
               <div class="row items-center q-gutter-x-xs q-mt-xs">
                 <q-badge color="positive" class="q-pa-xs">
                   No AD: {{ summary.ad_joined_agents ?? 0 }}
@@ -116,6 +125,8 @@
                 :label="t('kpi.refreshKpis')"
                 no-caps
                 size="sm"
+                class="q-px-sm"
+                style="border-radius: 7px"
                 :loading="loading"
                 @click="loadSummary"
               />
@@ -180,3 +191,30 @@ onMounted(() => {
   loadSummary();
 });
 </script>
+
+<style scoped>
+.trmm-kpi-card {
+  border-radius: 9px;
+  transition: border-color 0.16s ease;
+}
+.trmm-kpi-card:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+}
+.trmm-kpi-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.trmm-kpi-icon--positive {
+  background: rgba(34, 197, 94, 0.14);
+}
+.trmm-kpi-icon--primary {
+  background: rgba(25, 118, 210, 0.16);
+}
+.trmm-kpi-icon--warning {
+  background: rgba(245, 158, 11, 0.16);
+}
+</style>

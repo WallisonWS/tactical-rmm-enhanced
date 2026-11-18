@@ -91,20 +91,26 @@
         <!-- temp dark mode toggle -->
         <q-toggle
           v-model="darkMode"
+          dense
           class="q-mr-sm"
           checked-icon="nights_stay"
           unchecked-icon="wb_sunny"
-        />
+          color="primary"
+        >
+          <q-tooltip :delay="350">Alternar Modo Escuro / Claro</q-tooltip>
+        </q-toggle>
         <!-- Central CLI & Web Terminal button -->
         <q-btn
-          label=">_"
           dense
           flat
+          no-caps
+          icon="terminal"
+          label="CLI"
           @click="openWebTerm"
-          class="q-mr-sm"
-          style="font-size: 16px"
+          class="q-mr-sm q-px-sm"
+          style="border-radius: 7px; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.07); font-size: 12px; font-weight: 600"
         >
-          <q-tooltip>Central CLI da Frota &amp; Terminal do Servidor (&gt;_)</q-tooltip>
+          <q-tooltip :delay="350">Central CLI da Frota &amp; Terminal do Servidor</q-tooltip>
         </q-btn>
         <!-- Devices Chip -->
         <q-chip class="cursor-pointer" data-no-translate="true">
