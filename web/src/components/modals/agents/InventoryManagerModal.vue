@@ -135,6 +135,42 @@
         </div>
       </div>
 
+      <!-- Company / Unit Distinction Strip -->
+      <div v-if="companyUnitSummary.length" class="row items-center q-gutter-xs q-mt-xs">
+        <span class="text-caption text-grey-4 text-weight-medium">Empresas / Unidades:</span>
+        <q-chip
+          clickable
+          dense
+          size="11px"
+          :color="filterClient === 'Todos' && filterSite === 'Todos' ? 'primary' : 'grey-8'"
+          text-color="white"
+          @click="filterClient = 'Todos'; filterSite = 'Todos'"
+        >
+          Todas ({{ items.length }})
+        </q-chip>
+        <q-chip
+          v-for="u in companyUnitSummary"
+          :key="u.key"
+          clickable
+          dense
+          size="11px"
+          icon="business"
+          :color="
+            filterClient === u.client && filterSite === u.site
+              ? getEntityBadgeColor(u.client)
+              : 'blue-grey-9'
+          "
+          text-color="white"
+          @click="selectCompanyUnit(u.client, u.site)"
+        >
+          <span class="text-weight-bold q-mr-xs">{{ u.client }}</span>
+          <span class="text-grey-3">/ {{ u.site }} ({{ u.total }})</span>
+          <q-tooltip>
+            Empresa: {{ u.client }} &bull; Unidade: {{ u.site }} &bull; Com Agente: {{ u.withAgent }} &bull; Sem Agente: {{ u.agentless }}
+          </q-tooltip>
+        </q-chip>
+      </div>
+
       <!-- Filter Row -->
       <div class="row q-col-gutter-sm items-center q-mt-xs">
         <div class="col-12 col-sm-3 col-md-2">
@@ -144,7 +180,7 @@
             dense
             outlined
             dark
-            label="Cliente"
+            label="Empresa / Cliente"
             @update:model-value="filterSite = 'Todos'"
           />
         </div>
@@ -155,7 +191,7 @@
             dense
             outlined
             dark
-            label="Unidade / Site"
+            label="Unidade / Filial"
           />
         </div>
         <div class="col-12 col-sm-3 col-md-3">
@@ -271,8 +307,24 @@
 
         <template v-slot:body-cell-site="props">
           <q-td :props="props">
-            <div class="text-weight-medium">{{ props.row.site_name }}</div>
-            <div class="text-caption text-grey-5">{{ props.row.client_name }}</div>
+            <div class="row items-center q-gutter-x-xs">
+              <q-badge
+                :color="getEntityBadgeColor(props.row.client_name)"
+                text-color="white"
+                class="text-weight-bold"
+              >
+                {{ props.row.client_name }}
+              </q-badge>
+            </div>
+            <div class="q-mt-xs">
+              <q-badge
+                outline
+                :color="getEntityBadgeColor(props.row.site_name)"
+                class="text-weight-medium"
+              >
+                {{ props.row.site_name }}
+              </q-badge>
+            </div>
           </q-td>
         </template>
 
@@ -699,6 +751,7 @@ import {
   saveInventoryAsset,
   deleteInventoryAsset,
   importInventoryAssets,
+  getEntityBadgeColor,
   type InventoryAssetRow,
   type InventoryCategory,
   type InventoryImportRowInput,
@@ -886,7 +939,7 @@ const columns = [
   { name: "patrimonio", label: "Nº Patrimônio", field: "patrimonio", sortable: true, align: "left" as const },
   { name: "name", label: "Equipamento / Hostname", field: "name", sortable: true, align: "left" as const },
   { name: "category", label: "Classificação", field: "category", sortable: true, align: "left" as const },
-  { name: "site", label: "Cliente / Unidade", field: "site_name", sortable: true, align: "left" as const },
+  { name: "site", label: "Empresa / Unidade", field: "client_name", sortable: true, align: "left" as const },
   { name: "sector_location", label: "Setor / Localização", field: "sector_location", sortable: true, align: "left" as const },
   { name: "network", label: "IP / MAC", field: "ip_address", sortable: true, align: "left" as const },
   { name: "hardware", label: "Fabricante / Modelo / Série", field: "manufacturer", sortable: true, align: "left" as const },
@@ -925,6 +978,41 @@ const siteFilterOptions = computed(() => {
   const set = new Set<string>(filtered.map((s) => s.name).filter(Boolean));
   return ["Todos", ...Array.from(set).sort()];
 });
+
+const companyUnitSummary = computed(() => {
+  const map = new Map<
+    string,
+    { key: string; client: string; site: string; total: number; withAgent: number; agentless: number }
+  >();
+  for (const r of items.value) {
+    const c = r.client_name || "Sem Empresa";
+    const s = r.site_name || "Sem Unidade";
+    const key = `${c}:::${s}`;
+    const existing = map.get(key) || {
+      key,
+      client: c,
+      site: s,
+      total: 0,
+      withAgent: 0,
+      agentless: 0,
+    };
+    existing.total += 1;
+    if (r.has_agent) existing.withAgent += 1;
+    else existing.agentless += 1;
+    map.set(key, existing);
+  }
+  return Array.from(map.values()).sort((a, b) => a.key.localeCompare(b.key));
+});
+
+function selectCompanyUnit(client: string, site: string) {
+  if (filterClient.value === client && filterSite.value === site) {
+    filterClient.value = "Todos";
+    filterSite.value = "Todos";
+  } else {
+    filterClient.value = client;
+    filterSite.value = site;
+  }
+}
 
 const detectedDelimiterLabel = computed(() => {
   if (detectedDelimiter.value === ";") return "Ponto e vírgula (;)";

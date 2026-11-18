@@ -46,6 +46,22 @@
         <q-tooltip>{{ store.getters.formatDate(summary.last_seen) }}</q-tooltip>
       </q-icon>
       <b>{{ summary.hostname }}</b>
+      <q-badge
+        v-if="summary.client_name"
+        :color="getEntityBadgeColor(summary.client_name)"
+        text-color="white"
+        class="q-ml-sm text-weight-bold"
+      >
+        Empresa: {{ summary.client_name }}
+      </q-badge>
+      <q-badge
+        v-if="summary.site_name"
+        outline
+        :color="getEntityBadgeColor(summary.site_name)"
+        class="q-ml-xs text-weight-bold"
+      >
+        Unidade: {{ summary.site_name }}
+      </q-badge>
       <span v-if="summary.maintenance_mode">
         &bull; <q-badge color="green"> Maintenance Mode </q-badge>
       </span>
@@ -455,6 +471,7 @@ import {
   fleetDomainMap,
   fetchAgentInventoryTag,
   saveAgentInventoryTag,
+  getEntityBadgeColor,
 } from "@/api/enhanced";
 import { notifySuccess, notifyError, notifyWarning } from "@/utils/notify";
 import { fetchCustomFields } from "@/api/core";
@@ -758,6 +775,7 @@ export default {
       submitJoinAd,
       openPatrimonioDialog,
       submitPatrimonio,
+      getEntityBadgeColor,
     };
   },
 };

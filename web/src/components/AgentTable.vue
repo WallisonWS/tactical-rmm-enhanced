@@ -271,10 +271,26 @@
             </q-icon>
           </q-td>
 
-          <q-td key="client_name" :props="props">{{
-            props.row.client_name
-          }}</q-td>
-          <q-td key="site_name" :props="props">{{ props.row.site_name }}</q-td>
+          <q-td key="client_name" :props="props">
+            <q-badge
+              :color="entityBadgeColor(props.row.client_name)"
+              text-color="white"
+              class="text-weight-bold q-px-sm"
+            >
+              {{ props.row.client_name }}
+              <q-tooltip>Empresa / Cliente: {{ props.row.client_name }}</q-tooltip>
+            </q-badge>
+          </q-td>
+          <q-td key="site_name" :props="props">
+            <q-badge
+              outline
+              :color="entityBadgeColor(props.row.site_name)"
+              class="text-weight-bold q-px-sm"
+            >
+              {{ props.row.site_name }}
+              <q-tooltip>Unidade / Filial: {{ props.row.site_name }}</q-tooltip>
+            </q-badge>
+          </q-td>
           <q-td key="hostname" :props="props">
             <div class="row no-wrap items-center">
               <span>{{ props.row.hostname }}</span>
@@ -435,6 +451,7 @@ import {
   manageAgentRDP,
   downloadNativeRDPFile,
   resolveFirstReachableHost,
+  getEntityBadgeColor,
 } from "@/api/enhanced";
 import { notifySuccess, notifyWarning } from "@/utils/notify";
 import { t } from "@/i18n";
@@ -504,6 +521,9 @@ export default {
     domainInfoFor(agent_id) {
       const map = fleetDomainMap.value || {};
       return map[agent_id] || null;
+    },
+    entityBadgeColor(name) {
+      return getEntityBadgeColor(name);
     },
     filterTable(rows, terms, cols, cellValue) {
       const hiddenFields = [

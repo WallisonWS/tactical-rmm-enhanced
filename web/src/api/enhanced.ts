@@ -1074,4 +1074,26 @@ export async function saveAgentInventoryTag(
   return data;
 }
 
+const ENTITY_BADGE_PALETTE = [
+  "indigo-7",
+  "teal-8",
+  "deep-purple-7",
+  "cyan-8",
+  "amber-9",
+  "pink-8",
+  "deep-orange-8",
+  "blue-8",
+];
+
+export function getEntityBadgeColor(name?: string | null): string {
+  const clean = String(name || "").trim().toLowerCase();
+  if (!clean) return "blue-grey-7";
+  let hash = 2166136261;
+  for (let i = 0; i < clean.length; i += 1) {
+    hash ^= clean.charCodeAt(i);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return ENTITY_BADGE_PALETTE[hash % ENTITY_BADGE_PALETTE.length];
+}
+
 
