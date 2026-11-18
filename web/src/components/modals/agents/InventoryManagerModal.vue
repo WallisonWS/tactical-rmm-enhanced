@@ -1,11 +1,17 @@
 <template>
-  <q-card style="width: 1340px; max-width: 98vw; max-height: 94vh" class="column no-wrap">
+  <q-card
+    style="width: 100vw; max-width: 100vw; height: 100vh; max-height: 100vh; overflow: hidden"
+    class="column no-wrap inventory-modal-card"
+  >
     <!-- Top Header -->
-    <q-bar class="bg-teal-10 text-white">
+    <q-bar class="bg-teal-10 text-white" style="flex: 0 0 auto">
       <q-icon name="inventory_2" class="q-mr-xs" />
       <div class="text-weight-bold">
         Central de Inventário Geral, Patrimônio e Ativos/Passivos de Rede
       </div>
+      <q-badge color="teal-7" text-color="white" class="q-ml-sm text-weight-bold">
+        {{ activeScopeBadge }}
+      </q-badge>
       <q-space />
       <q-btn
         dense
@@ -32,9 +38,9 @@
         outline
         color="teal-2"
         icon="download"
-        label="Exportar Excel (.CSV)"
+        :label="`Exportar Excel (${filteredRows.length})`"
         no-caps
-        class="q-mr-xs"
+        class="q-mr-xs q-px-sm"
         :disable="!filteredRows.length"
         @click="exportCsv"
       />
@@ -43,9 +49,9 @@
         outline
         color="amber-3"
         icon="print"
-        label="Imprimir / PDF"
+        :label="`Imprimir / PDF (${filteredRows.length})`"
         no-caps
-        class="q-mr-xs"
+        class="q-mr-xs q-px-sm"
         :disable="!filteredRows.length"
         @click="printReport"
       />
@@ -61,82 +67,104 @@
       <q-btn dense flat icon="close" v-close-popup @click="$emit('close')" />
     </q-bar>
 
-    <!-- KPI Cards -->
-    <q-card-section class="q-py-sm q-px-md bg-grey-10 text-white">
-      <div class="row q-col-gutter-sm">
-        <div class="col-6 col-sm-4 col-md-2">
+    <!-- KPI Cards (Dynamic for Selected Company / Unit) -->
+    <q-card-section class="q-py-xs q-px-md bg-grey-10 text-white" style="flex: 0 0 auto">
+      <div class="row q-col-gutter-xs">
+        <div class="col-6 col-sm-3 col-md">
           <q-card
             flat
             bordered
             class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
             @click="resetQuickFilters"
           >
-            <div class="text-caption text-grey-4">Total no Inventário</div>
-            <div class="text-h5 text-weight-bold text-white">{{ summary.total }}</div>
+            <div class="text-caption text-grey-4" style="font-size: 11px">Total na Seleção</div>
+            <div class="text-h6 text-weight-bold text-white">{{ scopedSummary.total }}</div>
           </q-card>
         </div>
-        <div class="col-6 col-sm-4 col-md-2">
+        <div class="col-6 col-sm-3 col-md">
           <q-card
             flat
             bordered
             class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
             @click="quickFilterAgent('agent_only')"
           >
-            <div class="text-caption text-grey-4">Com Agente Tactical</div>
-            <div class="text-h5 text-weight-bold text-light-blue-4">{{ summary.with_agent }}</div>
+            <div class="text-caption text-grey-4" style="font-size: 11px">Com Agente Tactical</div>
+            <div class="text-h6 text-weight-bold text-light-blue-4">{{ scopedSummary.with_agent }}</div>
           </q-card>
         </div>
-        <div class="col-6 col-sm-4 col-md-2">
-          <q-card
-            flat
-            bordered
-            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
-            @click="quickFilterCategory('ativo_rede')"
-          >
-            <div class="text-caption text-grey-4">Ativos de Rede</div>
-            <div class="text-h5 text-weight-bold text-teal-4">{{ summary.ativos_rede }}</div>
-          </q-card>
-        </div>
-        <div class="col-6 col-sm-4 col-md-2">
-          <q-card
-            flat
-            bordered
-            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
-            @click="quickFilterCategory('passivo_rede')"
-          >
-            <div class="text-caption text-grey-4">Passivos de Rede</div>
-            <div class="text-h5 text-weight-bold text-amber-4">{{ summary.passivos_rede }}</div>
-          </q-card>
-        </div>
-        <div class="col-6 col-sm-4 col-md-2">
+        <div class="col-6 col-sm-3 col-md">
           <q-card
             flat
             bordered
             class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
             @click="quickFilterAgent('agentless_only')"
           >
-            <div class="text-caption text-grey-4">Total Sem Agente</div>
-            <div class="text-h5 text-weight-bold text-orange-4">{{ summary.agentless_total }}</div>
+            <div class="text-caption text-grey-4" style="font-size: 11px">Sem Agente (Rede/Clín.)</div>
+            <div class="text-h6 text-weight-bold text-orange-4">{{ scopedSummary.agentless_total }}</div>
           </q-card>
         </div>
-        <div class="col-6 col-sm-4 col-md-2">
+        <div class="col-6 col-sm-3 col-md">
+          <q-card
+            flat
+            bordered
+            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
+            @click="quickFilterCategory('equipamento_medico')"
+          >
+            <div class="text-caption text-grey-4" style="font-size: 11px">Equip. Médicos</div>
+            <div class="text-h6 text-weight-bold text-purple-3">{{ scopedSummary.equipamentos_medicos }}</div>
+          </q-card>
+        </div>
+        <div class="col-6 col-sm-3 col-md">
+          <q-card
+            flat
+            bordered
+            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
+            @click="quickFilterCategory('ativo_rede')"
+          >
+            <div class="text-caption text-grey-4" style="font-size: 11px">Ativos de Rede</div>
+            <div class="text-h6 text-weight-bold text-teal-4">{{ scopedSummary.ativos_rede }}</div>
+          </q-card>
+        </div>
+        <div class="col-6 col-sm-3 col-md">
+          <q-card
+            flat
+            bordered
+            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
+            @click="quickFilterCategory('passivo_rede')"
+          >
+            <div class="text-caption text-grey-4" style="font-size: 11px">Passivos de Rede</div>
+            <div class="text-h6 text-weight-bold text-amber-4">{{ scopedSummary.passivos_rede }}</div>
+          </q-card>
+        </div>
+        <div class="col-6 col-sm-3 col-md">
+          <q-card
+            flat
+            bordered
+            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
+            @click="quickFilterCategory('impressora_periferico')"
+          >
+            <div class="text-caption text-grey-4" style="font-size: 11px">Impressoras / CFTV</div>
+            <div class="text-h6 text-weight-bold text-cyan-3">{{ scopedSummary.impressoras_perifericos }}</div>
+          </q-card>
+        </div>
+        <div class="col-6 col-sm-3 col-md">
           <q-card
             flat
             bordered
             class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
             @click="quickFilterAgent('missing_patrimonio')"
           >
-            <div class="text-caption text-grey-4">Com Nº Patrimônio</div>
-            <div class="text-h5 text-weight-bold text-green-4">
-              {{ summary.with_patrimonio }}
-              <span class="text-caption text-grey-4">({{ summary.without_patrimonio }} p/ definir)</span>
+            <div class="text-caption text-grey-4" style="font-size: 11px">Com Nº Patrimônio</div>
+            <div class="text-h6 text-weight-bold text-green-4">
+              {{ scopedSummary.with_patrimonio }}
+              <span class="text-caption text-grey-4">({{ scopedSummary.without_patrimonio }} p/ def.)</span>
             </div>
           </q-card>
         </div>
       </div>
 
       <!-- Company / Unit Distinction Strip -->
-      <div v-if="companyUnitSummary.length" class="row items-center q-gutter-xs q-mt-xs">
+      <div v-if="companyUnitSummary.length" class="row items-center wrap q-gutter-xs q-mt-xs">
         <span class="text-caption text-grey-4 text-weight-medium">Empresas / Unidades:</span>
         <q-chip
           clickable
@@ -166,9 +194,13 @@
           <span class="text-weight-bold q-mr-xs">{{ u.client }}</span>
           <span class="text-grey-3">/ {{ u.site }} ({{ u.total }})</span>
           <q-tooltip>
-            Empresa: {{ u.client }} &bull; Unidade: {{ u.site }} &bull; Com Agente: {{ u.withAgent }} &bull; Sem Agente: {{ u.agentless }}
+            Empresa: {{ u.client }} &bull; Unidade: {{ u.site }} &bull; Total: {{ u.total }} &bull; Com Agente: {{ u.withAgent }} &bull; Sem Agente: {{ u.agentless }}
           </q-tooltip>
         </q-chip>
+        <q-space />
+        <span class="text-caption text-teal-3 text-weight-medium">
+          Exibindo {{ filteredRows.length }} de {{ scopedSummary.total }} ativo(s)
+        </span>
       </div>
 
       <!-- Filter Row -->
@@ -181,7 +213,7 @@
             outlined
             dark
             label="Empresa / Cliente"
-            @update:model-value="filterSite = 'Todos'"
+            @update:model-value="onClientFilterChange"
           />
         </div>
         <div class="col-12 col-sm-3 col-md-2">
@@ -237,8 +269,11 @@
 
     <q-separator />
 
-    <!-- Main Table -->
-    <q-card-section class="col scroll q-pa-sm">
+    <!-- Main Table (Guaranteed Smooth Mouse Wheel Scroll + Sticky Headers) -->
+    <div
+      class="col q-pa-sm"
+      style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden"
+    >
       <q-table
         :rows="filteredRows"
         :columns="columns"
@@ -247,7 +282,11 @@
         flat
         bordered
         :loading="loading"
-        :pagination="{ rowsPerPage: 20, sortBy: 'name', descending: false }"
+        v-model:pagination="tablePagination"
+        :rows-per-page-options="[25, 50, 100, 0]"
+        rows-per-page-label="Linhas por página:"
+        class="inventory-sticky-table"
+        style="flex: 1 1 auto; min-height: 0; height: 100%"
         no-data-label="Nenhum equipamento encontrado com os filtros selecionados."
       >
         <template v-slot:body-cell-patrimonio="props">
@@ -279,7 +318,7 @@
         </template>
 
         <template v-slot:body-cell-name="props">
-          <q-td :props="props">
+          <q-td :props="props" style="max-width: 340px; white-space: normal">
             <div class="text-weight-bold">
               {{ props.row.name }}
               <q-badge
@@ -292,7 +331,7 @@
             </div>
             <div class="text-caption text-grey-5">
               {{ props.row.asset_subtype || "-" }}
-              <span v-if="props.row.operating_system"> &bull; {{ props.row.operating_system }}</span>
+              <span v-if="extractRowFunction(props.row)"> &bull; {{ extractRowFunction(props.row) }}</span>
             </div>
           </q-td>
         </template>
@@ -307,7 +346,7 @@
 
         <template v-slot:body-cell-site="props">
           <q-td :props="props">
-            <div class="row items-center q-gutter-x-xs">
+            <div class="row items-center q-gutter-x-xs no-wrap">
               <q-badge
                 :color="getEntityBadgeColor(props.row.client_name)"
                 text-color="white"
@@ -315,8 +354,6 @@
               >
                 {{ props.row.client_name }}
               </q-badge>
-            </div>
-            <div class="q-mt-xs">
               <q-badge
                 outline
                 :color="getEntityBadgeColor(props.row.site_name)"
@@ -339,7 +376,7 @@
 
         <template v-slot:body-cell-network="props">
           <q-td :props="props">
-            <div>{{ props.row.ip_address || "-" }}</div>
+            <div class="text-weight-medium">{{ props.row.ip_address || "-" }}</div>
             <div class="text-caption text-grey-5" v-if="props.row.mac_address">
               MAC: {{ props.row.mac_address }}
             </div>
@@ -347,11 +384,11 @@
         </template>
 
         <template v-slot:body-cell-hardware="props">
-          <q-td :props="props">
+          <q-td :props="props" style="max-width: 280px; white-space: normal">
             <div>
-              {{ [props.row.manufacturer, props.row.model_name].filter(Boolean).join(" ") || "-" }}
+              {{ formatHardwareLabel(props.row.manufacturer, props.row.model_name) }}
             </div>
-            <div class="text-caption text-grey-5" v-if="props.row.serial_number">
+            <div class="text-caption text-grey-5" v-if="props.row.serial_number && props.row.serial_number !== props.row.mac_address">
               S/N: {{ props.row.serial_number }}
             </div>
           </q-td>
@@ -401,7 +438,7 @@
           </q-td>
         </template>
       </q-table>
-    </q-card-section>
+    </div>
 
     <!-- Sub-Dialog 1: Inclusão Manual / Edição de Patrimônio, Ativo & Passivo de Rede -->
     <q-dialog v-model="showFormDialog" persistent>
@@ -795,6 +832,12 @@ const filterSite = ref("Todos");
 const filterCategory = ref("all");
 const filterMode = ref<"all" | "agent_only" | "agentless_only" | "missing_patrimonio">("all");
 const search = ref("");
+const tablePagination = ref({
+  sortBy: "name",
+  descending: false,
+  page: 1,
+  rowsPerPage: 50,
+});
 
 const showFormDialog = ref(false);
 const form = ref<{
@@ -1004,6 +1047,19 @@ const companyUnitSummary = computed(() => {
   return Array.from(map.values()).sort((a, b) => a.key.localeCompare(b.key));
 });
 
+function onClientFilterChange(newClient: string) {
+  if (newClient === "Todos") {
+    filterSite.value = "Todos";
+    return;
+  }
+  const clientSites = sites.value.filter((s) => s.client_name === newClient);
+  if (clientSites.length === 1) {
+    filterSite.value = clientSites[0].name;
+  } else {
+    filterSite.value = "Todos";
+  }
+}
+
 function selectCompanyUnit(client: string, site: string) {
   if (filterClient.value === client && filterSite.value === site) {
     filterClient.value = "Todos";
@@ -1014,6 +1070,90 @@ function selectCompanyUnit(client: string, site: string) {
   }
 }
 
+const unitScopedItems = computed(() =>
+  items.value.filter((r) => {
+    if (filterClient.value !== "Todos" && r.client_name !== filterClient.value) return false;
+    if (filterSite.value !== "Todos" && r.site_name !== filterSite.value) return false;
+    return true;
+  }),
+);
+
+const scopedSummary = computed<InventorySummaryCounts>(() => {
+  const list = unitScopedItems.value;
+  const withAgent = list.filter((r) => r.has_agent).length;
+  const withPat = list.filter((r) => Boolean((r.patrimonio || "").trim())).length;
+  return {
+    total: list.length,
+    with_agent: withAgent,
+    agentless_total: list.length - withAgent,
+    ativos_rede: list.filter((r) => r.category === "ativo_rede").length,
+    passivos_rede: list.filter((r) => r.category === "passivo_rede").length,
+    estacoes_sem_agente: list.filter((r) => r.category === "estacao_sem_agente").length,
+    equipamentos_medicos: list.filter((r) => r.category === "equipamento_medico").length,
+    impressoras_perifericos: list.filter((r) => r.category === "impressora_periferico").length,
+    with_patrimonio: withPat,
+    without_patrimonio: list.length - withPat,
+    matched_with_agent: list.filter((r) => !r.has_agent && Boolean(r.matched_agent_id)).length,
+  };
+});
+
+const activeScopeBadge = computed(() => {
+  if (filterClient.value !== "Todos" && filterSite.value !== "Todos") {
+    return `${filterClient.value} / ${filterSite.value}`;
+  }
+  if (filterClient.value !== "Todos") {
+    return `${filterClient.value} (Todas as Unidades)`;
+  }
+  if (filterSite.value !== "Todos") {
+    return `Unidade: ${filterSite.value}`;
+  }
+  return "Todas as Empresas e Unidades";
+});
+
+const activeFileSlug = computed(() => {
+  const raw =
+    filterClient.value !== "Todos" && filterSite.value !== "Todos"
+      ? `${filterClient.value}-${filterSite.value}`
+      : filterClient.value !== "Todos"
+        ? filterClient.value
+        : filterSite.value !== "Todos"
+          ? filterSite.value
+          : "Geral-Todas-Unidades";
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+});
+
+function formatHardwareLabel(manufacturer?: string | null, modelName?: string | null): string {
+  const m = String(manufacturer || "").trim();
+  const mod = String(modelName || "").trim();
+  if (!m && !mod) return "-";
+  if (!m) return mod;
+  if (!mod) return m;
+  const mLower = m.toLowerCase();
+  const modLower = mod.toLowerCase();
+  if (modLower === mLower || modLower.startsWith(mLower)) return mod;
+  const firstWord = mLower.split(/[\s,/]+/)[0];
+  if (firstWord.length >= 3 && modLower.startsWith(firstWord)) return mod;
+  return `${m} — ${mod}`;
+}
+
+function extractRowFunction(row: InventoryAssetRow): string {
+  const notes = String(row.notes || "").trim();
+  if (notes) {
+    const clean = notes
+      .replace(/^Fun[çc][ãa]o:\s*/i, "")
+      .split("|")[0]
+      .trim();
+    if (clean) return clean;
+  }
+  const osText = String(row.operating_system || "").trim();
+  if (osText && osText !== row.asset_subtype) return osText;
+  return "";
+}
+
 const detectedDelimiterLabel = computed(() => {
   if (detectedDelimiter.value === ";") return "Ponto e vírgula (;)";
   if (detectedDelimiter.value === "\t") return "Tabulação (TAB)";
@@ -1022,13 +1162,11 @@ const detectedDelimiterLabel = computed(() => {
 
 const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase();
-  return items.value.filter((r) => {
-    if (filterClient.value !== "Todos" && r.client_name !== filterClient.value) return false;
-    if (filterSite.value !== "Todos" && r.site_name !== filterSite.value) return false;
+  return unitScopedItems.value.filter((r) => {
     if (filterCategory.value !== "all" && r.category !== filterCategory.value) return false;
     if (filterMode.value === "agent_only" && !r.has_agent) return false;
     if (filterMode.value === "agentless_only" && r.has_agent) return false;
-    if (filterMode.value === "missing_patrimonio" && r.patrimonio.trim()) return false;
+    if (filterMode.value === "missing_patrimonio" && (r.patrimonio || "").trim()) return false;
     if (q) {
       const hay = [
         r.patrimonio,
@@ -1452,64 +1590,71 @@ function downloadTemplateCsv() {
 }
 
 function exportCsv() {
+  const rows = [...filteredRows.value].sort((a, b) =>
+    `${a.client_name} ${a.site_name} ${a.name}`.localeCompare(`${b.client_name} ${b.site_name} ${b.name}`),
+  );
   const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const headers = [
     "Patrimonio",
-    "Equipamento",
+    "Equipamento / Hostname",
     "Classificacao",
     "Subtipo",
-    "Cliente",
-    "Unidade/Site",
-    "Setor/Localizacao",
+    "Funcao Exata / Descricao",
+    "Empresa / Cliente",
+    "Unidade / Site",
+    "Setor / Localizacao",
     "Responsavel",
     "IP Local",
     "MAC",
-    "Fabricante",
+    "Marca / Fabricante",
     "Modelo",
     "N Serie",
-    "Sistema Operacional",
-    "Possui Agente",
+    "Monitoramento Tactical",
     "Status",
     "Origem",
-    "Observacoes",
   ];
   const lines = [headers.map(esc).join(";")];
-  for (const r of filteredRows.value) {
+  for (const r of rows) {
     lines.push(
       [
-        r.patrimonio,
+        r.patrimonio || "-",
         r.name,
         shortCategoryLabel(r.category),
-        r.asset_subtype,
+        r.asset_subtype || "-",
+        extractRowFunction(r) || "-",
         r.client_name,
         r.site_name,
-        r.sector_location,
-        r.responsible || r.logged_in_username,
-        r.ip_address,
-        r.mac_address,
-        r.manufacturer,
-        r.model_name,
-        r.serial_number,
-        r.operating_system,
-        r.has_agent ? "Sim" : r.matched_agent_id ? `Nao (Agente: ${r.matched_agent_hostname})` : "Nao",
-        r.status,
+        r.sector_location || "-",
+        r.responsible || r.logged_in_username || "-",
+        r.ip_address || "-",
+        r.mac_address || "-",
+        r.manufacturer || "-",
+        r.model_name || "-",
+        r.serial_number && r.serial_number !== r.mac_address ? r.serial_number : "-",
+        r.has_agent ? "Com Agente Tactical" : r.matched_agent_id ? `Sem Agente (Agente: ${r.matched_agent_hostname})` : "Sem Agente",
+        r.status || "ativo",
         sourceLabel(r.source),
-        r.notes,
       ]
         .map(esc)
         .join(";"),
     );
   }
-  const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `inventario-patrimonio-tactical-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `inventario-${activeFileSlug.value}-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+  notifySuccess(`Excel (.CSV) exportado com ${rows.length} ativo(s) — ${activeScopeBadge.value}!`);
 }
 
 function printReport() {
+  const rows = [...filteredRows.value].sort((a, b) =>
+    `${a.client_name} ${a.site_name} ${a.category} ${a.name}`.localeCompare(
+      `${b.client_name} ${b.site_name} ${b.category} ${b.name}`,
+    ),
+  );
   const w = window.open("", "_blank");
   if (!w) {
     notifyError("Desbloqueie pop-ups para gerar a versão de impressão/PDF.");
@@ -1519,36 +1664,89 @@ function printReport() {
     String(s ?? "")
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  const rowsHtml = filteredRows.value
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const exportedWithAgent = rows.filter((r) => r.has_agent).length;
+  const exportedAgentless = rows.length - exportedWithAgent;
+  const exportedMed = rows.filter((r) => r.category === "equipamento_medico").length;
+  const exportedNetAct = rows.filter((r) => r.category === "ativo_rede").length;
+  const exportedNetPas = rows.filter((r) => r.category === "passivo_rede").length;
+  const exportedPrint = rows.filter((r) => r.category === "impressora_periferico").length;
+  const exportedPc = rows.filter(
+    (r) => r.category === "estacao_sem_agente" || r.category === "ativo_monitorado",
+  ).length;
+  const exportedWithPat = rows.filter((r) => Boolean((r.patrimonio || "").trim())).length;
+
+  const catFilterLabel =
+    categoryFilterOptions.find((o) => o.value === filterCategory.value)?.label || "Todas as Classificações";
+  const modeFilterLabel =
+    modeFilterOptions.find((o) => o.value === filterMode.value)?.label || "Todos os Itens";
+
+  const rowsHtml = rows
     .map(
       (r) => `<tr>
-        <td>${escHtml(r.patrimonio || "-")}</td>
-        <td><b>${escHtml(r.name)}</b><br><small>${escHtml(r.asset_subtype)}</small></td>
-        <td>${escHtml(shortCategoryLabel(r.category))}</td>
-        <td>${escHtml(r.client_name)} / ${escHtml(r.site_name)}</td>
+        <td style="white-space:nowrap">${escHtml(r.patrimonio || "-")}</td>
+        <td><b>${escHtml(r.name)}</b><br><small style="color:#555">${escHtml(r.asset_subtype || "-")}</small></td>
+        <td style="white-space:nowrap">${escHtml(shortCategoryLabel(r.category))}</td>
+        <td><b>${escHtml(r.client_name)}</b><br><small>${escHtml(r.site_name)}</small></td>
         <td>${escHtml(r.sector_location || "-")}</td>
-        <td>${escHtml(r.ip_address || "-")}<br><small>${escHtml(r.mac_address || "")}</small></td>
-        <td>${escHtml([r.manufacturer, r.model_name].filter(Boolean).join(" ") || "-")}</td>
-        <td>${escHtml(r.has_agent ? "Com Agente" : "Sem Agente")}</td>
+        <td style="white-space:nowrap">${escHtml(r.ip_address || "-")}<br><small style="color:#555">${escHtml(r.mac_address || "")}</small></td>
+        <td>${escHtml(formatHardwareLabel(r.manufacturer, r.model_name))}</td>
+        <td>${escHtml(extractRowFunction(r) || "-")}</td>
+        <td style="white-space:nowrap">${escHtml(r.has_agent ? "Com Agente" : sourceLabel(r.source))}</td>
       </tr>`,
     )
     .join("");
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Relatório de Inventário & Patrimônio - Tactical RMM</title>
+
+  w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Inventário ${escHtml(activeScopeBadge.value)} - Tactical RMM</title>
     <style>
-      body { font-family: Arial, sans-serif; margin: 20px; color: #111; }
-      h2 { margin: 0 0 6px 0; }
-      .meta { font-size: 12px; color: #555; margin-bottom: 14px; }
-      table { width: 100%; border-collapse: collapse; font-size: 11px; }
-      th, td { border: 1px solid #ccc; padding: 5px 6px; text-align: left; vertical-align: top; }
-      th { background: #0f4c5c; color: #fff; }
-      tr:nth-child(even) { background: #f8f9fa; }
-      @media print { body { margin: 8mm; } }
+      @page { size: landscape; margin: 10mm; }
+      body { font-family: "Segoe UI", Arial, sans-serif; margin: 16px; color: #111827; }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f4c5c; padding-bottom: 8px; margin-bottom: 12px; }
+      h1 { font-size: 17px; margin: 0 0 4px 0; color: #0f4c5c; }
+      .meta { font-size: 11px; color: #4b5563; line-height: 1.5; }
+      .scope-pill { display: inline-block; background: #0f4c5c; color: #fff; font-weight: bold; font-size: 11px; padding: 4px 10px; border-radius: 4px; }
+      .kpis { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-bottom: 12px; }
+      .kpi { border: 1px solid #d1d5db; border-radius: 4px; padding: 6px 4px; text-align: center; background: #f8fafc; }
+      .kpi-lbl { font-size: 9px; color: #4b5563; text-transform: uppercase; font-weight: 600; }
+      .kpi-val { font-size: 15px; font-weight: 700; color: #0f172a; margin-top: 2px; }
+      table { width: 100%; border-collapse: collapse; font-size: 10px; }
+      thead { display: table-header-group; }
+      tr { page-break-inside: avoid; }
+      th, td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; vertical-align: top; }
+      th { background: #0f4c5c; color: #fff; font-weight: 600; }
+      tr:nth-child(even) { background: #f8fafc; }
+      @media print { body { margin: 0; } }
     </style></head><body>
-    <h2>Relatório Consolidado de Inventário, Patrimônio e Rede</h2>
-    <div class="meta">Gerado em ${escHtml(new Date().toLocaleString("pt-BR"))} &bull; Total listado: ${filteredRows.value.length} ativo(s) &bull; Filtro Unidade: ${escHtml(filterSite.value)}</div>
+    <div class="header">
+      <div>
+        <h1>Relatório Consolidado de Inventário, Patrimônio e Ativos de Rede</h1>
+        <div class="meta">
+          <strong>Escopo / Unidade:</strong> ${escHtml(activeScopeBadge.value)} &bull;
+          <strong>Classificação:</strong> ${escHtml(catFilterLabel)} &bull;
+          <strong>Filtro:</strong> ${escHtml(modeFilterLabel)}<br>
+          <strong>Gerado em:</strong> ${escHtml(new Date().toLocaleString("pt-BR"))} &bull;
+          <strong>Total exato neste relatório:</strong> ${rows.length} equipamento(s) único(s)
+        </div>
+      </div>
+      <div class="scope-pill">${escHtml(activeScopeBadge.value)} (${rows.length})</div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="kpi-lbl">Total Listado</div><div class="kpi-val">${rows.length}</div></div>
+      <div class="kpi"><div class="kpi-lbl">Com Agente</div><div class="kpi-val">${exportedWithAgent}</div></div>
+      <div class="kpi"><div class="kpi-lbl">Sem Agente</div><div class="kpi-val">${exportedAgentless}</div></div>
+      <div class="kpi"><div class="kpi-lbl">Equip. Médicos</div><div class="kpi-val">${exportedMed}</div></div>
+      <div class="kpi"><div class="kpi-lbl">Ativos de Rede</div><div class="kpi-val">${exportedNetAct}</div></div>
+      <div class="kpi"><div class="kpi-lbl">Passivos Rede</div><div class="kpi-val">${exportedNetPas}</div></div>
+      <div class="kpi"><div class="kpi-lbl">Impr. / CFTV</div><div class="kpi-val">${exportedPrint}</div></div>
+      <div class="kpi"><div class="kpi-lbl">Estações / Srv</div><div class="kpi-val">${exportedPc}</div></div>
+    </div>
+    <div class="meta" style="margin-bottom: 8px;">
+      <strong>Patrimônio preenchido:</strong> ${exportedWithPat} de ${rows.length} (${rows.length - exportedWithPat} pendente(s) de tombamento)
+    </div>
     <table><thead><tr>
-      <th>Patrimônio</th><th>Equipamento</th><th>Classificação</th><th>Unidade</th><th>Setor / Local</th><th>IP / MAC</th><th>Fabricante / Modelo</th><th>Monitoramento</th>
+      <th>Patrimônio</th><th>Equipamento / Subtipo</th><th>Classificação</th><th>Empresa / Unidade</th><th>Setor / Local</th><th>IP / MAC</th><th>Marca / Modelo</th><th>Função Exata</th><th>Origem</th>
     </tr></thead><tbody>${rowsHtml}</tbody></table>
     <script>window.onload = () => window.print();<\/script>
   </body></html>`);
@@ -1580,3 +1778,29 @@ onMounted(() => {
   loadInventory();
 });
 </script>
+
+<style lang="sass">
+.inventory-modal-card
+  display: flex
+  flex-direction: column
+
+.inventory-sticky-table
+  display: flex
+  flex-direction: column
+  height: 100%
+
+  .q-table__middle
+    flex: 1 1 auto
+    min-height: 0
+    overflow-y: auto !important
+    overflow-x: auto !important
+    overscroll-behavior: contain
+
+  .q-table__bottom
+    flex: 0 0 auto
+
+  thead tr th
+    position: sticky
+    top: 0
+    z-index: 2
+</style>

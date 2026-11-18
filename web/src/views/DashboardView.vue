@@ -722,7 +722,12 @@
     </q-dialog>
 
     <!-- consolidated inventory, patrimonio & network active/passive modal -->
-    <q-dialog v-model="showInventoryManagerModal">
+    <q-dialog
+      v-model="showInventoryManagerModal"
+      maximized
+      transition-show="slide-up"
+      transition-hide="slide-down"
+    >
       <InventoryManagerModal
         :initialSiteId="sitePk ? parseInt(sitePk) : null"
         @close="showInventoryManagerModal = false"

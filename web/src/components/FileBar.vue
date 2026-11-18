@@ -313,7 +313,12 @@
         <ADDirectoryAuditModal @close="showADDirectoryAuditModal = false" />
       </q-dialog>
       <!-- Inventory & Patrimonio Modal -->
-      <q-dialog v-model="showInventoryManagerModal">
+      <q-dialog
+        v-model="showInventoryManagerModal"
+        maximized
+        transition-show="slide-up"
+        transition-hide="slide-down"
+      >
         <InventoryManagerModal @close="showInventoryManagerModal = false" />
       </q-dialog>
     </q-bar>

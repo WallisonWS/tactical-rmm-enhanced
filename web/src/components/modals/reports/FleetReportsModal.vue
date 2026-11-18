@@ -1,5 +1,5 @@
 <template>
-  <q-card class="bg-dark text-white" style="min-height: 100vh; display: flex; flex-direction: column">
+  <q-card class="bg-dark text-white" style="height: 100vh; max-height: 100vh; display: flex; flex-direction: column; overflow: hidden">
     <!-- Top Header -->
     <q-bar class="bg-primary text-white q-py-md">
       <q-icon name="assessment" size="sm" class="q-mr-sm" />
@@ -68,6 +68,7 @@
             dense
             outlined
             label="Cliente"
+            @update:model-value="selectedSite = 'Todos'"
           />
         </div>
 
@@ -137,7 +138,7 @@
     <q-separator dark />
 
     <!-- Report Data Table -->
-    <q-card-section class="col q-pa-sm" style="overflow: auto">
+    <q-card-section class="col q-pa-sm" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: auto; overscroll-behavior: contain">
       <q-table
         :rows="filteredRows"
         :columns="columns"
@@ -446,13 +447,25 @@ export default {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       const dateStr = new Date().toISOString().slice(0, 10);
+      const scopeRaw =
+        selectedClient.value !== "Todos" && selectedSite.value !== "Todos"
+          ? `${selectedClient.value}-${selectedSite.value}`
+          : selectedClient.value !== "Todos"
+            ? selectedClient.value
+            : selectedSite.value !== "Todos"
+              ? selectedSite.value
+              : "Geral";
+      const scopeSlug = scopeRaw
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-zA-Z0-9_-]+/g, "-");
       a.href = url;
-      a.download = `relatorio-tacticalrmm-${selectedReportType.value}-${dateStr}.csv`;
+      a.download = `relatorio-${scopeSlug}-${selectedReportType.value}-${dateStr}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      notifySuccess(`Relatório exportado (${filteredRows.value.length} computadores)!`);
+      notifySuccess(`Relatório exportado (${filteredRows.value.length} equipamentos — ${scopeRaw})!`);
     }
 
     function printReport() {
@@ -465,6 +478,14 @@ export default {
       const reportTitle =
         reportTypeOptions.find((o) => o.value === selectedReportType.value)?.label ||
         "Relatório da Frota";
+      const scopeLabel =
+        selectedClient.value !== "Todos" && selectedSite.value !== "Todos"
+          ? `${selectedClient.value} / ${selectedSite.value}`
+          : selectedClient.value !== "Todos"
+            ? `${selectedClient.value} (Todas as Unidades)`
+            : selectedSite.value !== "Todos"
+              ? `Unidade: ${selectedSite.value}`
+              : "Todas as Empresas e Unidades";
       const nowStr = new Date().toLocaleString("pt-BR");
       const rowsHtml = filteredRows.value
         .map(
@@ -494,21 +515,26 @@ export default {
         <html lang="pt-BR">
         <head>
           <meta charset="utf-8" />
-          <title>${reportTitle}</title>
+          <title>${escHtml(reportTitle)} — ${escHtml(scopeLabel)}</title>
           <style>
-            body { font-family: Arial, sans-serif; margin: 20px; color: #111; }
-            h1 { font-size: 18px; margin-bottom: 4px; }
-            .meta { font-size: 12px; color: #444; margin-bottom: 12px; }
-            .kpis { display: flex; gap: 12px; margin-bottom: 14px; font-size: 12px; }
-            .kpi { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; background: #f8f9fa; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            th, td { border: 1px solid #ccc; padding: 5px 6px; text-align: left; }
-            th { background: #eaecef; }
+            @page { size: landscape; margin: 10mm; }
+            body { font-family: "Segoe UI", Arial, sans-serif; margin: 16px; color: #111; }
+            h1 { font-size: 17px; margin-bottom: 4px; color: #0f4c5c; }
+            .meta { font-size: 11px; color: #444; margin-bottom: 12px; }
+            .kpis { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; font-size: 11px; }
+            .kpi { padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; }
+            table { width: 100%; border-collapse: collapse; font-size: 10px; }
+            thead { display: table-header-group; }
+            tr { page-break-inside: avoid; }
+            th, td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; }
+            th { background: #0f4c5c; color: #fff; }
+            tr:nth-child(even) { background: #f8fafc; }
+            @media print { body { margin: 0; } }
           </style>
         </head>
         <body>
-          <h1>Tactical RMM — ${reportTitle}</h1>
-          <div class="meta">Gerado em: ${nowStr} | Total de computadores: ${filteredRows.value.length}</div>
+          <h1>Tactical RMM — ${escHtml(reportTitle)} (${escHtml(scopeLabel)})</h1>
+          <div class="meta"><strong>Empresa / Unidade:</strong> ${escHtml(scopeLabel)} &bull; <strong>Gerado em:</strong> ${escHtml(nowStr)} &bull; <strong>Total exato:</strong> ${filteredRows.value.length} equipamento(s)</div>
           <div class="kpis">
             <div class="kpi"><strong>Online:</strong> ${summaryCounts.value.online}</div>
             <div class="kpi"><strong>Offline:</strong> ${summaryCounts.value.offline}</div>

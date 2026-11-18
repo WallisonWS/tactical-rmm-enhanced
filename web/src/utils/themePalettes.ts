@@ -5,11 +5,15 @@ export interface ThemePalette {
   id: string;
   name: string;
   subtitle: string;
+  group: "dark" | "light";
   isDark: boolean;
   swatches: [string, string, string, string, string];
   bg: string;
   surface: string;
   headerBg: string;
+  tableHeaderBg: string;
+  rowHoverBg: string;
+  rowActiveBg: string;
   primary: string;
   secondary: string;
   textPrimary: string;
@@ -20,136 +24,148 @@ export interface ThemePalette {
 export const THEME_PALETTES: ThemePalette[] = [
   {
     id: "classic-dark",
-    name: "Padrão Tactical (Escuro)",
-    subtitle: "Tema original escuro do Tactical RMM",
+    name: "Padrão Tactical (Grafite)",
+    subtitle: "Tema escuro clássico de alto contraste do Tactical RMM",
+    group: "dark",
     isDark: true,
     swatches: ["#121212", "#1D1D1D", "#1976D2", "#26A69A", "#F5F5F5"],
     bg: "#121212",
     surface: "#1D1D1D",
-    headerBg: "#212121",
+    headerBg: "#1F242D",
+    tableHeaderBg: "#181B20",
+    rowHoverBg: "rgba(25, 118, 210, 0.16)",
+    rowActiveBg: "#263244",
     primary: "#1976D2",
     secondary: "#26A69A",
     textPrimary: "#FFFFFF",
     textSecondary: "#B0BEC5",
-    border: "rgba(255,255,255,0.12)",
+    border: "rgba(255, 255, 255, 0.12)",
   },
   {
-    id: "salvia-concreta",
-    name: "1) Sálvia Concreta",
-    subtitle: "#1F2328 • #3C4A3F • #A9B7A6 • #E7E2D9 • #C97C5D",
+    id: "cobalt-executive",
+    name: "Azul Cobalto Executivo",
+    subtitle: "Azul-marinho profundo com destaque corporativo nítido (NOC / TI)",
+    group: "dark",
     isDark: true,
-    swatches: ["#1F2328", "#3C4A3F", "#A9B7A6", "#E7E2D9", "#C97C5D"],
-    bg: "#1F2328",
-    surface: "#28312B",
-    headerBg: "#3C4A3F",
-    primary: "#C97C5D",
-    secondary: "#A9B7A6",
-    textPrimary: "#E7E2D9",
-    textSecondary: "#A9B7A6",
-    border: "rgba(169, 183, 166, 0.22)",
+    swatches: ["#0B1120", "#131C31", "#2563EB", "#38BDF8", "#F1F5F9"],
+    bg: "#0B1120",
+    surface: "#131C31",
+    headerBg: "#172542",
+    tableHeaderBg: "#11192C",
+    rowHoverBg: "rgba(37, 99, 235, 0.18)",
+    rowActiveBg: "#1D3461",
+    primary: "#2563EB",
+    secondary: "#38BDF8",
+    textPrimary: "#F1F5F9",
+    textSecondary: "#94A3B8",
+    border: "rgba(148, 163, 184, 0.18)",
   },
   {
-    id: "carvao-cobalto",
-    name: "4) Carvão Cobalto",
-    subtitle: "#0F1115 • #2B2F3A • #1F5EFF • #CFD6E6 • #F2F5FF",
+    id: "clinical-emerald",
+    name: "Esmeralda Clínica (Hospitalar)",
+    subtitle: "Petróleo escuro e verde-água clínico de alta legibilidade",
+    group: "dark",
     isDark: true,
-    swatches: ["#0F1115", "#2B2F3A", "#1F5EFF", "#CFD6E6", "#F2F5FF"],
-    bg: "#0F1115",
-    surface: "#1B1E26",
-    headerBg: "#2B2F3A",
-    primary: "#1F5EFF",
-    secondary: "#CFD6E6",
-    textPrimary: "#F2F5FF",
-    textSecondary: "#CFD6E6",
-    border: "rgba(207, 214, 230, 0.18)",
+    swatches: ["#0B1517", "#122326", "#0D9488", "#2DD4BF", "#F0FDFA"],
+    bg: "#0B1517",
+    surface: "#122326",
+    headerBg: "#133036",
+    tableHeaderBg: "#0F1E21",
+    rowHoverBg: "rgba(13, 148, 136, 0.20)",
+    rowActiveBg: "#164348",
+    primary: "#0D9488",
+    secondary: "#2DD4BF",
+    textPrimary: "#F0FDFA",
+    textSecondary: "#99D5CE",
+    border: "rgba(45, 212, 191, 0.18)",
   },
   {
-    id: "lavanda-aco",
-    name: "8) Lavanda Aço",
-    subtitle: "#1B1D23 • #515563 • #A6A0C4 • #D9D6EE • #F4F3FB",
+    id: "slate-indigo",
+    name: "Ardósia & Índigo Moderno",
+    subtitle: "Cinza ardósia equilibrado com acento índigo moderno",
+    group: "dark",
     isDark: true,
-    swatches: ["#1B1D23", "#515563", "#A6A0C4", "#D9D6EE", "#F4F3FB"],
-    bg: "#1B1D23",
-    surface: "#282B34",
-    headerBg: "#515563",
-    primary: "#A6A0C4",
-    secondary: "#D9D6EE",
-    textPrimary: "#F4F3FB",
-    textSecondary: "#D9D6EE",
-    border: "rgba(166, 160, 196, 0.24)",
+    swatches: ["#0F172A", "#1E293B", "#4F46E5", "#818CF8", "#F8FAFC"],
+    bg: "#0F172A",
+    surface: "#1E293B",
+    headerBg: "#243247",
+    tableHeaderBg: "#162033",
+    rowHoverBg: "rgba(99, 102, 241, 0.18)",
+    rowActiveBg: "#2B3A67",
+    primary: "#4F46E5",
+    secondary: "#818CF8",
+    textPrimary: "#F8FAFC",
+    textSecondary: "#CBD5E1",
+    border: "rgba(148, 163, 184, 0.20)",
   },
   {
-    id: "forest-minimal",
-    name: "11) Forest Minimal",
-    subtitle: "#0F1411 • #263A2E • #4F6F5A • #D8E1D7 • #F3F6F2",
+    id: "forest-night",
+    name: "Floresta Noturna",
+    subtitle: "Verde escuro sóbrio e confortável para longas jornadas",
+    group: "dark",
     isDark: true,
-    swatches: ["#0F1411", "#263A2E", "#4F6F5A", "#D8E1D7", "#F3F6F2"],
-    bg: "#0F1411",
-    surface: "#18241D",
-    headerBg: "#263A2E",
-    primary: "#4F6F5A",
-    secondary: "#D8E1D7",
-    textPrimary: "#F3F6F2",
-    textSecondary: "#D8E1D7",
-    border: "rgba(79, 111, 90, 0.28)",
-  },
-  {
-    id: "seafoam-slate",
-    name: "13) Seafoam Slate",
-    subtitle: "#12181B • #3F5A60 • #7FC8C2 • #D9F0EE • #F6FBFB",
-    isDark: true,
-    swatches: ["#12181B", "#3F5A60", "#7FC8C2", "#D9F0EE", "#F6FBFB"],
-    bg: "#12181B",
-    surface: "#1E292E",
-    headerBg: "#3F5A60",
-    primary: "#7FC8C2",
-    secondary: "#D9F0EE",
-    textPrimary: "#F6FBFB",
-    textSecondary: "#D9F0EE",
-    border: "rgba(127, 200, 194, 0.24)",
-  },
-  {
-    id: "teal-studio",
-    name: "16) Teal Studio",
-    subtitle: "#0D1416 • #1B3B40 • #2B7C85 • #BFE7EA • #F2FBFB",
-    isDark: true,
-    swatches: ["#0D1416", "#1B3B40", "#2B7C85", "#BFE7EA", "#F2FBFB"],
-    bg: "#0D1416",
-    surface: "#13262A",
-    headerBg: "#1B3B40",
-    primary: "#2B7C85",
-    secondary: "#BFE7EA",
-    textPrimary: "#F2FBFB",
-    textSecondary: "#BFE7EA",
-    border: "rgba(43, 124, 133, 0.28)",
+    swatches: ["#0D1512", "#16231D", "#15803D", "#4ADE80", "#F0FDF4"],
+    bg: "#0D1512",
+    surface: "#16231D",
+    headerBg: "#1B2E25",
+    tableHeaderBg: "#121E19",
+    rowHoverBg: "rgba(22, 163, 74, 0.18)",
+    rowActiveBg: "#1F3B2D",
+    primary: "#15803D",
+    secondary: "#4ADE80",
+    textPrimary: "#F0FDF4",
+    textSecondary: "#A7C4B5",
+    border: "rgba(74, 222, 128, 0.18)",
   },
   {
     id: "classic-light",
     name: "Modo Claro Corporativo",
-    subtitle: "Fundo claro de alto contraste",
+    subtitle: "Fundo claro limpo de alto contraste para apresentações",
+    group: "light",
     isDark: false,
-    swatches: ["#F8FAFC", "#FFFFFF", "#0284C7", "#E2E8F0", "#0F172A"],
+    swatches: ["#F8FAFC", "#FFFFFF", "#0284C7", "#0F766E", "#0F172A"],
     bg: "#F8FAFC",
     surface: "#FFFFFF",
-    headerBg: "#1E293B",
+    headerBg: "#0F172A",
+    tableHeaderBg: "#F1F5F9",
+    rowHoverBg: "rgba(2, 132, 199, 0.08)",
+    rowActiveBg: "#DBEAFE",
     primary: "#0284C7",
-    secondary: "#475569",
+    secondary: "#0F766E",
     textPrimary: "#0F172A",
     textSecondary: "#475569",
     border: "rgba(15, 23, 42, 0.12)",
   },
 ];
 
+const LEGACY_PALETTE_MAP: Record<string, string> = {
+  "salvia-concreta": "forest-night",
+  "carvao-cobalto": "cobalt-executive",
+  "lavanda-aco": "slate-indigo",
+  "forest-minimal": "forest-night",
+  "seafoam-slate": "clinical-emerald",
+  "teal-studio": "clinical-emerald",
+};
+
 const STORAGE_KEY = "trmm_active_theme_palette";
+
+function resolvePaletteId(rawId?: string | null): string {
+  const cleaned = String(rawId || "").trim();
+  if (!cleaned) return "classic-dark";
+  const mapped = LEGACY_PALETTE_MAP[cleaned] || cleaned;
+  return THEME_PALETTES.some((p) => p.id === mapped) ? mapped : "classic-dark";
+}
+
 export const currentPaletteId = ref<string>(
-  (typeof localStorage !== "undefined" && localStorage.getItem(STORAGE_KEY)) || "classic-dark",
+  resolvePaletteId(typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null),
 );
 
 let styleElement: HTMLStyleElement | null = null;
 
 export function applyThemePalette(paletteId: string): void {
+  const resolvedId = resolvePaletteId(paletteId);
   const palette =
-    THEME_PALETTES.find((p) => p.id === paletteId) || THEME_PALETTES[0];
+    THEME_PALETTES.find((p) => p.id === resolvedId) || THEME_PALETTES[0];
   currentPaletteId.value = palette.id;
 
   if (typeof localStorage !== "undefined") {
@@ -185,7 +201,7 @@ export function applyThemePalette(paletteId: string): void {
     return;
   }
 
-  if (palette.id === "classic-light") {
+  if (!palette.isDark) {
     styleElement.textContent = `
       body.body--light {
         background-color: ${palette.bg} !important;
@@ -202,7 +218,7 @@ export function applyThemePalette(paletteId: string): void {
         color: #FFFFFF !important;
         border-bottom: 1px solid ${palette.border} !important;
       }
-      body.body--light .q-bar {
+      body.body--light .q-bar:not(.bg-teal-10):not(.bg-primary):not(.bg-indigo-9) {
         background: #E2E8F0 !important;
         color: ${palette.textPrimary} !important;
         border-bottom: 1px solid ${palette.border} !important;
@@ -218,13 +234,19 @@ export function applyThemePalette(paletteId: string): void {
       }
       body.body--light .q-table thead tr,
       body.body--light .q-table th {
-        background-color: #F1F5F9 !important;
+        background-color: ${palette.tableHeaderBg} !important;
         color: ${palette.textPrimary} !important;
         border-color: ${palette.border} !important;
       }
       body.body--light .q-table tbody td {
         border-color: ${palette.border} !important;
         color: ${palette.textPrimary} !important;
+      }
+      body.body--light .q-table tbody tr:hover {
+        background-color: ${palette.rowHoverBg} !important;
+      }
+      body.body--light .q-table tbody tr.highlight {
+        background-color: ${palette.rowActiveBg} !important;
       }
       body.body--light .q-separator {
         background: ${palette.border} !important;
@@ -254,7 +276,7 @@ export function applyThemePalette(paletteId: string): void {
       background: ${palette.headerBg} !important;
       border-bottom: 1px solid ${palette.border} !important;
     }
-    body.body--dark .q-bar {
+    body.body--dark .q-bar:not(.bg-teal-10):not(.bg-primary):not(.bg-indigo-9) {
       background: ${palette.surface} !important;
       color: ${palette.textPrimary} !important;
       border-bottom: 1px solid ${palette.border} !important;
@@ -274,7 +296,7 @@ export function applyThemePalette(paletteId: string): void {
     }
     body.body--dark .q-table thead tr,
     body.body--dark .q-table th {
-      background-color: ${palette.headerBg} !important;
+      background-color: ${palette.tableHeaderBg} !important;
       color: ${palette.textPrimary} !important;
       border-color: ${palette.border} !important;
     }
@@ -282,8 +304,11 @@ export function applyThemePalette(paletteId: string): void {
       border-color: ${palette.border} !important;
       color: ${palette.textPrimary} !important;
     }
+    body.body--dark .q-table tbody tr:hover {
+      background-color: ${palette.rowHoverBg} !important;
+    }
     body.body--dark .q-table tbody tr.highlight-dark {
-      background-color: ${palette.headerBg} !important;
+      background-color: ${palette.rowActiveBg} !important;
     }
     body.body--dark .q-separator {
       background: ${palette.border} !important;

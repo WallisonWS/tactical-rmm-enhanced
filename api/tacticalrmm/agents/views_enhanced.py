@@ -3957,21 +3957,76 @@ def _build_agent_match_lookup(agents_qs) -> Dict[str, Agent]:
     return lookup
 
 
+def _is_agentless_inventory_agent(
+    ag: Agent, tag: Optional[InventoryAsset]
+) -> bool:
+    if tag and tag.source in (
+        "lan_discovery",
+        "csv_import",
+        "advanced_ip_scanner",
+        "manual",
+    ):
+        # If the agent later installed a real Go agent with MeshNodeID and version != 0.1.0, treat as real agent
+        has_live_binary = (
+            bool(str(ag.mesh_node_id or "").strip())
+            and str(ag.version or "").strip() not in ("", "0.1.0")
+        )
+        return not has_live_binary
+    return (
+        str(ag.version or "").strip() in ("", "0.1.0")
+        and not str(ag.mesh_node_id or "").strip()
+    )
+
+
 def _serialize_agent_inventory_row(
     ag: Agent, tag: Optional[InventoryAsset]
 ) -> Dict[str, Any]:
     prof = _extract_wmi_profile(ag)
     local_ips = _extract_agent_ips(ag)
-    category = (
-        tag.category
-        if (tag and tag.category in INVENTORY_VALID_CATEGORIES)
-        else "ativo_monitorado"
+    is_agentless = _is_agentless_inventory_agent(ag, tag)
+    has_real_agent = not is_agentless
+
+    if tag and tag.category in INVENTORY_VALID_CATEGORIES:
+        category = (
+            "estacao_sem_agente"
+            if (is_agentless and tag.category == "ativo_monitorado")
+            else tag.category
+        )
+    else:
+        category = "ativo_monitorado" if has_real_agent else "estacao_sem_agente"
+
+    wmi = ag.wmi_detail if isinstance(ag.wmi_detail, dict) else {}
+    exact_func = str(wmi.get("exact_function") or "").strip()
+    raw_notes = (tag.notes if tag and tag.notes else "").strip()
+    if not raw_notes and exact_func:
+        raw_notes = f"Função: {exact_func}"
+
+    tag_ip = (tag.ip_address if tag and tag.ip_address else "").strip()
+    ip_value = tag_ip or ", ".join(local_ips)
+
+    manufacturer = (
+        (tag.manufacturer if tag and tag.manufacturer else "")
+        or str(wmi.get("cs_manuf") or "")
+        or prof.get("manufacturer", "")
+    ).strip()
+    model_name = (
+        (tag.model_name if tag and tag.model_name else "")
+        or str(wmi.get("cs_model") or "")
+        or prof.get("model", "")
+    ).strip()
+
+    # For agentless LAN-discovered assets, show exact function cleanly instead of repeating long brand+model strings
+    os_display = (
+        (ag.operating_system or "")
+        if has_real_agent
+        else (exact_func or (tag.operating_system if tag else "") or "")
     )
+
     return {
         "row_key": f"agent:{ag.agent_id}",
         "asset_id": tag.pk if tag else None,
         "agent_id": ag.agent_id,
-        "has_agent": True,
+        "has_agent": has_real_agent,
         "client_id": ag.site.client_id,
         "client_name": ag.site.client.name,
         "site_id": ag.site_id,
@@ -3984,23 +4039,23 @@ def _serialize_agent_inventory_row(
         ),
         "patrimonio": tag.patrimonio if tag else "",
         "name": ag.hostname,
-        "ip_address": ", ".join(local_ips),
+        "ip_address": ip_value,
         "public_ip": ag.public_ip or "",
         "mac_address": (tag.mac_address if tag and tag.mac_address else "") or _extract_agent_mac(ag),
-        "manufacturer": (tag.manufacturer if tag and tag.manufacturer else "") or prof.get("manufacturer", ""),
-        "model_name": (tag.model_name if tag and tag.model_name else "") or prof.get("model", ""),
+        "manufacturer": manufacturer,
+        "model_name": model_name,
         "serial_number": (tag.serial_number if tag and tag.serial_number else "") or prof.get("serial_number", ""),
-        "operating_system": ag.operating_system or "",
+        "operating_system": os_display,
         "logged_in_username": ag.logged_in_username or ag.last_logged_in_user or "",
         "sector_location": tag.sector_location if tag else "",
         "responsible": tag.responsible if tag else "",
-        "status": ag.status,
-        "source": "agent_sync",
-        "notes": tag.notes if tag else "",
-        "matched_agent_id": ag.agent_id,
-        "matched_agent_hostname": ag.hostname,
-        "matched_agent_status": ag.status,
-        "matched_agent_site": f"{ag.site.client.name} / {ag.site.name}",
+        "status": ag.status if has_real_agent else ((tag.status if tag and tag.status else "") or "ativo"),
+        "source": "agent_sync" if has_real_agent else ((tag.source if tag and tag.source else "") or "lan_discovery"),
+        "notes": raw_notes,
+        "matched_agent_id": ag.agent_id if has_real_agent else None,
+        "matched_agent_hostname": ag.hostname if has_real_agent else "",
+        "matched_agent_status": ag.status if has_real_agent else "",
+        "matched_agent_site": f"{ag.site.client.name} / {ag.site.name}" if has_real_agent else "",
         "updated_at": (tag.updated_at if tag else ag.last_seen).isoformat()
         if (tag or ag.last_seen)
         else "",
@@ -4174,18 +4229,22 @@ class FleetInventoryAssetsView(APIView):
                 agent=ag,
                 defaults={
                     "site": ag.site,
-                    "category": "ativo_monitorado",
+                    "category": "ativo_monitorado" if not _is_agentless_inventory_agent(ag, None) else "estacao_sem_agente",
                     "name": ag.hostname,
-                    "source": "agent_sync",
+                    "source": "agent_sync" if not _is_agentless_inventory_agent(ag, None) else "lan_discovery",
                     "imported_by": request.user.username,
                 },
             )
+            was_agentless = _is_agentless_inventory_agent(ag, tag)
             tag.site = ag.site
             tag.name = ag.hostname
             _apply_inventory_fields(tag, data)
             if not tag.category or tag.category not in INVENTORY_VALID_CATEGORIES:
-                tag.category = "ativo_monitorado"
-            tag.source = "agent_sync"
+                tag.category = "estacao_sem_agente" if was_agentless else "ativo_monitorado"
+            if not was_agentless:
+                tag.source = "agent_sync"
+            elif not tag.source:
+                tag.source = "lan_discovery"
             tag.imported_by = request.user.username
             tag.save()
 
@@ -4549,18 +4608,22 @@ class AgentInventoryTagView(APIView):
             agent=ag,
             defaults={
                 "site": ag.site,
-                "category": "ativo_monitorado",
+                "category": "ativo_monitorado" if not _is_agentless_inventory_agent(ag, None) else "estacao_sem_agente",
                 "name": ag.hostname,
-                "source": "agent_sync",
+                "source": "agent_sync" if not _is_agentless_inventory_agent(ag, None) else "lan_discovery",
                 "imported_by": request.user.username,
             },
         )
+        was_agentless = _is_agentless_inventory_agent(ag, tag)
         tag.site = ag.site
         tag.name = ag.hostname
         _apply_inventory_fields(tag, data)
         if not tag.category or tag.category not in INVENTORY_VALID_CATEGORIES:
-            tag.category = "ativo_monitorado"
-        tag.source = "agent_sync"
+            tag.category = "estacao_sem_agente" if was_agentless else "ativo_monitorado"
+        if not was_agentless:
+            tag.source = "agent_sync"
+        elif not tag.source:
+            tag.source = "lan_discovery"
         tag.imported_by = request.user.username
         tag.save()
 

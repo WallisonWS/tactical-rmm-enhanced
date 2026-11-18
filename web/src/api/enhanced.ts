@@ -1077,12 +1077,12 @@ export async function saveAgentInventoryTag(
 const ENTITY_BADGE_PALETTE = [
   "indigo-7",
   "teal-8",
-  "deep-purple-7",
-  "cyan-8",
-  "amber-9",
-  "pink-8",
-  "deep-orange-8",
   "blue-8",
+  "cyan-9",
+  "deep-purple-7",
+  "blue-grey-8",
+  "light-blue-9",
+  "green-9",
 ];
 
 export function getEntityBadgeColor(name?: string | null): string {
