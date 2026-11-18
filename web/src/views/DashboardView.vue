@@ -433,6 +433,20 @@
                     Consulta o Active Directory (pastas CRD, Computadores, Computers, sub-OUs e raiz do domínio) e mostra computadores faltantes no Tactical RMM com Push Remoto em 1 clique
                   </q-tooltip>
                 </q-chip>
+                <q-chip
+                  clickable
+                  dense
+                  size="12px"
+                  color="teal-8"
+                  text-color="white"
+                  icon="inventory_2"
+                  @click="showInventoryManagerModal = true"
+                >
+                  Inventário &amp; Patrimônio
+                  <q-tooltip>
+                    Gerencia Nº de Patrimônio das máquinas, inclui Ativos e Passivos de Rede sem agente e importa tabelas CSV (Advanced IP Scanner)
+                  </q-tooltip>
+                </q-chip>
               </div>
 
               <q-space />
@@ -706,6 +720,14 @@
     <q-dialog v-model="showADDirectoryAuditModal">
       <ADDirectoryAuditModal @close="showADDirectoryAuditModal = false" />
     </q-dialog>
+
+    <!-- consolidated inventory, patrimonio & network active/passive modal -->
+    <q-dialog v-model="showInventoryManagerModal">
+      <InventoryManagerModal
+        :initialSiteId="sitePk ? parseInt(sitePk) : null"
+        @close="showInventoryManagerModal = false"
+      />
+    </q-dialog>
   </q-page>
 </template>
 
@@ -723,6 +745,7 @@ import SitesForm from "@/components/clients/SitesForm.vue";
 import DeleteClient from "@/components/clients/DeleteClient.vue";
 import InstallAgent from "@/components/modals/agents/InstallAgent.vue";
 import ADDirectoryAuditModal from "@/components/modals/agents/ADDirectoryAuditModal.vue";
+import InventoryManagerModal from "@/components/modals/agents/InventoryManagerModal.vue";
 import AlertTemplateAdd from "@/components/modals/alerts/AlertTemplateAdd.vue";
 import IntegrationsContextMenu from "@/components/ui/IntegrationsContextMenu.vue";
 
@@ -740,6 +763,7 @@ export default {
     SubTableTabs,
     InstallAgent,
     ADDirectoryAuditModal,
+    InventoryManagerModal,
     IntegrationsContextMenu,
   },
   // allow child components to refresh table
@@ -757,6 +781,7 @@ export default {
     return {
       showInstallAgentModal: false,
       showADDirectoryAuditModal: false,
+      showInventoryManagerModal: false,
       sitePk: null,
       savedSidebarWidth: 15,
       innerModel: (this.$q.screen.height - 82) / 2,

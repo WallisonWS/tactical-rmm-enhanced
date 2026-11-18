@@ -907,4 +907,171 @@ export async function pushInstallADComputers(payload: {
   return data;
 }
 
+export type InventoryCategory =
+  | "ativo_monitorado"
+  | "ativo_rede"
+  | "passivo_rede"
+  | "estacao_sem_agente"
+  | "equipamento_medico"
+  | "impressora_periferico";
+
+export interface InventorySiteOption {
+  id: number;
+  name: string;
+  client_id: number;
+  client_name: string;
+  label: string;
+}
+
+export interface InventoryCategoryOption {
+  value: InventoryCategory;
+  label: string;
+}
+
+export interface InventoryAssetRow {
+  row_key: string;
+  asset_id: number | null;
+  agent_id: string | null;
+  has_agent: boolean;
+  client_id: number;
+  client_name: string;
+  site_id: number;
+  site_name: string;
+  category: InventoryCategory;
+  category_label: string;
+  asset_subtype: string;
+  patrimonio: string;
+  name: string;
+  ip_address: string;
+  public_ip: string;
+  mac_address: string;
+  manufacturer: string;
+  model_name: string;
+  serial_number: string;
+  operating_system: string;
+  logged_in_username: string;
+  sector_location: string;
+  responsible: string;
+  status: string;
+  source: string;
+  notes: string;
+  matched_agent_id: string | null;
+  matched_agent_hostname: string;
+  matched_agent_status: string;
+  matched_agent_site: string;
+  updated_at: string;
+}
+
+export interface InventorySummaryCounts {
+  total: number;
+  with_agent: number;
+  agentless_total: number;
+  ativos_rede: number;
+  passivos_rede: number;
+  estacoes_sem_agente: number;
+  equipamentos_medicos: number;
+  impressoras_perifericos: number;
+  with_patrimonio: number;
+  without_patrimonio: number;
+  matched_with_agent: number;
+}
+
+export interface InventoryListResponse {
+  sites: InventorySiteOption[];
+  items: InventoryAssetRow[];
+  summary: InventorySummaryCounts;
+  categories: InventoryCategoryOption[];
+  timestamp: string;
+}
+
+export interface InventoryImportRowInput {
+  name: string;
+  ip_address?: string;
+  mac_address?: string;
+  patrimonio?: string;
+  manufacturer?: string;
+  model_name?: string;
+  serial_number?: string;
+  operating_system?: string;
+  sector_location?: string;
+  responsible?: string;
+  status?: string;
+  notes?: string;
+  category?: string;
+  asset_subtype?: string;
+}
+
+export interface InventoryImportResponse {
+  status: string;
+  created: number;
+  updated: number;
+  skipped_agents: number;
+  skipped_empty: number;
+  site_name: string;
+}
+
+export async function fetchInventoryAssets(): Promise<InventoryListResponse> {
+  const { data } = await axios.get("/agents/inventory-assets/", adRequestConfig);
+  return data;
+}
+
+export async function saveInventoryAsset(payload: {
+  asset_id?: number | null;
+  agent_id?: string | null;
+  site_id?: number;
+  category?: InventoryCategory;
+  asset_subtype?: string;
+  patrimonio?: string;
+  name?: string;
+  ip_address?: string;
+  mac_address?: string;
+  manufacturer?: string;
+  model_name?: string;
+  serial_number?: string;
+  operating_system?: string;
+  sector_location?: string;
+  responsible?: string;
+  status?: string;
+  notes?: string;
+}): Promise<{ status: string; item: InventoryAssetRow }> {
+  const { data } = await axios.post("/agents/inventory-assets/", payload, adRequestConfig);
+  return data;
+}
+
+export async function deleteInventoryAsset(assetId: number): Promise<{ status: string }> {
+  const { data } = await axios.delete(`/agents/inventory-assets/${assetId}/`, adRequestConfig);
+  return data;
+}
+
+export async function importInventoryAssets(payload: {
+  site_id: number;
+  default_category: string;
+  default_source?: string;
+  replace_site_imports?: boolean;
+  skip_matched_agents?: boolean;
+  rows: InventoryImportRowInput[];
+}): Promise<InventoryImportResponse> {
+  const { data } = await axios.post("/agents/inventory-assets/import/", payload, adRequestConfig);
+  return data;
+}
+
+export async function fetchAgentInventoryTag(agentId: string): Promise<InventoryAssetRow> {
+  const { data } = await axios.get(`/agents/${agentId}/inventory-tag/`, adRequestConfig);
+  return data;
+}
+
+export async function saveAgentInventoryTag(
+  agentId: string,
+  payload: {
+    patrimonio?: string;
+    sector_location?: string;
+    responsible?: string;
+    asset_subtype?: string;
+    notes?: string;
+  },
+): Promise<InventoryAssetRow> {
+  const { data } = await axios.post(`/agents/${agentId}/inventory-tag/`, payload, adRequestConfig);
+  return data;
+}
+
 

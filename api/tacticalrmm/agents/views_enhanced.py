@@ -3,7 +3,7 @@ import base64
 import json
 import re
 from contextlib import suppress
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
@@ -13,9 +13,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from agents.models import Agent
+from agents.models import Agent, InventoryAsset
 from agents.permissions import SendCMDPerms as SendCommandPerms
 from agents.utils import WINDOWS_MESH_BANKING_PAUSE_CMD
+from clients.models import Site
+from tacticalrmm.permissions import _has_perm, _has_perm_on_agent, _has_perm_on_site
 from alerts.models import Alert
 from checks.models import CheckResult
 from core.models import CoreSettings
@@ -3867,4 +3869,714 @@ class FleetBulkCLIView(APIView):
                 "timestamp": djangotime.now().isoformat(),
             }
         )
+
+
+INVENTORY_CATEGORY_LABELS: Dict[str, str] = dict(InventoryAsset.CATEGORY_CHOICES)
+INVENTORY_VALID_CATEGORIES = set(INVENTORY_CATEGORY_LABELS.keys())
+
+
+def _normalize_mac(value: Any) -> str:
+    raw = str(value or "").strip().upper()
+    if not raw or raw in ("-", "N/A", "NONE"):
+        return ""
+    hex_only = re.sub(r"[^0-9A-F]", "", raw)
+    if len(hex_only) == 12:
+        return ":".join(hex_only[i : i + 2] for i in range(0, 12, 2))
+    return raw[:100]
+
+
+def _extract_agent_ips(agent: Agent) -> List[str]:
+    ips: List[str] = []
+    with suppress(Exception):
+        raw_local = agent.local_ips
+        if raw_local and "error" not in str(raw_local).lower():
+            for part in str(raw_local).split(","):
+                clean = part.strip()
+                if clean and not clean.startswith("127.") and ":" not in clean and clean not in ips:
+                    ips.append(clean)
+    wmi = agent.wmi_detail if isinstance(agent.wmi_detail, dict) else {}
+    if isinstance(wmi.get("local_ips"), list):
+        for part in wmi.get("local_ips") or []:
+            clean = str(part).strip()
+            if clean and not clean.startswith("127.") and ":" not in clean and clean not in ips:
+                ips.append(clean)
+    return ips
+
+
+def _extract_agent_mac(agent: Agent) -> str:
+    wmi = agent.wmi_detail if isinstance(agent.wmi_detail, dict) else {}
+    for section_name in ("network_adapter", "network_config"):
+        section = wmi.get(section_name)
+        entries: List[Dict[str, Any]] = []
+        if isinstance(section, list):
+            for entry in section:
+                if isinstance(entry, dict):
+                    entries.append(entry)
+                elif isinstance(entry, list):
+                    merged: Dict[str, Any] = {}
+                    for item in entry:
+                        if isinstance(item, dict):
+                            merged.update(item)
+                    if merged:
+                        entries.append(merged)
+        for entry in entries:
+            mac = _normalize_mac(entry.get("MACAddress") or entry.get("MacAddress") or "")
+            if mac:
+                return mac
+    return ""
+
+
+def _infer_inventory_category(
+    raw_category: str, name: str = "", manufacturer: str = "", subtype: str = ""
+) -> Tuple[str, str]:
+    cat_norm = str(raw_category or "").strip().lower()
+    if cat_norm in INVENTORY_VALID_CATEGORIES:
+        return cat_norm, subtype.strip()
+
+    combined = f"{cat_norm} {name} {manufacturer} {subtype}".lower()
+    if any(k in combined for k in ("passivo", "patch panel", "patchpanel", "rack", "keystone", "tomada", "fibra", "cabo", "bandeja", "conversor")):
+        return "passivo_rede", subtype.strip() or "Infraestrutura Passiva"
+    if any(k in combined for k in ("ativo de rede", "ativo_rede", "switch", "roteador", "router", "firewall", "mikrotik", "ubiquiti", "unifi", "aruba", "cisco", "fortinet", "access point", "ap ", "tplink", "tp-link", "meraki", "pfsense", "opnsense", "gateway")):
+        return "ativo_rede", subtype.strip() or "Ativo de Rede"
+    if any(k in combined for k in ("medic", "diagnos", "dicom", "ultrassom", "tomog", "resson", "raio-x", "raiox", "ray", "mamog", "ge healthcare", "siemens health", "philips medical", "mindray", "carestream", "agfa")):
+        return "equipamento_medico", subtype.strip() or "Equipamento Médico / Diagnose"
+    if any(k in combined for k in ("impress", "printer", "scanner", "brother", "epson", "ricoh", "xerox", "kyocera", "zebra", "lexmark", "canon", "cftv", "camera", "hikvision", "dahua", "intelbras", "dvr", "nvr", "ponto", "control id", "henry")):
+        return "impressora_periferico", subtype.strip() or "Impressora / Periférico / CFTV"
+    return "estacao_sem_agente", subtype.strip() or "Computador / Dispositivo"
+
+
+def _build_agent_match_lookup(agents_qs) -> Dict[str, Agent]:
+    lookup: Dict[str, Agent] = {}
+    for ag in agents_qs:
+        for ip in _extract_agent_ips(ag):
+            lookup.setdefault(f"ip:{ip}", ag)
+        host = (ag.hostname or "").strip().upper()
+        if host:
+            lookup.setdefault(f"host:{host}", ag)
+            lookup.setdefault(f"host:{host.split('.')[0]}", ag)
+    return lookup
+
+
+def _serialize_agent_inventory_row(
+    ag: Agent, tag: Optional[InventoryAsset]
+) -> Dict[str, Any]:
+    prof = _extract_wmi_profile(ag)
+    local_ips = _extract_agent_ips(ag)
+    category = (
+        tag.category
+        if (tag and tag.category in INVENTORY_VALID_CATEGORIES)
+        else "ativo_monitorado"
+    )
+    return {
+        "row_key": f"agent:{ag.agent_id}",
+        "asset_id": tag.pk if tag else None,
+        "agent_id": ag.agent_id,
+        "has_agent": True,
+        "client_id": ag.site.client_id,
+        "client_name": ag.site.client.name,
+        "site_id": ag.site_id,
+        "site_name": ag.site.name,
+        "category": category,
+        "category_label": INVENTORY_CATEGORY_LABELS.get(category, category),
+        "asset_subtype": (
+            (tag.asset_subtype if tag and tag.asset_subtype else "")
+            or ("Servidor" if ag.monitoring_type == "server" else "Estação / PC")
+        ),
+        "patrimonio": tag.patrimonio if tag else "",
+        "name": ag.hostname,
+        "ip_address": ", ".join(local_ips),
+        "public_ip": ag.public_ip or "",
+        "mac_address": (tag.mac_address if tag and tag.mac_address else "") or _extract_agent_mac(ag),
+        "manufacturer": (tag.manufacturer if tag and tag.manufacturer else "") or prof.get("manufacturer", ""),
+        "model_name": (tag.model_name if tag and tag.model_name else "") or prof.get("model", ""),
+        "serial_number": (tag.serial_number if tag and tag.serial_number else "") or prof.get("serial_number", ""),
+        "operating_system": ag.operating_system or "",
+        "logged_in_username": ag.logged_in_username or ag.last_logged_in_user or "",
+        "sector_location": tag.sector_location if tag else "",
+        "responsible": tag.responsible if tag else "",
+        "status": ag.status,
+        "source": "agent_sync",
+        "notes": tag.notes if tag else "",
+        "matched_agent_id": ag.agent_id,
+        "matched_agent_hostname": ag.hostname,
+        "matched_agent_status": ag.status,
+        "matched_agent_site": f"{ag.site.client.name} / {ag.site.name}",
+        "updated_at": (tag.updated_at if tag else ag.last_seen).isoformat()
+        if (tag or ag.last_seen)
+        else "",
+    }
+
+
+def _serialize_standalone_inventory_row(
+    asset: InventoryAsset, tactical_lookup: Dict[str, Agent]
+) -> Dict[str, Any]:
+    ip_clean = (asset.ip_address or "").strip()
+    name_upper = (asset.name or "").strip().upper()
+    matched_ag: Optional[Agent] = None
+    if ip_clean:
+        matched_ag = tactical_lookup.get(f"ip:{ip_clean}")
+    if matched_ag is None and name_upper:
+        matched_ag = tactical_lookup.get(f"host:{name_upper}") or tactical_lookup.get(
+            f"host:{name_upper.split('.')[0]}"
+        )
+
+    return {
+        "row_key": f"asset:{asset.pk}",
+        "asset_id": asset.pk,
+        "agent_id": None,
+        "has_agent": False,
+        "client_id": asset.site.client_id,
+        "client_name": asset.site.client.name,
+        "site_id": asset.site_id,
+        "site_name": asset.site.name,
+        "category": asset.category,
+        "category_label": INVENTORY_CATEGORY_LABELS.get(asset.category, asset.category),
+        "asset_subtype": asset.asset_subtype,
+        "patrimonio": asset.patrimonio,
+        "name": asset.name,
+        "ip_address": asset.ip_address,
+        "public_ip": "",
+        "mac_address": asset.mac_address,
+        "manufacturer": asset.manufacturer,
+        "model_name": asset.model_name,
+        "serial_number": asset.serial_number,
+        "operating_system": asset.operating_system,
+        "logged_in_username": "",
+        "sector_location": asset.sector_location,
+        "responsible": asset.responsible,
+        "status": asset.status or "ativo",
+        "source": asset.source or "manual",
+        "notes": asset.notes,
+        "matched_agent_id": matched_ag.agent_id if matched_ag else None,
+        "matched_agent_hostname": matched_ag.hostname if matched_ag else "",
+        "matched_agent_status": matched_ag.status if matched_ag else "",
+        "matched_agent_site": (
+            f"{matched_ag.site.client.name} / {matched_ag.site.name}"
+            if matched_ag
+            else ""
+        ),
+        "updated_at": asset.updated_at.isoformat() if asset.updated_at else "",
+    }
+
+
+def _apply_inventory_fields(asset: InventoryAsset, data: Dict[str, Any]) -> None:
+    text_fields = (
+        ("patrimonio", 100),
+        ("asset_subtype", 100),
+        ("name", 255),
+        ("ip_address", 255),
+        ("manufacturer", 255),
+        ("model_name", 255),
+        ("serial_number", 255),
+        ("operating_system", 255),
+        ("sector_location", 255),
+        ("responsible", 255),
+        ("status", 64),
+        ("source", 64),
+    )
+    for field_name, max_len in text_fields:
+        if field_name in data and data.get(field_name) is not None:
+            setattr(asset, field_name, str(data.get(field_name)).strip()[:max_len])
+    if "mac_address" in data and data.get("mac_address") is not None:
+        asset.mac_address = _normalize_mac(data.get("mac_address"))
+    if "notes" in data and data.get("notes") is not None:
+        asset.notes = str(data.get("notes")).strip()
+    if "category" in data and str(data.get("category") or "").strip() in INVENTORY_VALID_CATEGORIES:
+        asset.category = str(data.get("category")).strip()
+
+
+class FleetInventoryAssetsView(APIView):
+    """
+    GET  /agents/inventory-assets/  -> Consolidated fleet inventory (monitored agents + agentless active/passive network & CSV assets).
+    POST /agents/inventory-assets/  -> Assign Patrimonio/Location to an existing agent OR create/update an agentless item manually.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request) -> Response:
+        if not _has_perm(request, "can_list_agents"):
+            return Response({"error": "Permissão insuficiente para listar inventário."}, status=status.HTTP_403_FORBIDDEN)
+
+        sites_qs = Site.objects.filter_by_role(request.user).select_related("client").order_by("client__name", "name")
+        accessible_sites = [
+            {
+                "id": s.pk,
+                "name": s.name,
+                "client_id": s.client_id,
+                "client_name": s.client.name,
+                "label": f"{s.client.name} / {s.name}",
+            }
+            for s in sites_qs
+        ]
+
+        agents_qs = (
+            Agent.objects.filter_by_role(request.user)
+            .select_related("site__client", "inventory_record")
+            .order_by("site__client__name", "site__name", "hostname")
+        )
+        agents_list = list(agents_qs)
+        tactical_lookup = _build_agent_match_lookup(agents_list)
+
+        standalone_qs = (
+            InventoryAsset.objects.filter_by_role(request.user)
+            .filter(agent__isnull=True)
+            .select_related("site__client")
+            .order_by("site__client__name", "site__name", "name")
+        )
+
+        rows: List[Dict[str, Any]] = []
+        for ag in agents_list:
+            tag = getattr(ag, "inventory_record", None)
+            rows.append(_serialize_agent_inventory_row(ag, tag))
+
+        for asset in standalone_qs:
+            rows.append(_serialize_standalone_inventory_row(asset, tactical_lookup))
+
+        summary = {
+            "total": len(rows),
+            "with_agent": sum(1 for r in rows if r["has_agent"]),
+            "agentless_total": sum(1 for r in rows if not r["has_agent"]),
+            "ativos_rede": sum(1 for r in rows if r["category"] == "ativo_rede"),
+            "passivos_rede": sum(1 for r in rows if r["category"] == "passivo_rede"),
+            "estacoes_sem_agente": sum(1 for r in rows if r["category"] == "estacao_sem_agente"),
+            "equipamentos_medicos": sum(1 for r in rows if r["category"] == "equipamento_medico"),
+            "impressoras_perifericos": sum(1 for r in rows if r["category"] == "impressora_periferico"),
+            "with_patrimonio": sum(1 for r in rows if bool(r["patrimonio"])),
+            "without_patrimonio": sum(1 for r in rows if not r["patrimonio"]),
+            "matched_with_agent": sum(1 for r in rows if (not r["has_agent"] and bool(r["matched_agent_id"]))),
+        }
+
+        return Response(
+            {
+                "sites": accessible_sites,
+                "items": rows,
+                "summary": summary,
+                "categories": [
+                    {"value": k, "label": v}
+                    for k, v in InventoryAsset.CATEGORY_CHOICES
+                ],
+                "timestamp": djangotime.now().isoformat(),
+            }
+        )
+
+    def post(self, request) -> Response:
+        if not _has_perm(request, "can_edit_agent"):
+            return Response({"error": "Permissão insuficiente para editar inventário."}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data if isinstance(request.data, dict) else {}
+        agent_id = str(data.get("agent_id") or "").strip()
+
+        if agent_id:
+            if not _has_perm_on_agent(request.user, agent_id):
+                return Response({"error": "Sem permissão neste agente."}, status=status.HTTP_403_FORBIDDEN)
+            ag = get_object_or_404(Agent.objects.select_related("site__client"), agent_id=agent_id)
+            tag, _created = InventoryAsset.objects.get_or_create(
+                agent=ag,
+                defaults={
+                    "site": ag.site,
+                    "category": "ativo_monitorado",
+                    "name": ag.hostname,
+                    "source": "agent_sync",
+                    "imported_by": request.user.username,
+                },
+            )
+            tag.site = ag.site
+            tag.name = ag.hostname
+            _apply_inventory_fields(tag, data)
+            if not tag.category or tag.category not in INVENTORY_VALID_CATEGORIES:
+                tag.category = "ativo_monitorado"
+            tag.source = "agent_sync"
+            tag.imported_by = request.user.username
+            tag.save()
+
+            AuditLog.objects.create(
+                username=request.user.username,
+                agent=ag.hostname,
+                agent_id=ag.agent_id,
+                object_type=AuditObjType.AGENT,
+                action=AuditActionType.MODIFY,
+                message=f"{request.user.username} atualizou patrimônio/localização de {ag.hostname} (Pat: {tag.patrimonio or '-'})",
+                after_value={
+                    "patrimonio": tag.patrimonio,
+                    "sector_location": tag.sector_location,
+                    "responsible": tag.responsible,
+                },
+            )
+            return Response(
+                {
+                    "status": "ok",
+                    "item": _serialize_agent_inventory_row(ag, tag),
+                }
+            )
+
+        # Standalone agentless create / update
+        asset_id = data.get("asset_id")
+        if asset_id:
+            asset = get_object_or_404(InventoryAsset.objects.select_related("site__client"), pk=asset_id)
+            if not _has_perm_on_site(request.user, asset.site_id):
+                return Response({"error": "Sem permissão nesta unidade/site."}, status=status.HTTP_403_FORBIDDEN)
+        else:
+            raw_site_id = data.get("site_id")
+            if not raw_site_id:
+                return Response({"error": "Selecione a Unidade/Site de destino."}, status=status.HTTP_400_BAD_REQUEST)
+            site = get_object_or_404(Site.objects.select_related("client"), pk=raw_site_id)
+            if not _has_perm_on_site(request.user, site.pk):
+                return Response({"error": "Sem permissão nesta unidade/site."}, status=status.HTTP_403_FORBIDDEN)
+            asset = InventoryAsset(site=site, source="manual", imported_by=request.user.username)
+
+        if data.get("site_id") and int(data.get("site_id")) != asset.site_id:
+            new_site = get_object_or_404(Site, pk=data.get("site_id"))
+            if not _has_perm_on_site(request.user, new_site.pk):
+                return Response({"error": "Sem permissão na unidade de destino."}, status=status.HTTP_403_FORBIDDEN)
+            asset.site = new_site
+
+        _apply_inventory_fields(asset, data)
+        if not asset.name:
+            return Response({"error": "Informe o Nome / Identificação do equipamento."}, status=status.HTTP_400_BAD_REQUEST)
+        if asset.category not in INVENTORY_VALID_CATEGORIES or asset.category == "ativo_monitorado":
+            inferred_cat, inferred_sub = _infer_inventory_category(
+                str(data.get("category") or ""),
+                asset.name,
+                asset.manufacturer,
+                asset.asset_subtype,
+            )
+            asset.category = inferred_cat
+            if not asset.asset_subtype:
+                asset.asset_subtype = inferred_sub
+        asset.imported_by = request.user.username
+        asset.save()
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.MODIFY if asset_id else AuditActionType.ADD,
+            message=f"{request.user.username} salvou ativo sem agente '{asset.name}' ({asset.category}, Pat: {asset.patrimonio or '-'})",
+            after_value={
+                "asset_id": asset.pk,
+                "site": asset.site.name,
+                "category": asset.category,
+                "patrimonio": asset.patrimonio,
+                "ip_address": asset.ip_address,
+            },
+        )
+
+        agents_list = list(Agent.objects.filter_by_role(request.user).select_related("site__client"))
+        lookup = _build_agent_match_lookup(agents_list)
+        return Response(
+            {
+                "status": "ok",
+                "item": _serialize_standalone_inventory_row(asset, lookup),
+            },
+            status=status.HTTP_200_OK if asset_id else status.HTTP_201_CREATED,
+        )
+
+
+class FleetInventoryAssetDetailView(APIView):
+    """
+    PATCH  /agents/inventory-assets/<int:pk>/
+    DELETE /agents/inventory-assets/<int:pk>/
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk: int) -> Response:
+        if not _has_perm(request, "can_edit_agent"):
+            return Response({"error": "Permissão insuficiente."}, status=status.HTTP_403_FORBIDDEN)
+        asset = get_object_or_404(InventoryAsset.objects.select_related("site__client", "agent"), pk=pk)
+        if not _has_perm_on_site(request.user, asset.site_id):
+            return Response({"error": "Sem permissão neste site."}, status=status.HTTP_403_FORBIDDEN)
+        data = request.data if isinstance(request.data, dict) else {}
+        if data.get("site_id") and int(data.get("site_id")) != asset.site_id and asset.agent is None:
+            new_site = get_object_or_404(Site, pk=data.get("site_id"))
+            if not _has_perm_on_site(request.user, new_site.pk):
+                return Response({"error": "Sem permissão no site de destino."}, status=status.HTTP_403_FORBIDDEN)
+            asset.site = new_site
+        _apply_inventory_fields(asset, data)
+        asset.imported_by = request.user.username
+        asset.save()
+
+        if asset.agent:
+            return Response({"status": "ok", "item": _serialize_agent_inventory_row(asset.agent, asset)})
+        agents_list = list(Agent.objects.filter_by_role(request.user).select_related("site__client"))
+        lookup = _build_agent_match_lookup(agents_list)
+        return Response({"status": "ok", "item": _serialize_standalone_inventory_row(asset, lookup)})
+
+    def delete(self, request, pk: int) -> Response:
+        if not _has_perm(request, "can_edit_agent"):
+            return Response({"error": "Permissão insuficiente."}, status=status.HTTP_403_FORBIDDEN)
+        asset = get_object_or_404(InventoryAsset.objects.select_related("site"), pk=pk)
+        if not _has_perm_on_site(request.user, asset.site_id):
+            return Response({"error": "Sem permissão neste site."}, status=status.HTTP_403_FORBIDDEN)
+        label = f"{asset.name} (Pat: {asset.patrimonio or '-'})"
+        asset.delete()
+        AuditLog.objects.create(
+            username=request.user.username,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.DELETE,
+            message=f"{request.user.username} removeu registro de inventário {label}",
+        )
+        return Response({"status": "ok"})
+
+
+class FleetInventoryAssetImportView(APIView):
+    """
+    POST /agents/inventory-assets/import/
+    Bulk imports CSV / Advanced IP Scanner / spreadsheet rows for a Site even without agents installed.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request) -> Response:
+        if not _has_perm(request, "can_edit_agent"):
+            return Response({"error": "Permissão insuficiente para importar inventário."}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data if isinstance(request.data, dict) else {}
+        site_id = data.get("site_id")
+        if not site_id:
+            return Response({"error": "Selecione a Unidade/Site de destino para importação."}, status=status.HTTP_400_BAD_REQUEST)
+
+        site = get_object_or_404(Site.objects.select_related("client"), pk=site_id)
+        if not _has_perm_on_site(request.user, site.pk):
+            return Response({"error": "Sem permissão nesta unidade/site."}, status=status.HTTP_403_FORBIDDEN)
+
+        rows = data.get("rows")
+        if not isinstance(rows, list) or not rows:
+            return Response({"error": "Nenhuma linha válida enviada para importação."}, status=status.HTTP_400_BAD_REQUEST)
+        if len(rows) > 5000:
+            return Response({"error": "Limite máximo de 5000 registros por importação."}, status=status.HTTP_400_BAD_REQUEST)
+
+        default_cat_raw = str(data.get("default_category") or "auto").strip()
+        default_source = str(data.get("default_source") or "advanced_ip_scanner").strip()[:64] or "csv_import"
+        replace_site_imports = bool(data.get("replace_site_imports", False))
+        skip_matched_agents = bool(data.get("skip_matched_agents", False))
+
+        if replace_site_imports:
+            InventoryAsset.objects.filter(
+                site=site,
+                agent__isnull=True,
+                source__in=["advanced_ip_scanner", "csv_import"],
+            ).delete()
+
+        agents_list = list(Agent.objects.filter_by_role(request.user).select_related("site__client"))
+        tactical_lookup = _build_agent_match_lookup(agents_list)
+
+        existing_assets = list(
+            InventoryAsset.objects.filter(site=site, agent__isnull=True)
+        )
+        by_patrimonio = {
+            a.patrimonio.strip().upper(): a for a in existing_assets if a.patrimonio.strip()
+        }
+        by_mac = {
+            _normalize_mac(a.mac_address): a for a in existing_assets if _normalize_mac(a.mac_address)
+        }
+        by_ip_name = {
+            (a.ip_address.strip(), a.name.strip().upper()): a
+            for a in existing_assets
+            if (a.ip_address.strip() or a.name.strip())
+        }
+
+        created_cnt = 0
+        updated_cnt = 0
+        skipped_agent_cnt = 0
+        skipped_empty_cnt = 0
+
+        for raw in rows:
+            if not isinstance(raw, dict):
+                skipped_empty_cnt += 1
+                continue
+
+            name = str(raw.get("name") or "").strip()[:255]
+            ip_addr = str(raw.get("ip_address") or "").strip()[:255]
+            mac_addr = _normalize_mac(raw.get("mac_address") or "")
+            patrimonio = str(raw.get("patrimonio") or "").strip()[:100]
+            manufacturer = str(raw.get("manufacturer") or "").strip()[:255]
+            model_name = str(raw.get("model_name") or "").strip()[:255]
+            serial_number = str(raw.get("serial_number") or "").strip()[:255]
+            operating_system = str(raw.get("operating_system") or "").strip()[:255]
+            sector_location = str(raw.get("sector_location") or "").strip()[:255]
+            responsible = str(raw.get("responsible") or "").strip()[:255]
+            status_val = str(raw.get("status") or "").strip()[:64] or "ativo"
+            notes = str(raw.get("notes") or "").strip()
+            subtype_raw = str(raw.get("asset_subtype") or "").strip()[:100]
+            cat_raw = str(raw.get("category") or "").strip()
+
+            if not name and ip_addr:
+                name = ip_addr
+            if not name:
+                skipped_empty_cnt += 1
+                continue
+
+            if skip_matched_agents:
+                name_upper = name.upper()
+                is_agent_match = bool(
+                    (ip_addr and f"ip:{ip_addr}" in tactical_lookup)
+                    or f"host:{name_upper}" in tactical_lookup
+                    or f"host:{name_upper.split('.')[0]}" in tactical_lookup
+                )
+                if is_agent_match:
+                    skipped_agent_cnt += 1
+                    continue
+
+            if cat_raw in INVENTORY_VALID_CATEGORIES and cat_raw != "ativo_monitorado":
+                category = cat_raw
+                subtype = subtype_raw
+            elif default_cat_raw in INVENTORY_VALID_CATEGORIES and default_cat_raw != "ativo_monitorado":
+                category = default_cat_raw
+                subtype = subtype_raw
+            else:
+                category, subtype = _infer_inventory_category(
+                    cat_raw, name=name, manufacturer=manufacturer, subtype=subtype_raw
+                )
+
+            existing: Optional[InventoryAsset] = None
+            if patrimonio and patrimonio.upper() in by_patrimonio:
+                existing = by_patrimonio[patrimonio.upper()]
+            elif mac_addr and mac_addr in by_mac:
+                existing = by_mac[mac_addr]
+            elif (ip_addr, name.upper()) in by_ip_name:
+                existing = by_ip_name[(ip_addr, name.upper())]
+
+            if existing is not None:
+                existing.name = name
+                if ip_addr:
+                    existing.ip_address = ip_addr
+                if mac_addr:
+                    existing.mac_address = mac_addr
+                if patrimonio:
+                    existing.patrimonio = patrimonio
+                if manufacturer:
+                    existing.manufacturer = manufacturer
+                if model_name:
+                    existing.model_name = model_name
+                if serial_number:
+                    existing.serial_number = serial_number
+                if operating_system:
+                    existing.operating_system = operating_system
+                if sector_location:
+                    existing.sector_location = sector_location
+                if responsible:
+                    existing.responsible = responsible
+                if status_val:
+                    existing.status = status_val
+                if notes:
+                    existing.notes = notes
+                if subtype and not existing.asset_subtype:
+                    existing.asset_subtype = subtype
+                if category:
+                    existing.category = category
+                existing.source = default_source
+                existing.imported_by = request.user.username
+                existing.save()
+                updated_cnt += 1
+            else:
+                obj = InventoryAsset.objects.create(
+                    site=site,
+                    category=category,
+                    asset_subtype=subtype,
+                    patrimonio=patrimonio,
+                    name=name,
+                    ip_address=ip_addr,
+                    mac_address=mac_addr,
+                    manufacturer=manufacturer,
+                    model_name=model_name,
+                    serial_number=serial_number,
+                    operating_system=operating_system,
+                    sector_location=sector_location,
+                    responsible=responsible,
+                    status=status_val,
+                    source=default_source,
+                    notes=notes,
+                    imported_by=request.user.username,
+                )
+                if obj.patrimonio:
+                    by_patrimonio[obj.patrimonio.upper()] = obj
+                if obj.mac_address:
+                    by_mac[obj.mac_address] = obj
+                by_ip_name[(obj.ip_address, obj.name.upper())] = obj
+                created_cnt += 1
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.BULK_ACTION,
+            message=(
+                f"{request.user.username} importou {created_cnt} novos e atualizou {updated_cnt} ativos "
+                f"no inventário de {site.client.name}/{site.name} ({default_source})"
+            ),
+            after_value={
+                "site_id": site.pk,
+                "site_name": site.name,
+                "created": created_cnt,
+                "updated": updated_cnt,
+                "skipped_agents": skipped_agent_cnt,
+                "source": default_source,
+            },
+        )
+
+        return Response(
+            {
+                "status": "ok",
+                "created": created_cnt,
+                "updated": updated_cnt,
+                "skipped_agents": skipped_agent_cnt,
+                "skipped_empty": skipped_empty_cnt,
+                "site_name": f"{site.client.name} / {site.name}",
+            }
+        )
+
+
+class AgentInventoryTagView(APIView):
+    """
+    GET|POST /agents/<agent:agent_id>/inventory-tag/
+    Quick inline Patrimonio & Location tag editor for monitored Agents in SummaryTab.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, agent_id: str) -> Response:
+        if not (_has_perm(request, "can_list_agents") and _has_perm_on_agent(request.user, agent_id)):
+            return Response({"error": "Permissão insuficiente."}, status=status.HTTP_403_FORBIDDEN)
+        ag = get_object_or_404(Agent.objects.select_related("site__client"), agent_id=agent_id)
+        tag = InventoryAsset.objects.filter(agent=ag).first()
+        return Response(_serialize_agent_inventory_row(ag, tag))
+
+    def post(self, request, agent_id: str) -> Response:
+        if not (_has_perm(request, "can_edit_agent") and _has_perm_on_agent(request.user, agent_id)):
+            return Response({"error": "Permissão insuficiente para editar patrimônio."}, status=status.HTTP_403_FORBIDDEN)
+        ag = get_object_or_404(Agent.objects.select_related("site__client"), agent_id=agent_id)
+        data = request.data if isinstance(request.data, dict) else {}
+        tag, _created = InventoryAsset.objects.get_or_create(
+            agent=ag,
+            defaults={
+                "site": ag.site,
+                "category": "ativo_monitorado",
+                "name": ag.hostname,
+                "source": "agent_sync",
+                "imported_by": request.user.username,
+            },
+        )
+        tag.site = ag.site
+        tag.name = ag.hostname
+        _apply_inventory_fields(tag, data)
+        if not tag.category or tag.category not in INVENTORY_VALID_CATEGORIES:
+            tag.category = "ativo_monitorado"
+        tag.source = "agent_sync"
+        tag.imported_by = request.user.username
+        tag.save()
+
+        AuditLog.objects.create(
+            username=request.user.username,
+            agent=ag.hostname,
+            agent_id=ag.agent_id,
+            object_type=AuditObjType.AGENT,
+            action=AuditActionType.MODIFY,
+            message=f"{request.user.username} definiu patrimônio='{tag.patrimonio}' em {ag.hostname}",
+            after_value={
+                "patrimonio": tag.patrimonio,
+                "sector_location": tag.sector_location,
+                "responsible": tag.responsible,
+            },
+        )
+        return Response(_serialize_agent_inventory_row(ag, tag))
+
 

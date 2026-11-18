@@ -27,7 +27,7 @@ class PermissionQuerySet(models.QuerySet):
         model_name = self.model._meta.label.split(".")[1]
 
         # checks which sites and clients the user has access to and filters agents
-        if model_name in ("Agent", "Deployment"):
+        if model_name in ("Agent", "Deployment", "InventoryAsset"):
             if can_view_clients:
                 clients_queryset = models.Q(site__client__in=can_view_clients)
 

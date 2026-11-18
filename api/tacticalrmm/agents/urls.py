@@ -39,6 +39,26 @@ urlpatterns = [
         name="fleet_ad_publish_gpo",
     ),
     path(
+        "inventory-assets/",
+        views_enhanced.FleetInventoryAssetsView.as_view(),
+        name="fleet_inventory_assets",
+    ),
+    path(
+        "inventory-assets/import/",
+        views_enhanced.FleetInventoryAssetImportView.as_view(),
+        name="fleet_inventory_assets_import",
+    ),
+    path(
+        "inventory-assets/<int:pk>/",
+        views_enhanced.FleetInventoryAssetDetailView.as_view(),
+        name="fleet_inventory_asset_detail",
+    ),
+    path(
+        "<agent:agent_id>/inventory-tag/",
+        views_enhanced.AgentInventoryTagView.as_view(),
+        name="agent_inventory_tag",
+    ),
+    path(
         "<agent:agent_id>/telemetry/",
         views_enhanced.AgentLiveTelemetryView.as_view(),
         name="agent_live_telemetry",

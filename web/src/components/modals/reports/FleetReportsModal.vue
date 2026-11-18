@@ -209,7 +209,7 @@
 <script>
 import { ref, computed, onMounted } from "vue";
 import axios from "axios";
-import { fetchFleetExecutiveSummary, fleetDomainMap } from "@/api/enhanced";
+import { fetchFleetExecutiveSummary, fleetDomainMap, fetchInventoryAssets } from "@/api/enhanced";
 import { notifySuccess, notifyError } from "@/utils/notify";
 
 export default {
@@ -247,9 +247,11 @@ export default {
     ];
 
     const columns = [
+      { name: "patrimonio", label: "Patrimônio", field: "patrimonio", sortable: true, align: "left" },
       { name: "hostname", label: "Computador (Hostname)", field: "hostname", sortable: true, align: "left" },
       { name: "client_name", label: "Cliente", field: "client_name", sortable: true, align: "left" },
       { name: "site_name", label: "Unidade / Site", field: "site_name", sortable: true, align: "left" },
+      { name: "sector_location", label: "Setor / Local", field: "sector_location", sortable: true, align: "left" },
       { name: "status", label: "Status", field: "status", sortable: true, align: "left" },
       { name: "logged_username", label: "Usuário Logado", field: "logged_username", sortable: true, align: "left" },
       { name: "ad_status", label: "Active Directory / Domínio", field: "domain_name", sortable: true, align: "left" },
@@ -268,16 +270,31 @@ export default {
       loading.value = true;
       try {
         await fetchFleetExecutiveSummary().catch(() => {});
-        const { data } = await axios.get("/agents/");
+        const [agentsRes, invRes] = await Promise.all([
+          axios.get("/agents/"),
+          fetchInventoryAssets().catch(() => null),
+        ]);
+        const invByAgent = {};
+        if (invRes && Array.isArray(invRes.items)) {
+          for (const item of invRes.items) {
+            if (item.agent_id) {
+              invByAgent[item.agent_id] = item;
+            }
+          }
+        }
+        const data = agentsRes.data;
         const domainMap = fleetDomainMap.value || {};
         agents.value = (Array.isArray(data) ? data : []).map((a) => {
           const dInfo = domainMap[a.agent_id] || null;
           const partOfDomain = dInfo ? Boolean(dInfo.part_of_domain) : true;
           const domainName = dInfo?.domain || (partOfDomain ? "Domínio" : "WORKGROUP");
+          const inv = invByAgent[a.agent_id] || null;
           return {
             ...a,
             part_of_domain: partOfDomain,
             domain_name: domainName,
+            patrimonio: inv?.patrimonio || "",
+            sector_location: inv?.sector_location || "",
           };
         });
       } catch (e) {
@@ -348,6 +365,8 @@ export default {
             row.domain_name,
             row.make_model,
             row.serial_number,
+            row.patrimonio,
+            row.sector_location,
           ]
             .filter(Boolean)
             .join(" ")
@@ -372,6 +391,8 @@ export default {
 
     function exportCSV() {
       const headers = [
+        "Patrimonio",
+        "Setor/Localizacao",
         "Hostname",
         "Cliente",
         "Unidade/Site",
@@ -397,6 +418,8 @@ export default {
       for (const r of filteredRows.value) {
         lines.push(
           [
+            r.patrimonio || "-",
+            r.sector_location || "-",
             r.hostname,
             r.client_name,
             r.site_name,
@@ -433,6 +456,12 @@ export default {
     }
 
     function printReport() {
+      const escHtml = (val) =>
+        String(val ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
       const reportTitle =
         reportTypeOptions.find((o) => o.value === selectedReportType.value)?.label ||
         "Relatório da Frota";
@@ -441,14 +470,15 @@ export default {
         .map(
           (r) => `
           <tr>
-            <td><strong>${r.hostname || ""}</strong></td>
-            <td>${r.client_name || ""} / ${r.site_name || ""}</td>
+            <td>${escHtml(r.patrimonio || "-")}</td>
+            <td><strong>${escHtml(r.hostname || "")}</strong></td>
+            <td>${escHtml(r.client_name || "")} / ${escHtml(r.site_name || "")}${r.sector_location ? ` (${escHtml(r.sector_location)})` : ""}</td>
             <td>${r.status === "online" ? "Online" : r.status === "overdue" ? "Vencido" : "Offline"}</td>
-            <td>${r.logged_username || "-"}</td>
-            <td>${r.part_of_domain ? "No AD (" + (r.domain_name || "") + ")" : "Fora do AD (" + (r.domain_name || "WORKGROUP") + ")"}</td>
-            <td>${r.operating_system || "-"}</td>
-            <td>${r.local_ips || "-"}</td>
-            <td>${r.make_model || "-"}</td>
+            <td>${escHtml(r.logged_username || "-")}</td>
+            <td>${r.part_of_domain ? `No AD (${escHtml(r.domain_name || "")})` : `Fora do AD (${escHtml(r.domain_name || "WORKGROUP")})`}</td>
+            <td>${escHtml(r.operating_system || "-")}</td>
+            <td>${escHtml(r.local_ips || "-")}</td>
+            <td>${escHtml(r.make_model || "-")}</td>
             <td>${r.needs_reboot ? "Sim" : "Não"}</td>
           </tr>`,
         )
@@ -490,6 +520,7 @@ export default {
           <table>
             <thead>
               <tr>
+                <th>Patrimônio</th>
                 <th>Computador</th>
                 <th>Cliente / Unidade</th>
                 <th>Status</th>

@@ -1432,3 +1432,62 @@ class FileTransferSession(models.Model):
 
     def __str__(self) -> str:
         return f"{self.session_id} ({self.operation}/{self.status})"
+
+
+class InventoryAsset(models.Model):
+    CATEGORY_CHOICES = (
+        ("ativo_monitorado", "Ativo Monitorado (Com Agente)"),
+        ("ativo_rede", "Ativo de Rede (Switch / Roteador / AP / Firewall)"),
+        ("passivo_rede", "Passivo de Rede (Patch Panel / Rack / Cabo / Tomada)"),
+        ("estacao_sem_agente", "Computador / Servidor (Sem Agente)"),
+        ("equipamento_medico", "Equipamento Médico / Diagnose"),
+        ("impressora_periferico", "Impressora / Scanner / CFTV / Periférico"),
+    )
+
+    objects = PermissionQuerySet.as_manager()
+
+    site = models.ForeignKey(
+        "clients.Site",
+        related_name="inventory_assets",
+        on_delete=models.CASCADE,
+    )
+    agent = models.OneToOneField(
+        Agent,
+        related_name="inventory_record",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    category = models.CharField(
+        max_length=40,
+        choices=CATEGORY_CHOICES,
+        default="ativo_rede",
+        db_index=True,
+    )
+    asset_subtype = models.CharField(max_length=100, blank=True, default="")
+    patrimonio = models.CharField(
+        max_length=100, blank=True, default="", db_index=True
+    )
+    name = models.CharField(max_length=255, db_index=True)
+    ip_address = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    mac_address = models.CharField(max_length=100, blank=True, default="")
+    manufacturer = models.CharField(max_length=255, blank=True, default="")
+    model_name = models.CharField(max_length=255, blank=True, default="")
+    serial_number = models.CharField(max_length=255, blank=True, default="")
+    operating_system = models.CharField(max_length=255, blank=True, default="")
+    sector_location = models.CharField(max_length=255, blank=True, default="")
+    responsible = models.CharField(max_length=255, blank=True, default="")
+    status = models.CharField(max_length=64, blank=True, default="ativo")
+    source = models.CharField(max_length=64, blank=True, default="manual")
+    notes = models.TextField(blank=True, default="")
+    imported_by = models.CharField(max_length=150, blank=True, default="")
+    extra_data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("site__client__name", "site__name", "name")
+
+    def __str__(self) -> str:
+        pat = f" [Pat: {self.patrimonio}]" if self.patrimonio else ""
+        return f"{self.name}{pat} ({self.category})"

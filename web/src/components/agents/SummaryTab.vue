@@ -156,6 +156,36 @@
             </q-item-section>
             <q-item-section>{{ serial_number }}</q-item-section>
           </q-item>
+          <!-- patrimonio & localizacao -->
+          <q-item>
+            <q-item-section avatar>
+              <q-icon name="qr_code_2" color="teal-5" />
+            </q-item-section>
+            <q-item-section>
+              <div class="row items-center q-gutter-x-xs">
+                <span>
+                  Patrimônio:
+                  <q-badge v-if="inventoryTag && inventoryTag.patrimonio" color="teal-7">
+                    {{ inventoryTag.patrimonio }}
+                  </q-badge>
+                  <span v-else class="text-grey-5">Não definido</span>
+                </span>
+                <span v-if="inventoryTag && inventoryTag.sector_location" class="text-caption text-grey-5">
+                  &bull; Setor: {{ inventoryTag.sector_location }}
+                </span>
+                <q-btn
+                  dense
+                  flat
+                  size="xs"
+                  color="teal-4"
+                  icon="edit"
+                  label="Editar"
+                  no-caps
+                  @click="openPatrimonioDialog"
+                />
+              </div>
+            </q-item-section>
+          </q-item>
           <q-item>
             <q-item-section avatar>
               <q-icon name="fas fa-globe-americas" />
@@ -345,6 +375,62 @@
       </q-card>
     </q-dialog>
 
+    <!-- Modal: Editar Patrimônio & Localização do Agente -->
+    <q-dialog v-model="showPatrimonioDialog" persistent>
+      <q-card style="min-width: 440px">
+        <q-card-section class="row items-center">
+          <q-icon name="qr_code_2" color="teal" size="sm" class="q-mr-sm" />
+          <div class="text-subtitle1 text-weight-bold">
+            Patrimônio &amp; Setor — {{ summary.hostname }}
+          </div>
+          <q-space />
+          <q-btn icon="close" flat round dense v-close-popup />
+        </q-card-section>
+        <q-separator />
+        <q-card-section class="q-gutter-y-sm">
+          <q-input
+            v-model="patrimonioForm.patrimonio"
+            dense
+            outlined
+            autofocus
+            label="Nº do Patrimônio / Tombamento"
+            placeholder="Ex: PAT-001452"
+          />
+          <q-input
+            v-model="patrimonioForm.sector_location"
+            dense
+            outlined
+            label="Setor / Sala / Unidade"
+            placeholder="Ex: Recepção Ceres"
+          />
+          <q-input
+            v-model="patrimonioForm.responsible"
+            dense
+            outlined
+            label="Responsável / Ponto Focal"
+          />
+          <q-input
+            v-model="patrimonioForm.notes"
+            type="textarea"
+            rows="2"
+            dense
+            outlined
+            label="Observações de Inventário"
+          />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat label="Cancelar" v-close-popup />
+          <q-btn
+            color="teal-7"
+            icon="save"
+            label="Salvar Patrimônio"
+            :loading="savingPatrimonio"
+            @click="submitPatrimonio"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <q-inner-loading :showing="loading" color="primary" />
   </div>
 </template>
@@ -367,6 +453,8 @@ import {
   joinAgentToADDomain,
   fetchFleetExecutiveSummary,
   fleetDomainMap,
+  fetchAgentInventoryTag,
+  saveAgentInventoryTag,
 } from "@/api/enhanced";
 import { notifySuccess, notifyError, notifyWarning } from "@/utils/notify";
 import { fetchCustomFields } from "@/api/core";
@@ -396,6 +484,15 @@ export default {
     const rdpConnecting = ref(false);
     const showJoinAdDialog = ref(false);
     const joinAdLoading = ref(false);
+    const inventoryTag = ref(null);
+    const showPatrimonioDialog = ref(false);
+    const savingPatrimonio = ref(false);
+    const patrimonioForm = ref({
+      patrimonio: "",
+      sector_location: "",
+      responsible: "",
+      notes: "",
+    });
     const joinAdForm = ref({
       domain_name: "",
       admin_user: "",
@@ -556,10 +653,40 @@ export default {
       return ret;
     });
 
+    function openPatrimonioDialog() {
+      patrimonioForm.value = {
+        patrimonio: inventoryTag.value?.patrimonio || "",
+        sector_location: inventoryTag.value?.sector_location || "",
+        responsible: inventoryTag.value?.responsible || "",
+        notes: inventoryTag.value?.notes || "",
+      };
+      showPatrimonioDialog.value = true;
+    }
+
+    async function submitPatrimonio() {
+      if (!selectedAgent.value) return;
+      savingPatrimonio.value = true;
+      try {
+        inventoryTag.value = await saveAgentInventoryTag(selectedAgent.value, {
+          patrimonio: patrimonioForm.value.patrimonio.trim(),
+          sector_location: patrimonioForm.value.sector_location.trim(),
+          responsible: patrimonioForm.value.responsible.trim(),
+          notes: patrimonioForm.value.notes.trim(),
+        });
+        notifySuccess("Patrimônio e setor atualizados com sucesso!");
+        showPatrimonioDialog.value = false;
+      } catch (e) {
+        notifyError(e?.response?.data?.error || "Erro ao salvar patrimônio.");
+      } finally {
+        savingPatrimonio.value = false;
+      }
+    }
+
     async function getSummary() {
       loading.value = true;
       summary.value = await fetchAgent(selectedAgent.value);
       customFieldsDefinitions.value = await fetchCustomFields();
+      inventoryTag.value = await fetchAgentInventoryTag(selectedAgent.value).catch(() => null);
       store.commit("setRefreshSummaryTab", false);
       store.commit("setAgentPlatform", summary.value.plat);
       loading.value = false;
@@ -615,6 +742,10 @@ export default {
       joinAdLoading,
       joinAdForm,
       adDomainInfo,
+      inventoryTag,
+      showPatrimonioDialog,
+      savingPatrimonio,
+      patrimonioForm,
 
       // methods
       getSummary,
@@ -625,6 +756,8 @@ export default {
       openAgentWindow,
       connectNativeRDP,
       submitJoinAd,
+      openPatrimonioDialog,
+      submitPatrimonio,
     };
   },
 };

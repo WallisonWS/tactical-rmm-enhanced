@@ -51,6 +51,9 @@
               <q-item clickable v-close-popup @click="showADDirectoryAuditModal = true">
                 <q-item-section>Auditoria AD × Tactical (Computadores Faltantes)</q-item-section>
               </q-item>
+              <q-item clickable v-close-popup @click="showInventoryManagerModal = true">
+                <q-item-section>Inventário, Patrimônio &amp; Ativos/Passivos de Rede</q-item-section>
+              </q-item>
               <q-item clickable v-close-popup @click="showDeployments">
                 <q-item-section>{{ t("filebar.manageDeployments") }}</q-item-section>
               </q-item>
@@ -180,6 +183,16 @@
               <q-item
                 clickable
                 v-close-popup
+                @click="showInventoryManagerModal = true"
+              >
+                <q-item-section side>
+                  <q-icon name="inventory_2" size="xs" color="teal-5" />
+                </q-item-section>
+                <q-item-section>Inventário, Patrimônio &amp; Ativos/Passivos (Com/Sem Agente)</q-item-section>
+              </q-item>
+              <q-item
+                clickable
+                v-close-popup
                 @click="openFleetReports('ad_compliance')"
               >
                 <q-item-section side>
@@ -299,6 +312,10 @@
       <q-dialog v-model="showADDirectoryAuditModal">
         <ADDirectoryAuditModal @close="showADDirectoryAuditModal = false" />
       </q-dialog>
+      <!-- Inventory & Patrimonio Modal -->
+      <q-dialog v-model="showInventoryManagerModal">
+        <InventoryManagerModal @close="showInventoryManagerModal = false" />
+      </q-dialog>
     </q-bar>
   </div>
 </template>
@@ -327,6 +344,7 @@ import PermissionsManager from "@/components/accounts/PermissionsManager.vue";
 import FleetReportsModal from "@/components/modals/reports/FleetReportsModal.vue";
 import FleetServerCLIModal from "@/components/modals/core/FleetServerCLIModal.vue";
 import ADDirectoryAuditModal from "@/components/modals/agents/ADDirectoryAuditModal.vue";
+import InventoryManagerModal from "@/components/modals/agents/InventoryManagerModal.vue";
 import { t } from "@/i18n";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -345,6 +363,7 @@ export default {
     FleetReportsModal,
     FleetServerCLIModal,
     ADDirectoryAuditModal,
+    InventoryManagerModal,
   },
   data() {
     return {
@@ -357,6 +376,7 @@ export default {
       showFleetReportsModal: false,
       showFleetCLIModal: false,
       showADDirectoryAuditModal: false,
+      showInventoryManagerModal: false,
       fleetReportType: "all",
     };
   },
