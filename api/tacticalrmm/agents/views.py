@@ -86,6 +86,7 @@ from tacticalrmm.constants import (
     CustomFieldModel,
     DebugLogType,
     EvtLogNames,
+    GoArch,
     PAAction,
     PAStatus,
 )

@@ -3,7 +3,7 @@ import base64
 import json
 import re
 from contextlib import suppress
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404

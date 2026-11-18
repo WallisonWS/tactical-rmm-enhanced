@@ -709,6 +709,9 @@ fi
 export PATH="/usr/local/go/bin:${PATH}"
 
 sudo mkdir -p /var/www/rmm/dist
+if [ -f /var/www/rmm/dist/env-config.js ]; then
+  cp -a /var/www/rmm/dist/env-config.js /tmp/trmm_env_config_backup.js
+fi
 if [ -d /var/www/rmm/dist/agents ]; then
   rm -rf /tmp/trmm_agents_backup
   cp -a /var/www/rmm/dist/agents /tmp/trmm_agents_backup
@@ -763,7 +766,12 @@ if [ -d /rmm/rmmagent ] && command -v go >/dev/null 2>&1; then
   CGO_ENABLED=0 GOOS=windows GOARCH=386 go build -ldflags="-s -w" -o "/var/www/rmm/dist/agents/tacticalagent-v${AGENT_VER}-windows-386.exe" . || true
 fi
 
-echo "window._env_ = {PROD_URL: \"https://${API}\"}" | sudo tee /var/www/rmm/dist/env-config.js >/dev/null
+if [ -n "$API" ]; then
+  echo "window._env_ = {PROD_URL: \"https://${API}\"}" | sudo tee /var/www/rmm/dist/env-config.js >/dev/null
+elif [ -f /tmp/trmm_env_config_backup.js ]; then
+  sudo cp -a /tmp/trmm_env_config_backup.js /var/www/rmm/dist/env-config.js
+fi
+rm -f /tmp/trmm_env_config_backup.js
 sudo chown ${WEB_USER}:${WEB_GROUP} -R /var/www/rmm/dist
 
 for i in nats nats-api rmm daphne celery celerybeat nginx; do
