@@ -112,4 +112,21 @@ a
 
 .min-width
   min-width: 0px !important
+
+.q-bar
+  height: auto !important
+  min-height: 32px
+  flex-wrap: wrap
+  row-gap: 4px
+  padding-top: 3px
+  padding-bottom: 3px
+
+.q-btn__content
+  flex-wrap: nowrap !important
+  white-space: nowrap !important
+
+.trmm-subtabs
+  .q-tab__content
+    flex-wrap: nowrap !important
+    white-space: nowrap !important
 </style>

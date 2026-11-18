@@ -9,126 +9,157 @@
     />
   </div>
   <div v-else-if="summary" class="q-pa-sm">
-    <q-bar dense style="background-color: transparent">
-      <q-btn
-        dense
-        flat
-        size="md"
-        class="q-mr-sm"
-        icon="refresh"
-        @click="refreshSummary"
-      />
-      <q-icon
-        v-if="summary.status === 'overdue'"
-        name="fas fa-signal"
-        size="1.2em"
-        :color="dash_negative_color"
-        class="q-mr-sm"
+    <div
+      class="row items-center justify-between wrap q-px-xs q-py-xs"
+      style="min-height: 38px; gap: 6px 12px"
+    >
+      <div
+        class="row items-center wrap col-grow"
+        style="min-width: 240px; gap: 4px 8px"
       >
-        <q-tooltip>Agent overdue</q-tooltip>
-      </q-icon>
-      <q-icon
-        v-else-if="summary.status === 'offline'"
-        name="fas fa-signal"
-        size="1.2em"
-        :color="dash_warning_color"
-        class="q-mr-sm"
-      >
-        <q-tooltip>{{ store.getters.formatDate(summary.last_seen) }}</q-tooltip>
-      </q-icon>
-      <q-icon
-        v-else
-        name="fas fa-signal"
-        size="1.2em"
-        :color="dash_positive_color"
-        class="q-mr-sm"
-      >
-        <q-tooltip>{{ store.getters.formatDate(summary.last_seen) }}</q-tooltip>
-      </q-icon>
-      <b>{{ summary.hostname }}</b>
-      <q-badge
-        v-if="summary.client_name"
-        :color="getEntityBadgeColor(summary.client_name)"
-        text-color="white"
-        class="q-ml-sm text-weight-bold"
-      >
-        Empresa: {{ summary.client_name }}
-      </q-badge>
-      <q-badge
-        v-if="summary.site_name"
-        outline
-        :color="getEntityBadgeColor(summary.site_name)"
-        class="q-ml-xs text-weight-bold"
-      >
-        Unidade: {{ summary.site_name }}
-      </q-badge>
-      <span v-if="summary.maintenance_mode">
-        &bull; <q-badge color="green"> Maintenance Mode </q-badge>
-      </span>
-      &bull; {{ summary.operating_system }} &bull; Agent v{{ summary.version }}
-      <q-space />
-      <q-btn
-        dense
-        unelevated
-        color="primary"
-        label="Take Control"
-        icon="computer"
-        size="sm"
-        no-caps
-        class="q-mr-sm q-px-sm"
-        @click="runTakeControl(selectedAgent)"
-      />
-      <q-btn
-        dense
-        flat
-        label="Remote Background"
-        icon="terminal"
-        size="md"
-        no-caps
-        class="q-mr-sm"
-        @click="runRemoteBackground(selectedAgent, summary.plat)"
-      />
-      <q-btn
-        v-if="summary.plat === 'windows'"
-        dense
-        flat
-        label="Conectar RDP (.rdp)"
-        icon="desktop_windows"
-        size="md"
-        no-caps
-        class="q-mr-sm"
-        :loading="rdpConnecting"
-        @click="connectNativeRDP"
-      />
-      <q-btn
-        v-if="summary.plat === 'windows' && !adDomainInfo.inDomain"
-        dense
-        unelevated
-        color="amber-9"
-        label="Ingressar no AD"
-        icon="domain_add"
-        size="sm"
-        no-caps
-        class="q-mr-sm q-px-sm"
-        @click="showJoinAdDialog = true"
-      />
-      <q-btn
-        dense
-        flat
-        label="Popout"
-        icon="open_in_new"
-        size="md"
-        no-caps
-        class="q-mr-sm"
-        @click="openAgentWindow(selectedAgent)"
-      />
-      <q-btn-dropdown dense flat size="md" no-caps label="Actions">
-        <AgentActionMenu :agent="summary" />
-      </q-btn-dropdown>
-    </q-bar>
-    <q-separator class="q-mt-sm" />
-    <div class="row">
-      <div class="col-4">
+        <q-btn
+          dense
+          flat
+          round
+          size="sm"
+          icon="refresh"
+          @click="refreshSummary"
+        />
+        <q-icon
+          v-if="summary.status === 'overdue'"
+          name="fas fa-signal"
+          size="1.1em"
+          :color="dash_negative_color"
+        >
+          <q-tooltip>Agent overdue</q-tooltip>
+        </q-icon>
+        <q-icon
+          v-else-if="summary.status === 'offline'"
+          name="fas fa-signal"
+          size="1.1em"
+          :color="dash_warning_color"
+        >
+          <q-tooltip>{{ store.getters.formatDate(summary.last_seen) }}</q-tooltip>
+        </q-icon>
+        <q-icon
+          v-else
+          name="fas fa-signal"
+          size="1.1em"
+          :color="dash_positive_color"
+        >
+          <q-tooltip>{{ store.getters.formatDate(summary.last_seen) }}</q-tooltip>
+        </q-icon>
+        <b class="text-subtitle2">{{ summary.hostname }}</b>
+        <q-badge
+          v-if="summary.client_name"
+          :color="getEntityBadgeColor(summary.client_name)"
+          text-color="white"
+          class="text-weight-bold"
+        >
+          Empresa: {{ summary.client_name }}
+        </q-badge>
+        <q-badge
+          v-if="summary.site_name"
+          outline
+          :color="getEntityBadgeColor(summary.site_name)"
+          class="text-weight-bold"
+        >
+          Unidade: {{ summary.site_name }}
+        </q-badge>
+        <span v-if="summary.maintenance_mode">
+          &bull; <q-badge color="green"> Maintenance Mode </q-badge>
+        </span>
+        <span class="text-caption text-grey-4">
+          &bull; {{ summary.operating_system }}
+          <template v-if="summary.version">
+            &bull; Agent v{{ summary.version }}
+          </template>
+        </span>
+      </div>
+
+      <div class="row items-center wrap" style="gap: 6px">
+        <q-btn
+          dense
+          unelevated
+          no-wrap
+          color="primary"
+          label="Take Control"
+          icon="computer"
+          size="sm"
+          no-caps
+          class="q-px-sm"
+          style="white-space: nowrap"
+          @click="runTakeControl(selectedAgent)"
+        />
+        <q-btn
+          dense
+          flat
+          no-wrap
+          label="Remote Background"
+          icon="terminal"
+          size="sm"
+          no-caps
+          class="q-px-sm"
+          style="white-space: nowrap"
+          @click="runRemoteBackground(selectedAgent, summary.plat)"
+        />
+        <q-btn
+          v-if="summary.plat === 'windows'"
+          dense
+          flat
+          no-wrap
+          label="Conectar RDP (.rdp)"
+          icon="desktop_windows"
+          size="sm"
+          no-caps
+          class="q-px-sm"
+          style="white-space: nowrap"
+          :loading="rdpConnecting"
+          @click="connectNativeRDP"
+        />
+        <q-btn
+          v-if="summary.plat === 'windows' && !adDomainInfo.inDomain"
+          dense
+          unelevated
+          no-wrap
+          color="amber-9"
+          label="Ingressar no AD"
+          icon="domain_add"
+          size="sm"
+          no-caps
+          class="q-px-sm"
+          style="white-space: nowrap"
+          @click="showJoinAdDialog = true"
+        />
+        <q-btn
+          dense
+          flat
+          no-wrap
+          label="Popout"
+          icon="open_in_new"
+          size="sm"
+          no-caps
+          class="q-px-sm"
+          style="white-space: nowrap"
+          @click="openAgentWindow(selectedAgent)"
+        />
+        <q-btn-dropdown
+          dense
+          flat
+          no-wrap
+          size="sm"
+          no-caps
+          label="Actions"
+          class="q-px-xs"
+          style="white-space: nowrap"
+        >
+          <AgentActionMenu :agent="summary" />
+        </q-btn-dropdown>
+      </div>
+    </div>
+    <q-separator class="q-my-xs" />
+    <div class="row q-col-gutter-md">
+      <div class="col-12 col-md-5">
         <!-- left -->
         <span class="text-subtitle2 text-bold">Hardware Details</span>
         <q-list dense>
@@ -136,19 +167,25 @@
             <q-item-section avatar>
               <q-icon name="fas fa-desktop" />
             </q-item-section>
-            <q-item-section>{{ summary.make_model }}</q-item-section>
+            <q-item-section>{{ displayMakeModel }}</q-item-section>
           </q-item>
           <q-item>
             <q-item-section avatar>
               <q-icon name="fas fa-microchip" />
             </q-item-section>
-            <q-item-section>{{ cpu }}</q-item-section>
+            <q-item-section>{{ displayCpuOrFunction }}</q-item-section>
           </q-item>
-          <q-item>
+          <q-item v-if="summary.total_ram">
             <q-item-section avatar>
               <q-icon name="fas fa-memory" />
             </q-item-section>
             <q-item-section>{{ summary.total_ram }} GB RAM</q-item-section>
+          </q-item>
+          <q-item v-else-if="inventoryTag && inventoryTag.asset_subtype">
+            <q-item-section avatar>
+              <q-icon name="category" />
+            </q-item-section>
+            <q-item-section>Tipo: {{ inventoryTag.asset_subtype }}</q-item-section>
           </q-item>
 
           <!-- physical disks -->
@@ -159,7 +196,7 @@
             <q-item-section>{{ disk }}</q-item-section>
           </q-item>
           <!-- graphics -->
-          <q-item>
+          <q-item v-if="showGraphicsRow">
             <q-item-section avatar>
               <q-icon name="fas fa-tv" />
             </q-item-section>
@@ -242,7 +279,7 @@
           </q-item>
         </q-list>
       </div>
-      <div class="col-2">
+      <div class="col-12 col-md-3">
         <span class="text-subtitle2 text-bold">Checks Status</span>
         <br />
         <div v-if="summary.checks.total !== 0">
@@ -314,9 +351,8 @@
           </q-item>
         </q-list>
       </div>
-      <div class="col-1"></div>
       <!-- right -->
-      <div class="col-3">
+      <div class="col-12 col-md-4">
         <span class="text-subtitle2 text-bold">Disks</span>
         <div v-for="disk in disks" :key="disk.device">
           <span>{{ disk.device }} ({{ disk.fstype }})</span>
@@ -331,7 +367,6 @@
           <q-separator />
         </div>
       </div>
-      <div class="col-2"></div>
     </div>
 
     <!-- Modal: Ingressar Computador no Domínio Active Directory -->
@@ -618,7 +653,56 @@ export default {
       if (summary.value.cpu_model?.length > 1) {
         return `${summary.value.cpu_model.length}x ${summary.value.cpu_model[0]}`;
       }
-      return summary.value.cpu_model[0];
+      return summary.value.cpu_model?.[0] || "unknown cpu model";
+    });
+
+    const displayMakeModel = computed(() => {
+      const tagManuf = (inventoryTag.value?.manufacturer || "").trim();
+      const tagModel = (inventoryTag.value?.model_name || "").trim();
+      if (tagManuf || tagModel) {
+        if (tagModel && tagManuf && tagModel.toLowerCase().startsWith(tagManuf.toLowerCase())) {
+          return tagModel;
+        }
+        return `${tagManuf} ${tagModel}`.trim();
+      }
+      const wmiManuf = (summary.value?.wmi_detail?.cs_manuf || "").trim();
+      const wmiModel = (summary.value?.wmi_detail?.cs_model || "").trim();
+      if (wmiManuf || wmiModel) {
+        if (wmiModel && wmiManuf && wmiModel.toLowerCase().startsWith(wmiManuf.toLowerCase())) {
+          return wmiModel;
+        }
+        return `${wmiManuf} ${wmiModel}`.trim();
+      }
+      return summary.value?.make_model || "";
+    });
+
+    const displayCpuOrFunction = computed(() => {
+      const c = (cpu.value || "").trim();
+      if (c && c.toLowerCase() !== "unknown cpu model") {
+        return c;
+      }
+      const exactFn = (summary.value?.wmi_detail?.exact_function || "").trim();
+      if (exactFn) {
+        return `Função: ${exactFn}`;
+      }
+      const notes = (inventoryTag.value?.notes || "").trim();
+      if (notes) {
+        return notes;
+      }
+      return "Ativo Descoberto na Rede (Inventário)";
+    });
+
+    const showGraphicsRow = computed(() => {
+      const g = (summary.value?.graphics || "").trim();
+      if (!g) return false;
+      const lower = g.toLowerCase();
+      if (
+        lower.includes("requires agent") ||
+        lower.includes("error getting graphics")
+      ) {
+        return false;
+      }
+      return true;
     });
 
     function diskBarColor(percent) {
@@ -753,6 +837,9 @@ export default {
       dash_negative_color,
       serial_number,
       cpu,
+      displayMakeModel,
+      displayCpuOrFunction,
+      showGraphicsRow,
       store,
       rdpConnecting,
       showJoinAdDialog,
