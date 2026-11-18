@@ -43,17 +43,18 @@
               @update:selected="$store.dispatch('refreshDashboard')"
             >
               <template v-slot:default-header="props">
-                <div class="row items-center">
+                <div class="row items-center no-wrap full-width">
                   <q-icon
                     :name="props.node.icon"
                     :color="props.node.color"
-                    class="q-mr-sm"
+                    size="16px"
+                    class="q-mr-xs"
                   />
-                  <div>
+                  <div class="ellipsis text-weight-medium">
                     {{ props.node.label }}
                     <q-tooltip :delay="600">
                       ID: {{ props.node.id }}<br />
-                      Agent Count:
+                      Equipamentos:
                       {{
                         props.node.children
                           ? props.node.client.agent_count
@@ -61,6 +62,20 @@
                       }}
                     </q-tooltip>
                   </div>
+                  <q-space />
+                  <q-badge
+                    rounded
+                    :color="$q.dark.isActive ? 'blue-grey-9' : 'blue-grey-2'"
+                    :text-color="$q.dark.isActive ? 'grey-3' : 'blue-grey-9'"
+                    class="q-ml-xs text-weight-bold"
+                    style="font-size: 10px; padding: 2px 6px"
+                  >
+                    {{
+                      props.node.children
+                        ? props.node.client.agent_count
+                        : props.node.site.agent_count
+                    }}
+                  </q-badge>
 
                   <q-menu context-menu>
                     <q-list dense style="min-width: 200px">
@@ -283,170 +298,208 @@
                 />
               </q-tabs>
 
-              <!-- 1-Click Quick Category Chips -->
-              <div class="row items-center wrap q-gutter-xs" data-no-translate="true">
-                <q-chip
-                  clickable
+              <!-- 1-Click Quick Filter Pills & Enterprise Actions -->
+              <div class="row items-center wrap trmm-toolbar-group" data-no-translate="true">
+                <!-- Filter Pills -->
+                <q-btn
                   dense
-                  size="12px"
-                  :color="!hasAnyTokenFilter ? 'primary' : 'grey-8'"
-                  text-color="white"
+                  no-caps
+                  unelevated
+                  class="trmm-filter-pill"
+                  :class="{ 'trmm-filter-pill--active-primary': !hasAnyTokenFilter }"
                   @click="clearFilter"
                 >
-                  {{ t("dash.quickAll") }} ({{ filteredAgents.length }})
-                </q-chip>
-                <q-chip
-                  clickable
+                  <q-icon name="grid_view" size="15px" class="q-mr-xs" :color="!hasAnyTokenFilter ? 'white' : 'primary'" />
+                  <span>{{ t("dash.quickAll") }}</span>
+                  <span class="trmm-pill-count">{{ filteredAgents.length }}</span>
+                </q-btn>
+
+                <q-btn
                   dense
-                  size="12px"
-                  :color="hasToken('is:online') ? 'positive' : 'grey-8'"
-                  text-color="white"
-                  icon="check_circle"
+                  no-caps
+                  unelevated
+                  class="trmm-filter-pill"
+                  :class="{ 'trmm-filter-pill--active-positive': hasToken('is:online') }"
                   @click="setQuickFilter('is:online')"
                 >
-                  {{ t("dash.quickOnline") }} ({{ onlineCount }})
+                  <span class="trmm-status-dot trmm-status-dot--online q-mr-xs" />
+                  <span>{{ t("dash.quickOnline") }}</span>
+                  <span class="trmm-pill-count">{{ onlineCount }}</span>
                   <q-tooltip>Máquinas conectadas e respondendo em tempo real</q-tooltip>
-                </q-chip>
-                <q-chip
+                </q-btn>
+
+                <q-btn
                   v-if="offlineOnlyCount > 0"
-                  clickable
                   dense
-                  size="12px"
-                  :color="hasToken('is:offline') ? 'warning' : 'grey-8'"
-                  :text-color="hasToken('is:offline') ? 'black' : 'white'"
-                  icon="power_off"
+                  no-caps
+                  unelevated
+                  class="trmm-filter-pill"
+                  :class="{ 'trmm-filter-pill--active-warning': hasToken('is:offline') }"
                   @click="setQuickFilter('is:offline')"
                 >
-                  {{ t("dash.quickOffline") }} ({{ offlineOnlyCount }})
-                </q-chip>
-                <q-chip
+                  <q-icon name="cloud_off" size="15px" class="q-mr-xs" :color="hasToken('is:offline') ? 'black' : 'amber-5'" />
+                  <span>{{ t("dash.quickOffline") }}</span>
+                  <span class="trmm-pill-count">{{ offlineOnlyCount }}</span>
+                </q-btn>
+
+                <q-btn
                   v-if="overdueOnlyCount > 0"
-                  clickable
                   dense
-                  size="12px"
-                  :color="hasToken('is:overdue') ? 'deep-orange' : 'grey-8'"
-                  text-color="white"
-                  icon="schedule"
+                  no-caps
+                  unelevated
+                  class="trmm-filter-pill"
+                  :class="{ 'trmm-filter-pill--active-negative': hasToken('is:overdue') }"
                   @click="setQuickFilter('is:overdue')"
                 >
-                  {{ t("dash.overdue") }} ({{ overdueOnlyCount }})
+                  <q-icon name="schedule" size="15px" class="q-mr-xs" :color="hasToken('is:overdue') ? 'white' : 'deep-orange-4'" />
+                  <span>{{ t("dash.overdue") }}</span>
+                  <span class="trmm-pill-count">{{ overdueOnlyCount }}</span>
                   <q-tooltip>Máquinas que passaram do tempo de check-in (Overdue)</q-tooltip>
-                </q-chip>
-                <q-chip
+                </q-btn>
+
+                <q-btn
                   v-if="offlineOrOverdueCount > 0"
-                  clickable
                   dense
-                  size="12px"
-                  :color="hasToken('is:disconnected') ? 'brown-7' : 'grey-8'"
-                  text-color="white"
-                  icon="cloud_off"
+                  no-caps
+                  unelevated
+                  class="trmm-filter-pill"
+                  :class="{ 'trmm-filter-pill--active-negative': hasToken('is:disconnected') }"
                   @click="setQuickFilter('is:disconnected')"
                 >
-                  Desconectados ({{ offlineOrOverdueCount }})
+                  <q-icon name="wifi_off" size="15px" class="q-mr-xs" :color="hasToken('is:disconnected') ? 'white' : 'orange-4'" />
+                  <span>Desconectados</span>
+                  <span class="trmm-pill-count">{{ offlineOrOverdueCount }}</span>
                   <q-tooltip>Mostra todos Offline ({{ offlineOnlyCount }}) + Vencidos ({{ overdueOnlyCount }}) juntos</q-tooltip>
-                </q-chip>
-                <q-chip
+                </q-btn>
+
+                <q-btn
                   v-if="failingChecksCount > 0"
-                  clickable
                   dense
-                  size="12px"
-                  :color="hasToken('is:checksfailing') ? 'negative' : 'grey-8'"
-                  text-color="white"
-                  icon="warning"
+                  no-caps
+                  unelevated
+                  class="trmm-filter-pill"
+                  :class="{ 'trmm-filter-pill--active-negative': hasToken('is:checksfailing') }"
                   @click="setQuickFilter('is:checksfailing')"
                 >
-                  {{ t("dash.quickFailing") }} ({{ failingChecksCount }})
-                </q-chip>
-                <q-chip
+                  <q-icon name="error_outline" size="15px" class="q-mr-xs" :color="hasToken('is:checksfailing') ? 'white' : 'red-4'" />
+                  <span>{{ t("dash.quickFailing") }}</span>
+                  <span class="trmm-pill-count">{{ failingChecksCount }}</span>
+                </q-btn>
+
+                <q-btn
                   v-if="rebootNeededCount > 0"
-                  clickable
                   dense
-                  size="12px"
-                  :color="hasToken('is:rebootneeded') ? 'orange-9' : 'grey-8'"
-                  text-color="white"
-                  icon="restart_alt"
+                  no-caps
+                  unelevated
+                  class="trmm-filter-pill"
+                  :class="{ 'trmm-filter-pill--active-warning': hasToken('is:rebootneeded') }"
                   @click="setQuickFilter('is:rebootneeded')"
                 >
-                  {{ t("dash.quickReboot") }} ({{ rebootNeededCount }})
-                </q-chip>
-                <q-chip
+                  <q-icon name="restart_alt" size="15px" class="q-mr-xs" :color="hasToken('is:rebootneeded') ? 'black' : 'orange-4'" />
+                  <span>{{ t("dash.quickReboot") }}</span>
+                  <span class="trmm-pill-count">{{ rebootNeededCount }}</span>
+                </q-btn>
+
+                <q-btn
                   v-if="outsideAdCount > 0"
-                  clickable
                   dense
-                  size="12px"
-                  :color="hasToken('is:outsidead') ? 'amber-9' : 'grey-8'"
-                  text-color="white"
-                  icon="domain_disabled"
+                  no-caps
+                  unelevated
+                  class="trmm-filter-pill"
+                  :class="{ 'trmm-filter-pill--active-amber': hasToken('is:outsidead') }"
                   @click="setQuickFilter('is:outsidead')"
                 >
-                  Fora do AD ({{ outsideAdCount }})
-                </q-chip>
-                <q-chip
+                  <q-icon name="domain_disabled" size="15px" class="q-mr-xs" :color="hasToken('is:outsidead') ? 'white' : 'amber-5'" />
+                  <span>Fora do AD</span>
+                  <span class="trmm-pill-count">{{ outsideAdCount }}</span>
+                </q-btn>
+
+                <q-btn
                   v-if="linuxCount > 0"
-                  clickable
                   dense
-                  size="12px"
-                  :color="hasToken('is:linux') ? 'light-blue-8' : 'grey-8'"
-                  text-color="white"
-                  icon="mdi-linux"
+                  no-caps
+                  unelevated
+                  class="trmm-filter-pill"
+                  :class="{ 'trmm-filter-pill--active-primary': hasToken('is:linux') }"
                   @click="setQuickFilter('is:linux')"
                 >
-                  Linux ({{ linuxCount }})
-                </q-chip>
-                <q-chip
+                  <q-icon name="terminal" size="15px" class="q-mr-xs" :color="hasToken('is:linux') ? 'white' : 'light-blue-4'" />
+                  <span>Linux</span>
+                  <span class="trmm-pill-count">{{ linuxCount }}</span>
+                </q-btn>
+
+                <q-btn
                   v-if="darwinCount > 0"
-                  clickable
                   dense
-                  size="12px"
-                  :color="hasToken('is:darwin') ? 'blue-grey-6' : 'grey-8'"
-                  text-color="white"
-                  icon="mdi-apple"
+                  no-caps
+                  unelevated
+                  class="trmm-filter-pill"
+                  :class="{ 'trmm-filter-pill--active-primary': hasToken('is:darwin') }"
                   @click="setQuickFilter('is:darwin')"
                 >
-                  macOS ({{ darwinCount }})
-                </q-chip>
-                <q-chip
-                  clickable
+                  <q-icon name="laptop_mac" size="15px" class="q-mr-xs" :color="hasToken('is:darwin') ? 'white' : 'blue-grey-3'" />
+                  <span>macOS</span>
+                  <span class="trmm-pill-count">{{ darwinCount }}</span>
+                </q-btn>
+
+                <q-separator vertical inset class="q-mx-xs" style="height: 20px; align-self: center" />
+
+                <!-- Enterprise Action Buttons -->
+                <q-btn
                   dense
-                  size="12px"
-                  color="teal-7"
-                  text-color="white"
-                  icon="sync"
+                  no-caps
+                  unelevated
+                  class="trmm-action-btn trmm-action-btn--sync"
                   @click="runFullFleetSync"
                 >
-                  Sincronizar 100%
+                  <q-icon name="autorenew" size="16px" class="q-mr-xs" />
+                  <span>Sincronizar</span>
                   <q-tooltip>
-                    Verifica todos os agentes offline/vencidos via NATS em tempo real, remove duplicatas de máquinas formatadas e atualiza todos os contadores
+                    Verifica todos os agentes offline/vencidos via NATS em tempo real, remove duplicatas e atualiza todos os contadores
                   </q-tooltip>
-                </q-chip>
-                <q-chip
-                  clickable
+                </q-btn>
+
+                <q-btn
                   dense
-                  size="12px"
-                  color="indigo-7"
-                  text-color="white"
-                  icon="account_tree"
+                  no-caps
+                  unelevated
+                  class="trmm-action-btn trmm-action-btn--ad"
                   @click="showADDirectoryAuditModal = true"
                 >
-                  Auditoria AD
+                  <q-icon name="hub" size="16px" class="q-mr-xs" />
+                  <span>Auditoria AD</span>
                   <q-tooltip>
-                    Consulta o Active Directory (pastas CRD, Computadores, Computers, sub-OUs e raiz do domínio) e mostra computadores faltantes no Tactical RMM com Push Remoto em 1 clique
+                    Consulta o Active Directory e mostra computadores faltantes no Tactical RMM com Push Remoto em 1 clique
                   </q-tooltip>
-                </q-chip>
-                <q-chip
-                  clickable
+                </q-btn>
+
+                <q-btn
                   dense
-                  size="12px"
-                  color="teal-8"
-                  text-color="white"
-                  icon="inventory_2"
+                  no-caps
+                  unelevated
+                  class="trmm-action-btn trmm-action-btn--inventory"
                   @click="showInventoryManagerModal = true"
                 >
-                  Inventário &amp; Patrimônio
+                  <q-icon name="inventory_2" size="16px" class="q-mr-xs" />
+                  <span>Inventário &amp; Patrimônio</span>
                   <q-tooltip>
-                    Gerencia Nº de Patrimônio das máquinas, inclui Ativos e Passivos de Rede sem agente e importa tabelas CSV (Advanced IP Scanner)
+                    Gerencia Nº de Patrimônio, Ativos e Passivos de Rede, Equipamentos Clínicos, importação CSV e exportação Excel/PDF por unidade
                   </q-tooltip>
-                </q-chip>
+                </q-btn>
+
+                <q-btn
+                  dense
+                  no-caps
+                  unelevated
+                  class="trmm-action-btn trmm-action-btn--reports"
+                  @click="showFleetReportsModal = true"
+                >
+                  <q-icon name="assessment" size="16px" class="q-mr-xs" />
+                  <span>Relatórios</span>
+                  <q-tooltip>
+                    Abre a Central de Relatórios Corporativos (AD, Patches, Offline e Exportação Excel/PDF)
+                  </q-tooltip>
+                </q-btn>
               </div>
 
               <q-space />
@@ -733,6 +786,19 @@
         @close="showInventoryManagerModal = false"
       />
     </q-dialog>
+
+    <!-- Fleet Reports Modal -->
+    <q-dialog
+      v-model="showFleetReportsModal"
+      maximized
+      transition-show="slide-up"
+      transition-hide="slide-down"
+    >
+      <FleetReportsModal
+        initialReportType="all"
+        @close="showFleetReportsModal = false"
+      />
+    </q-dialog>
   </q-page>
 </template>
 
@@ -751,6 +817,7 @@ import DeleteClient from "@/components/clients/DeleteClient.vue";
 import InstallAgent from "@/components/modals/agents/InstallAgent.vue";
 import ADDirectoryAuditModal from "@/components/modals/agents/ADDirectoryAuditModal.vue";
 import InventoryManagerModal from "@/components/modals/agents/InventoryManagerModal.vue";
+import FleetReportsModal from "@/components/modals/reports/FleetReportsModal.vue";
 import AlertTemplateAdd from "@/components/modals/alerts/AlertTemplateAdd.vue";
 import IntegrationsContextMenu from "@/components/ui/IntegrationsContextMenu.vue";
 
@@ -769,6 +836,7 @@ export default {
     InstallAgent,
     ADDirectoryAuditModal,
     InventoryManagerModal,
+    FleetReportsModal,
     IntegrationsContextMenu,
   },
   // allow child components to refresh table
@@ -787,6 +855,7 @@ export default {
       showInstallAgentModal: false,
       showADDirectoryAuditModal: false,
       showInventoryManagerModal: false,
+      showFleetReportsModal: false,
       sitePk: null,
       savedSidebarWidth: 15,
       innerModel: (this.$q.screen.height - 82) / 2,
@@ -1419,5 +1488,148 @@ export default {
 .my-menu-link {
   color: white;
   background: lightgray;
+}
+
+.trmm-toolbar-group {
+  gap: 6px;
+}
+
+.trmm-filter-pill {
+  border-radius: 7px !important;
+  padding: 2px 9px !important;
+  min-height: 28px !important;
+  font-size: 12px !important;
+  font-weight: 500;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(148, 163, 184, 0.1);
+  transition: all 0.15s ease;
+}
+
+.trmm-filter-pill:hover {
+  border-color: rgba(148, 163, 184, 0.5);
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.trmm-filter-pill--active-primary {
+  background: var(--q-primary, #1976d2) !important;
+  border-color: var(--q-primary, #1976d2) !important;
+  color: #ffffff !important;
+  box-shadow: 0 1px 6px rgba(25, 118, 210, 0.35);
+}
+
+.trmm-filter-pill--active-positive {
+  background: #16a34a !important;
+  border-color: #16a34a !important;
+  color: #ffffff !important;
+  box-shadow: 0 1px 6px rgba(22, 163, 74, 0.35);
+}
+
+.trmm-filter-pill--active-warning {
+  background: #f59e0b !important;
+  border-color: #f59e0b !important;
+  color: #111827 !important;
+}
+
+.trmm-filter-pill--active-amber {
+  background: #d97706 !important;
+  border-color: #d97706 !important;
+  color: #ffffff !important;
+}
+
+.trmm-filter-pill--active-negative {
+  background: #dc2626 !important;
+  border-color: #dc2626 !important;
+  color: #ffffff !important;
+}
+
+.trmm-pill-count {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 17px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+body.body--light .trmm-filter-pill:not([class*="trmm-filter-pill--active"]) .trmm-pill-count {
+  background: rgba(15, 23, 42, 0.1);
+  color: #0f172a;
+}
+
+.trmm-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.trmm-status-dot--online {
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.28);
+}
+
+.trmm-filter-pill--active-positive .trmm-status-dot--online {
+  background: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+}
+
+.trmm-action-btn {
+  border-radius: 7px !important;
+  padding: 2px 11px !important;
+  min-height: 28px !important;
+  font-size: 12px !important;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.trmm-action-btn--sync {
+  background: rgba(13, 148, 136, 0.18) !important;
+  border: 1px solid rgba(45, 212, 191, 0.42);
+  color: #2dd4bf !important;
+}
+.trmm-action-btn--sync:hover {
+  background: rgba(13, 148, 136, 0.32) !important;
+}
+body.body--light .trmm-action-btn--sync {
+  color: #0f766e !important;
+  border-color: rgba(15, 118, 110, 0.4);
+}
+
+.trmm-action-btn--ad {
+  background: rgba(99, 102, 241, 0.18) !important;
+  border: 1px solid rgba(129, 140, 248, 0.42);
+  color: #a5b4fc !important;
+}
+.trmm-action-btn--ad:hover {
+  background: rgba(99, 102, 241, 0.32) !important;
+}
+body.body--light .trmm-action-btn--ad {
+  color: #4338ca !important;
+  border-color: rgba(67, 56, 202, 0.4);
+}
+
+.trmm-action-btn--inventory {
+  background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%) !important;
+  border: 1px solid rgba(45, 212, 191, 0.45);
+  color: #ffffff !important;
+  box-shadow: 0 1px 6px rgba(13, 148, 136, 0.35);
+}
+.trmm-action-btn--inventory:hover {
+  filter: brightness(1.1);
+}
+
+.trmm-action-btn--reports {
+  background: rgba(2, 132, 199, 0.18) !important;
+  border: 1px solid rgba(56, 189, 248, 0.42);
+  color: #38bdf8 !important;
+}
+.trmm-action-btn--reports:hover {
+  background: rgba(2, 132, 199, 0.32) !important;
+}
+body.body--light .trmm-action-btn--reports {
+  color: #0369a1 !important;
+  border-color: rgba(3, 105, 161, 0.4);
 }
 </style>

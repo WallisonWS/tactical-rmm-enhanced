@@ -68,96 +68,108 @@
     </q-bar>
 
     <!-- KPI Cards (Dynamic for Selected Company / Unit) -->
-    <q-card-section class="q-py-xs q-px-md bg-grey-10 text-white" style="flex: 0 0 auto">
+    <q-card-section
+      class="q-py-xs q-px-md"
+      :class="$q.dark.isActive ? 'bg-grey-10 text-white' : 'bg-grey-2 text-grey-9'"
+      style="flex: 0 0 auto"
+    >
       <div class="row q-col-gutter-xs">
         <div class="col-6 col-sm-3 col-md">
           <q-card
             flat
             bordered
-            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
+            class="text-center q-pa-xs cursor-pointer"
+            :class="$q.dark.isActive ? 'bg-blue-grey-10' : 'bg-white'"
             @click="resetQuickFilters"
           >
-            <div class="text-caption text-grey-4" style="font-size: 11px">Total na Seleção</div>
-            <div class="text-h6 text-weight-bold text-white">{{ scopedSummary.total }}</div>
+            <div class="text-caption" :class="$q.dark.isActive ? 'text-grey-4' : 'text-grey-7'" style="font-size: 11px">Total na Seleção</div>
+            <div class="text-h6 text-weight-bold" :class="$q.dark.isActive ? 'text-white' : 'text-grey-10'">{{ scopedSummary.total }}</div>
           </q-card>
         </div>
         <div class="col-6 col-sm-3 col-md">
           <q-card
             flat
             bordered
-            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
+            class="text-center q-pa-xs cursor-pointer"
+            :class="$q.dark.isActive ? 'bg-blue-grey-10' : 'bg-white'"
             @click="quickFilterAgent('agent_only')"
           >
-            <div class="text-caption text-grey-4" style="font-size: 11px">Com Agente Tactical</div>
-            <div class="text-h6 text-weight-bold text-light-blue-4">{{ scopedSummary.with_agent }}</div>
+            <div class="text-caption" :class="$q.dark.isActive ? 'text-grey-4' : 'text-grey-7'" style="font-size: 11px">Com Agente Tactical</div>
+            <div class="text-h6 text-weight-bold text-light-blue-6">{{ scopedSummary.with_agent }}</div>
           </q-card>
         </div>
         <div class="col-6 col-sm-3 col-md">
           <q-card
             flat
             bordered
-            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
+            class="text-center q-pa-xs cursor-pointer"
+            :class="$q.dark.isActive ? 'bg-blue-grey-10' : 'bg-white'"
             @click="quickFilterAgent('agentless_only')"
           >
-            <div class="text-caption text-grey-4" style="font-size: 11px">Sem Agente (Rede/Clín.)</div>
-            <div class="text-h6 text-weight-bold text-orange-4">{{ scopedSummary.agentless_total }}</div>
+            <div class="text-caption" :class="$q.dark.isActive ? 'text-grey-4' : 'text-grey-7'" style="font-size: 11px">Sem Agente (Rede/Clín.)</div>
+            <div class="text-h6 text-weight-bold text-orange-6">{{ scopedSummary.agentless_total }}</div>
           </q-card>
         </div>
         <div class="col-6 col-sm-3 col-md">
           <q-card
             flat
             bordered
-            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
+            class="text-center q-pa-xs cursor-pointer"
+            :class="$q.dark.isActive ? 'bg-blue-grey-10' : 'bg-white'"
             @click="quickFilterCategory('equipamento_medico')"
           >
-            <div class="text-caption text-grey-4" style="font-size: 11px">Equip. Médicos</div>
-            <div class="text-h6 text-weight-bold text-purple-3">{{ scopedSummary.equipamentos_medicos }}</div>
+            <div class="text-caption" :class="$q.dark.isActive ? 'text-grey-4' : 'text-grey-7'" style="font-size: 11px">Equip. Médicos</div>
+            <div class="text-h6 text-weight-bold text-deep-purple-5">{{ scopedSummary.equipamentos_medicos }}</div>
           </q-card>
         </div>
         <div class="col-6 col-sm-3 col-md">
           <q-card
             flat
             bordered
-            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
+            class="text-center q-pa-xs cursor-pointer"
+            :class="$q.dark.isActive ? 'bg-blue-grey-10' : 'bg-white'"
             @click="quickFilterCategory('ativo_rede')"
           >
-            <div class="text-caption text-grey-4" style="font-size: 11px">Ativos de Rede</div>
-            <div class="text-h6 text-weight-bold text-teal-4">{{ scopedSummary.ativos_rede }}</div>
+            <div class="text-caption" :class="$q.dark.isActive ? 'text-grey-4' : 'text-grey-7'" style="font-size: 11px">Ativos de Rede</div>
+            <div class="text-h6 text-weight-bold text-teal-5">{{ scopedSummary.ativos_rede }}</div>
           </q-card>
         </div>
         <div class="col-6 col-sm-3 col-md">
           <q-card
             flat
             bordered
-            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
+            class="text-center q-pa-xs cursor-pointer"
+            :class="$q.dark.isActive ? 'bg-blue-grey-10' : 'bg-white'"
             @click="quickFilterCategory('passivo_rede')"
           >
-            <div class="text-caption text-grey-4" style="font-size: 11px">Passivos de Rede</div>
-            <div class="text-h6 text-weight-bold text-amber-4">{{ scopedSummary.passivos_rede }}</div>
+            <div class="text-caption" :class="$q.dark.isActive ? 'text-grey-4' : 'text-grey-7'" style="font-size: 11px">Passivos de Rede</div>
+            <div class="text-h6 text-weight-bold text-amber-7">{{ scopedSummary.passivos_rede }}</div>
           </q-card>
         </div>
         <div class="col-6 col-sm-3 col-md">
           <q-card
             flat
             bordered
-            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
+            class="text-center q-pa-xs cursor-pointer"
+            :class="$q.dark.isActive ? 'bg-blue-grey-10' : 'bg-white'"
             @click="quickFilterCategory('impressora_periferico')"
           >
-            <div class="text-caption text-grey-4" style="font-size: 11px">Impressoras / CFTV</div>
-            <div class="text-h6 text-weight-bold text-cyan-3">{{ scopedSummary.impressoras_perifericos }}</div>
+            <div class="text-caption" :class="$q.dark.isActive ? 'text-grey-4' : 'text-grey-7'" style="font-size: 11px">Impressoras / CFTV</div>
+            <div class="text-h6 text-weight-bold text-cyan-6">{{ scopedSummary.impressoras_perifericos }}</div>
           </q-card>
         </div>
         <div class="col-6 col-sm-3 col-md">
           <q-card
             flat
             bordered
-            class="bg-blue-grey-10 text-center q-pa-xs cursor-pointer"
+            class="text-center q-pa-xs cursor-pointer"
+            :class="$q.dark.isActive ? 'bg-blue-grey-10' : 'bg-white'"
             @click="quickFilterAgent('missing_patrimonio')"
           >
-            <div class="text-caption text-grey-4" style="font-size: 11px">Com Nº Patrimônio</div>
-            <div class="text-h6 text-weight-bold text-green-4">
+            <div class="text-caption" :class="$q.dark.isActive ? 'text-grey-4' : 'text-grey-7'" style="font-size: 11px">Com Nº Patrimônio</div>
+            <div class="text-h6 text-weight-bold text-green-6">
               {{ scopedSummary.with_patrimonio }}
-              <span class="text-caption text-grey-4">({{ scopedSummary.without_patrimonio }} p/ def.)</span>
+              <span class="text-caption" :class="$q.dark.isActive ? 'text-grey-4' : 'text-grey-7'">({{ scopedSummary.without_patrimonio }} p/ def.)</span>
             </div>
           </q-card>
         </div>
@@ -165,13 +177,13 @@
 
       <!-- Company / Unit Distinction Strip -->
       <div v-if="companyUnitSummary.length" class="row items-center wrap q-gutter-xs q-mt-xs">
-        <span class="text-caption text-grey-4 text-weight-medium">Empresas / Unidades:</span>
+        <span class="text-caption text-weight-medium" :class="$q.dark.isActive ? 'text-grey-4' : 'text-grey-8'">Empresas / Unidades:</span>
         <q-chip
           clickable
           dense
           size="11px"
-          :color="filterClient === 'Todos' && filterSite === 'Todos' ? 'primary' : 'grey-8'"
-          text-color="white"
+          :color="filterClient === 'Todos' && filterSite === 'Todos' ? 'primary' : $q.dark.isActive ? 'grey-8' : 'blue-grey-2'"
+          :text-color="filterClient === 'Todos' && filterSite === 'Todos' ? 'white' : $q.dark.isActive ? 'white' : 'grey-9'"
           @click="filterClient = 'Todos'; filterSite = 'Todos'"
         >
           Todas ({{ items.length }})
@@ -186,19 +198,27 @@
           :color="
             filterClient === u.client && filterSite === u.site
               ? getEntityBadgeColor(u.client)
-              : 'blue-grey-9'
+              : $q.dark.isActive
+                ? 'blue-grey-9'
+                : 'blue-grey-2'
           "
-          text-color="white"
+          :text-color="
+            filterClient === u.client && filterSite === u.site
+              ? 'white'
+              : $q.dark.isActive
+                ? 'white'
+                : 'grey-9'
+          "
           @click="selectCompanyUnit(u.client, u.site)"
         >
           <span class="text-weight-bold q-mr-xs">{{ u.client }}</span>
-          <span class="text-grey-3">/ {{ u.site }} ({{ u.total }})</span>
+          <span>/ {{ u.site }} ({{ u.total }})</span>
           <q-tooltip>
             Empresa: {{ u.client }} &bull; Unidade: {{ u.site }} &bull; Total: {{ u.total }} &bull; Com Agente: {{ u.withAgent }} &bull; Sem Agente: {{ u.agentless }}
           </q-tooltip>
         </q-chip>
         <q-space />
-        <span class="text-caption text-teal-3 text-weight-medium">
+        <span class="text-caption text-weight-medium" :class="$q.dark.isActive ? 'text-teal-3' : 'text-teal-9'">
           Exibindo {{ filteredRows.length }} de {{ scopedSummary.total }} ativo(s)
         </span>
       </div>
@@ -211,7 +231,7 @@
             :options="clientFilterOptions"
             dense
             outlined
-            dark
+            :dark="$q.dark.isActive"
             label="Empresa / Cliente"
             @update:model-value="onClientFilterChange"
           />
@@ -222,7 +242,7 @@
             :options="siteFilterOptions"
             dense
             outlined
-            dark
+            :dark="$q.dark.isActive"
             label="Unidade / Filial"
           />
         </div>
@@ -234,7 +254,7 @@
             map-options
             dense
             outlined
-            dark
+            :dark="$q.dark.isActive"
             label="Classificação"
           />
         </div>
@@ -246,7 +266,7 @@
             map-options
             dense
             outlined
-            dark
+            :dark="$q.dark.isActive"
             label="Monitoramento / Tag"
           />
         </div>
@@ -255,7 +275,7 @@
             v-model="search"
             dense
             outlined
-            dark
+            :dark="$q.dark.isActive"
             clearable
             label="Buscar Patrimônio, Nome, IP, MAC, Setor..."
           >

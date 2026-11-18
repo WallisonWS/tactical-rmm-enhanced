@@ -66,12 +66,20 @@
         >
           Unidade: {{ summary.site_name }}
         </q-badge>
+        <q-badge
+          v-if="isAgentlessAsset"
+          color="blue-grey-7"
+          text-color="white"
+          class="text-weight-medium"
+        >
+          Inventário LAN (Sem Agente)
+        </q-badge>
         <span v-if="summary.maintenance_mode">
           &bull; <q-badge color="green"> Maintenance Mode </q-badge>
         </span>
         <span class="text-caption text-grey-4">
           &bull; {{ summary.operating_system }}
-          <template v-if="summary.version">
+          <template v-if="summary.version && !isAgentlessAsset">
             &bull; Agent v{{ summary.version }}
           </template>
         </span>
@@ -79,6 +87,7 @@
 
       <div class="row items-center wrap" style="gap: 6px">
         <q-btn
+          v-if="!isAgentlessAsset"
           dense
           unelevated
           no-wrap
@@ -92,6 +101,21 @@
           @click="runTakeControl(selectedAgent)"
         />
         <q-btn
+          v-else
+          dense
+          unelevated
+          no-wrap
+          color="teal-8"
+          label="Editar Patrimônio / Setor"
+          icon="qr_code_2"
+          size="sm"
+          no-caps
+          class="q-px-sm"
+          style="white-space: nowrap"
+          @click="openPatrimonioDialog"
+        />
+        <q-btn
+          v-if="!isAgentlessAsset"
           dense
           flat
           no-wrap
@@ -118,7 +142,7 @@
           @click="connectNativeRDP"
         />
         <q-btn
-          v-if="summary.plat === 'windows' && !adDomainInfo.inDomain"
+          v-if="!isAgentlessAsset && summary.plat === 'windows' && !adDomainInfo.inDomain"
           dense
           unelevated
           no-wrap
@@ -705,6 +729,15 @@ export default {
       return true;
     });
 
+    const isAgentlessAsset = computed(() => {
+      if (inventoryTag.value && inventoryTag.value.has_agent === false) {
+        return true;
+      }
+      const ver = String(summary.value?.version || "").trim();
+      const mesh = String(summary.value?.mesh_node_id || "").trim();
+      return (ver === "" || ver === "0.1.0") && !mesh;
+    });
+
     function diskBarColor(percent) {
       if (percent < 80) {
         return dash_positive_color.value;
@@ -840,6 +873,7 @@ export default {
       displayMakeModel,
       displayCpuOrFunction,
       showGraphicsRow,
+      isAgentlessAsset,
       store,
       rdpConnecting,
       showJoinAdDialog,
