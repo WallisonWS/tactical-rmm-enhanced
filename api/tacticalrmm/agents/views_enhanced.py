@@ -40,6 +40,9 @@ def _flatten_wmi_section(section: Any) -> Dict[str, Any]:
     of single-key dicts, e.g. wmi_detail['comp_sys'][0] = [{'Domain': ...}, {'Model': ...}])
     into a single dictionary.
     """
+    if isinstance(section, str):
+        with suppress(Exception):
+            section = json.loads(section)
     flat: Dict[str, Any] = {}
     if isinstance(section, dict):
         return dict(section)
@@ -760,8 +763,10 @@ class FleetExecutiveSummaryView(APIView):
             total_agents += 1
             last_seen = row["last_seen"]
             if last_seen is not None:
-                offline_cutoff = now - djangotime.timedelta(minutes=row["offline_time"] or 4)
-                overdue_cutoff = now - djangotime.timedelta(minutes=row["overdue_time"] or 30)
+                off_mins = row["offline_time"] if row["offline_time"] is not None else 4
+                ovd_mins = row["overdue_time"] if row["overdue_time"] is not None else 30
+                offline_cutoff = now - djangotime.timedelta(minutes=off_mins)
+                overdue_cutoff = now - djangotime.timedelta(minutes=ovd_mins)
                 if last_seen <= overdue_cutoff:
                     overdue_count += 1
                 elif last_seen < offline_cutoff:
@@ -4252,7 +4257,10 @@ class FleetInventoryAssetsView(APIView):
         if agent_id:
             if not _has_perm_on_agent(request.user, agent_id):
                 return Response({"error": "Sem permissão neste agente."}, status=status.HTTP_403_FORBIDDEN)
-            ag = get_object_or_404(Agent.objects.select_related("site__client"), agent_id=agent_id)
+            ag = get_object_or_404(
+            Agent.objects.select_related("site__client").defer("services", "disks"),
+            agent_id=agent_id,
+        )
             tag, _created = InventoryAsset.objects.get_or_create(
                 agent=ag,
                 defaults={
@@ -4635,14 +4643,20 @@ class AgentInventoryTagView(APIView):
     def get(self, request, agent_id: str) -> Response:
         if not (_has_perm(request, "can_list_agents") and _has_perm_on_agent(request.user, agent_id)):
             return Response({"error": "Permissão insuficiente."}, status=status.HTTP_403_FORBIDDEN)
-        ag = get_object_or_404(Agent.objects.select_related("site__client"), agent_id=agent_id)
+        ag = get_object_or_404(
+            Agent.objects.select_related("site__client").defer("services", "disks"),
+            agent_id=agent_id,
+        )
         tag = InventoryAsset.objects.filter(agent=ag).first()
         return Response(_serialize_agent_inventory_row(ag, tag))
 
     def post(self, request, agent_id: str) -> Response:
         if not (_has_perm(request, "can_edit_agent") and _has_perm_on_agent(request.user, agent_id)):
             return Response({"error": "Permissão insuficiente para editar patrimônio."}, status=status.HTTP_403_FORBIDDEN)
-        ag = get_object_or_404(Agent.objects.select_related("site__client"), agent_id=agent_id)
+        ag = get_object_or_404(
+            Agent.objects.select_related("site__client").defer("services", "disks"),
+            agent_id=agent_id,
+        )
         data = request.data if isinstance(request.data, dict) else {}
         tag, _created = InventoryAsset.objects.get_or_create(
             agent=ag,
