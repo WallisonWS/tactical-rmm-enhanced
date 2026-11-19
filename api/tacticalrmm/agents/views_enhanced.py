@@ -5,6 +5,7 @@ import re
 from contextlib import suppress
 from typing import Any, Dict, List, Optional, Tuple
 
+from django.core.cache import cache
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone as djangotime
@@ -55,7 +56,7 @@ def _flatten_wmi_section(section: Any) -> Dict[str, Any]:
     return flat
 
 
-def _extract_wmi_profile(agent: Agent) -> Dict[str, Any]:
+def _extract_wmi_profile(agent: Agent, include_services: bool = True) -> Dict[str, Any]:
     """
     Extracts hardware, BIOS, network IP, GPU, and Active Directory / Workgroup metadata
     from the agent's cached WMI detail in PostgreSQL so Traditional Agents (v1.x/v2.12.0)
@@ -130,7 +131,7 @@ def _extract_wmi_profile(agent: Agent) -> Dict[str, Any]:
                 local_ips_list.append(clean)
 
     svc_map: Dict[str, str] = {}
-    if isinstance(agent.services, list):
+    if include_services and isinstance(agent.services, list):
         for svc in agent.services:
             if isinstance(svc, dict) and svc.get("name"):
                 svc_map[str(svc["name"]).lower()] = str(svc.get("status") or "unknown")
@@ -724,9 +725,17 @@ class FleetExecutiveSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request) -> Response:
-        agents_qs = Agent.objects.filter_by_role(request.user)
-        total_agents = agents_qs.count()
+        force_refresh = str(request.query_params.get("force", "")).lower() in ("1", "true", "yes")
+        cache_key = f"trmm_exec_summary:{request.user.pk}"
+        if not force_refresh:
+            cached_payload = cache.get(cache_key)
+            if cached_payload is not None:
+                return Response(cached_payload)
 
+        now = djangotime.now()
+        agents_qs = Agent.objects.filter_by_role(request.user)
+
+        total_agents = 0
         online_count = 0
         offline_count = 0
         overdue_count = 0
@@ -738,52 +747,69 @@ class FleetExecutiveSummaryView(APIView):
         ad_joined_agent_ids: List[str] = []
         domain_map: Dict[str, Dict[str, Any]] = {}
 
-        for ag in agents_qs.only(
+        # Pull only wmi_detail->comp_sys from PostgreSQL JSONB instead of full multi-MB wmi_detail blobs
+        for row in agents_qs.values(
             "agent_id",
             "last_seen",
             "offline_time",
             "overdue_time",
             "needs_reboot",
             "maintenance_mode",
-            "wmi_detail",
+            "wmi_detail__comp_sys",
         ):
-            st = ag.status
-            if st == AGENT_STATUS_ONLINE:
-                online_count += 1
-            elif st == AGENT_STATUS_OVERDUE:
-                overdue_count += 1
+            total_agents += 1
+            last_seen = row["last_seen"]
+            if last_seen is not None:
+                offline_cutoff = now - djangotime.timedelta(minutes=row["offline_time"] or 4)
+                overdue_cutoff = now - djangotime.timedelta(minutes=row["overdue_time"] or 30)
+                if last_seen <= overdue_cutoff:
+                    overdue_count += 1
+                elif last_seen < offline_cutoff:
+                    offline_count += 1
+                else:
+                    online_count += 1
             else:
                 offline_count += 1
-            if ag.needs_reboot:
+
+            if row["needs_reboot"]:
                 reboot_needed_count += 1
-            if ag.maintenance_mode:
+            if row["maintenance_mode"]:
                 maintenance_count += 1
 
-            wmi = ag.wmi_detail if isinstance(ag.wmi_detail, dict) else {}
-            comp_sys = _flatten_wmi_section(wmi.get("comp_sys"))
+            comp_sys = _flatten_wmi_section(row.get("wmi_detail__comp_sys"))
             in_domain = bool(comp_sys.get("PartOfDomain", False))
             dom_name = str(comp_sys.get("Domain") or "").strip()
             wg_name = str(comp_sys.get("Workgroup") or "").strip() or (
                 dom_name if not in_domain and dom_name else "WORKGROUP"
             )
+            ag_id = row["agent_id"]
             if in_domain:
                 ad_joined_count += 1
-                ad_joined_agent_ids.append(ag.agent_id)
-                domain_map[ag.agent_id] = {
+                ad_joined_agent_ids.append(ag_id)
+                domain_map[ag_id] = {
                     "part_of_domain": True,
                     "domain": dom_name or "AD",
                 }
             else:
                 outside_ad_count += 1
-                outside_ad_agent_ids.append(ag.agent_id)
-                domain_map[ag.agent_id] = {
+                outside_ad_agent_ids.append(ag_id)
+                domain_map[ag_id] = {
                     "part_of_domain": False,
                     "domain": wg_name,
                 }
 
-        unresolved_alerts = Alert.objects.filter_by_role(request.user).filter(resolved=False)
-        critical_alerts = unresolved_alerts.filter(severity=AlertSeverity.ERROR).count()
-        warning_alerts = unresolved_alerts.filter(severity=AlertSeverity.WARNING).count()
+        alert_agg = (
+            Alert.objects.filter_by_role(request.user)
+            .filter(resolved=False)
+            .aggregate(
+                total=Count("id"),
+                error=Count("id", filter=Q(severity=AlertSeverity.ERROR)),
+                warning=Count("id", filter=Q(severity=AlertSeverity.WARNING)),
+            )
+        )
+        total_alerts = alert_agg["total"] or 0
+        critical_alerts = alert_agg["error"] or 0
+        warning_alerts = alert_agg["warning"] or 0
 
         failing_checks = (
             CheckResult.objects.filter_by_role(request.user)
@@ -819,32 +845,33 @@ class FleetExecutiveSummaryView(APIView):
             patch_compliance_pct = 100.0
             fleet_health_score = 100
 
-        return Response(
-            {
-                "total_agents": total_agents,
-                "online_agents": online_count,
-                "offline_agents": offline_count,
-                "overdue_agents": overdue_count,
-                "reboot_needed_agents": reboot_needed_count,
-                "maintenance_agents": maintenance_count,
-                "availability_percent": availability_pct,
-                "patch_compliance_percent": patch_compliance_pct,
-                "fleet_health_score": fleet_health_score,
-                "active_alerts": {
-                    "total": unresolved_alerts.count(),
-                    "error": critical_alerts,
-                    "warning": warning_alerts,
-                },
-                "failing_checks_count": failing_checks,
-                "agents_with_pending_patches": pending_patches,
-                "ad_joined_agents": ad_joined_count,
-                "outside_ad_agents": outside_ad_count,
-                "outside_ad_agent_ids": outside_ad_agent_ids,
-                "ad_joined_agent_ids": ad_joined_agent_ids,
-                "domain_map": domain_map,
-                "timestamp": djangotime.now().isoformat(),
-            }
-        )
+        payload = {
+            "total_agents": total_agents,
+            "online_agents": online_count,
+            "offline_agents": offline_count,
+            "overdue_agents": overdue_count,
+            "reboot_needed_agents": reboot_needed_count,
+            "maintenance_agents": maintenance_count,
+            "availability_percent": availability_pct,
+            "patch_compliance_percent": patch_compliance_pct,
+            "fleet_health_score": fleet_health_score,
+            "active_alerts": {
+                "total": total_alerts,
+                "error": critical_alerts,
+                "warning": warning_alerts,
+            },
+            "failing_checks_count": failing_checks,
+            "agents_with_pending_patches": pending_patches,
+            "ad_joined_agents": ad_joined_count,
+            "outside_ad_agents": outside_ad_count,
+            "outside_ad_agent_ids": outside_ad_agent_ids,
+            "ad_joined_agent_ids": ad_joined_agent_ids,
+            "domain_map": domain_map,
+            "timestamp": now.isoformat(),
+        }
+        with suppress(Exception):
+            cache.set(cache_key, payload, timeout=15)
+        return Response(payload)
 
 
 class AgentHALinkWatchdogView(APIView):
@@ -3981,7 +4008,7 @@ def _is_agentless_inventory_agent(
 def _serialize_agent_inventory_row(
     ag: Agent, tag: Optional[InventoryAsset]
 ) -> Dict[str, Any]:
-    prof = _extract_wmi_profile(ag)
+    prof = _extract_wmi_profile(ag, include_services=False)
     local_ips = _extract_agent_ips(ag)
     is_agentless = _is_agentless_inventory_agent(ag, tag)
     has_real_agent = not is_agentless
@@ -4167,6 +4194,7 @@ class FleetInventoryAssetsView(APIView):
         agents_qs = (
             Agent.objects.filter_by_role(request.user)
             .select_related("site__client", "inventory_record")
+            .defer("services", "disks", "physical_disks")
             .order_by("site__client__name", "site__name", "hostname")
         )
         agents_list = list(agents_qs)
@@ -4319,7 +4347,11 @@ class FleetInventoryAssetsView(APIView):
             },
         )
 
-        agents_list = list(Agent.objects.filter_by_role(request.user).select_related("site__client"))
+        agents_list = list(
+            Agent.objects.filter_by_role(request.user)
+            .select_related("site__client")
+            .defer("services", "disks", "physical_disks")
+        )
         lookup = _build_agent_match_lookup(agents_list)
         return Response(
             {
@@ -4356,7 +4388,11 @@ class FleetInventoryAssetDetailView(APIView):
 
         if asset.agent:
             return Response({"status": "ok", "item": _serialize_agent_inventory_row(asset.agent, asset)})
-        agents_list = list(Agent.objects.filter_by_role(request.user).select_related("site__client"))
+        agents_list = list(
+            Agent.objects.filter_by_role(request.user)
+            .select_related("site__client")
+            .defer("services", "disks", "physical_disks")
+        )
         lookup = _build_agent_match_lookup(agents_list)
         return Response({"status": "ok", "item": _serialize_standalone_inventory_row(asset, lookup)})
 
@@ -4416,7 +4452,11 @@ class FleetInventoryAssetImportView(APIView):
                 source__in=["advanced_ip_scanner", "csv_import"],
             ).delete()
 
-        agents_list = list(Agent.objects.filter_by_role(request.user).select_related("site__client"))
+        agents_list = list(
+            Agent.objects.filter_by_role(request.user)
+            .select_related("site__client")
+            .defer("services", "disks", "physical_disks")
+        )
         tactical_lookup = _build_agent_match_lookup(agents_list)
 
         existing_assets = list(

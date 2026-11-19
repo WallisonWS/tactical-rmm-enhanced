@@ -733,6 +733,30 @@ import { fetchCustomFields } from "@/api/core";
 // ui imports
 import AgentActionMenu from "@/components/agents/AgentActionMenu.vue";
 
+let _customFieldsCache = null;
+let _customFieldsCacheAt = 0;
+let _customFieldsInflight = null;
+const CUSTOM_FIELDS_TTL_MS = 60_000;
+
+function getCachedCustomFields() {
+  const now = Date.now();
+  if (_customFieldsCache && now - _customFieldsCacheAt < CUSTOM_FIELDS_TTL_MS) {
+    return Promise.resolve(_customFieldsCache);
+  }
+  if (_customFieldsInflight) return _customFieldsInflight;
+  const req = fetchCustomFields()
+    .then((res) => {
+      _customFieldsCache = res;
+      _customFieldsCacheAt = Date.now();
+      return res;
+    })
+    .finally(() => {
+      if (_customFieldsInflight === req) _customFieldsInflight = null;
+    });
+  _customFieldsInflight = req;
+  return req;
+}
+
 export default {
   name: "SummaryTab",
   components: {
@@ -848,7 +872,7 @@ export default {
           notifySuccess(res.output || `${summary.value.hostname} ingressado no domínio AD com sucesso!`);
           showJoinAdDialog.value = false;
           joinAdForm.value.admin_password = "";
-          await fetchFleetExecutiveSummary().catch(() => {});
+          await fetchFleetExecutiveSummary(true).catch(() => {});
           await refreshSummary();
         } else {
           notifyError(res?.output || "Falha ao ingressar no domínio AD.");
@@ -1011,14 +1035,34 @@ export default {
       }
     }
 
+    let summaryReqSeq = 0;
+
     async function getSummary() {
+      const targetAgent = selectedAgent.value;
+      if (!targetAgent) return;
+      const reqId = ++summaryReqSeq;
       loading.value = true;
-      summary.value = await fetchAgent(selectedAgent.value);
-      customFieldsDefinitions.value = await fetchCustomFields();
-      inventoryTag.value = await fetchAgentInventoryTag(selectedAgent.value).catch(() => null);
-      store.commit("setRefreshSummaryTab", false);
-      store.commit("setAgentPlatform", summary.value.plat);
-      loading.value = false;
+      try {
+        const [agentData, fieldsData, tagData] = await Promise.all([
+          fetchAgent(targetAgent),
+          getCachedCustomFields().catch(() => customFieldsDefinitions.value),
+          fetchAgentInventoryTag(targetAgent).catch(() => null),
+        ]);
+        if (reqId !== summaryReqSeq) return;
+        summary.value = agentData;
+        customFieldsDefinitions.value = fieldsData;
+        inventoryTag.value = tagData;
+        store.commit("setRefreshSummaryTab", false);
+        if (agentData?.plat) {
+          store.commit("setAgentPlatform", agentData.plat);
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (reqId === summaryReqSeq) {
+          loading.value = false;
+        }
+      }
     }
 
     async function refreshSummary() {

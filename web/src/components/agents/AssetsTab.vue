@@ -142,17 +142,26 @@ export default {
       () => WMI_CATEGORIES.find((c) => c.name === tab.value)?.label || "",
     );
 
+    let wmiReqSeq = 0;
+
     async function getWMIData() {
-      if (!selectedAgent.value) return;
+      const targetAgent = selectedAgent.value;
+      if (!targetAgent) return;
+      const reqId = ++wmiReqSeq;
       loading.value = true;
       try {
-        const { wmi_detail } = await fetchAgent(selectedAgent.value);
+        const { wmi_detail } = await fetchAgent(targetAgent);
+        if (reqId !== wmiReqSeq) return;
         assets.value = wmi_detail || {};
       } catch (e) {
         console.error(e);
-        assets.value = {};
+        if (reqId === wmiReqSeq) {
+          assets.value = {};
+        }
       } finally {
-        loading.value = false;
+        if (reqId === wmiReqSeq) {
+          loading.value = false;
+        }
       }
     }
 

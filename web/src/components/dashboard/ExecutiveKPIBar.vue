@@ -128,7 +128,7 @@
                 class="q-px-sm"
                 style="border-radius: 7px"
                 :loading="loading"
-                @click="loadSummary"
+                @click="loadSummary(true)"
               />
             </div>
           </q-card-section>
@@ -169,10 +169,10 @@ function scoreColor(score: number): string {
   return "negative";
 }
 
-async function loadSummary() {
+async function loadSummary(force = false) {
   loading.value = true;
   try {
-    summary.value = await fetchFleetExecutiveSummary();
+    summary.value = await fetchFleetExecutiveSummary(force);
   } catch (e) {
     // Keep fallback defaults if endpoint not yet populated
   } finally {
@@ -183,12 +183,12 @@ async function loadSummary() {
 watch(
   () => dashboardStore.summaryVersion,
   () => {
-    loadSummary();
+    loadSummary(false);
   },
 );
 
 onMounted(() => {
-  loadSummary();
+  loadSummary(false);
 });
 </script>
 

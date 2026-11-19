@@ -136,18 +136,48 @@ export interface FleetExecutiveSummary {
   timestamp: string;
 }
 
-export async function fetchFleetExecutiveSummary(): Promise<FleetExecutiveSummary> {
-  const { data } = await axios.get("/agents/executive-summary/");
-  if (data?.domain_map) {
-    fleetDomainMap.value = data.domain_map;
+let _execSummaryCache: FleetExecutiveSummary | null = null;
+let _execSummaryCacheAt = 0;
+let _execSummaryInflight: Promise<FleetExecutiveSummary> | null = null;
+const EXEC_SUMMARY_TTL_MS = 10_000;
+
+export async function fetchFleetExecutiveSummary(
+  force = false,
+): Promise<FleetExecutiveSummary> {
+  const now = Date.now();
+  if (!force && _execSummaryCache && now - _execSummaryCacheAt < EXEC_SUMMARY_TTL_MS) {
+    return _execSummaryCache;
   }
-  if (Array.isArray(data?.outside_ad_agent_ids)) {
-    fleetOutsideAdIds.value = data.outside_ad_agent_ids;
+  if (!force && _execSummaryInflight) {
+    return _execSummaryInflight;
   }
-  if (Array.isArray(data?.ad_joined_agent_ids)) {
-    fleetInsideAdIds.value = data.ad_joined_agent_ids;
-  }
-  return data;
+
+  const req = axios
+    .get("/agents/executive-summary/", {
+      params: force ? { force: 1 } : undefined,
+    })
+    .then(({ data }) => {
+      if (data?.domain_map) {
+        fleetDomainMap.value = data.domain_map;
+      }
+      if (Array.isArray(data?.outside_ad_agent_ids)) {
+        fleetOutsideAdIds.value = data.outside_ad_agent_ids;
+      }
+      if (Array.isArray(data?.ad_joined_agent_ids)) {
+        fleetInsideAdIds.value = data.ad_joined_agent_ids;
+      }
+      _execSummaryCache = data;
+      _execSummaryCacheAt = Date.now();
+      return data;
+    })
+    .finally(() => {
+      if (_execSummaryInflight === req) {
+        _execSummaryInflight = null;
+      }
+    });
+
+  _execSummaryInflight = req;
+  return req;
 }
 
 export async function fetchAgentLiveTelemetry(agentId: string): Promise<LiveTelemetrySnapshot> {

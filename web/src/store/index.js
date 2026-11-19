@@ -5,6 +5,8 @@ import { formatDate } from "@/utils/format";
 import { useDashboardStore } from "@/stores/dashboard";
 import { syncDarkModeWithSavedPalette } from "@/utils/themePalettes";
 
+let _loadAgentsSeq = 0;
+
 export default function () {
   const Store = new createStore({
     state() {
@@ -203,8 +205,12 @@ export default function () {
         dispatch("loadAgents");
         dispatch("loadTree");
       },
-      async loadAgents({ state, commit }) {
-        commit("AGENT_TABLE_LOADING", true);
+      async loadAgents({ state, commit }, options = {}) {
+        const silent = Boolean(options && options.silent);
+        const seq = ++_loadAgentsSeq;
+        if (!silent) {
+          commit("AGENT_TABLE_LOADING", true);
+        }
 
         let localParams = null;
         if (state.defaultAgentTblTab !== "mixed") {
@@ -226,12 +232,16 @@ export default function () {
           const { data } = await axios.get(
             `/agents/${localParams ? localParams : ""}`,
           );
-          commit("setAgents", data);
+          if (seq === _loadAgentsSeq) {
+            commit("setAgents", data);
+          }
         } catch (e) {
           console.error(e);
         }
 
-        commit("AGENT_TABLE_LOADING", false);
+        if (!silent && seq === _loadAgentsSeq) {
+          commit("AGENT_TABLE_LOADING", false);
+        }
       },
       async getDashInfo({ commit }, edited = true) {
         const { data } = await axios.get("/core/dashinfo/");

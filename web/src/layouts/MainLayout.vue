@@ -336,6 +336,7 @@ const poll = ref(null);
 function livePoll() {
   poll.value = setInterval(
     () => {
+      if (typeof document !== "undefined" && document.hidden) return;
       store.dispatch("checkVer");
       store.dispatch("getDashInfo", false);
     },

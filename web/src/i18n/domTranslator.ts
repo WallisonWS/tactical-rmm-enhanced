@@ -14,19 +14,42 @@ const SKIP_TAGS = new Set([
   "TEXTAREA",
   "SVG",
   "PATH",
+  "G",
+  "CIRCLE",
+  "RECT",
+  "LINE",
+  "POLYGON",
+  "POLYLINE",
+  "DEFS",
 ]);
+
+function isDirectlySkippedElement(el: Element): boolean {
+  if (SKIP_TAGS.has(el.tagName)) return true;
+  if (el.getAttribute("data-no-translate") === "true") return true;
+  const cls = el.classList;
+  if (
+    cls.contains("q-icon") ||
+    cls.contains("material-icons") ||
+    cls.contains("q-ripple") ||
+    cls.contains("q-ripple__inner") ||
+    cls.contains("q-focus-helper") ||
+    cls.contains("q-spinner") ||
+    cls.contains("monaco-editor") ||
+    cls.contains("xterm")
+  ) {
+    return true;
+  }
+  return false;
+}
 
 function shouldSkipElement(el: Element | null): boolean {
   if (!el) return true;
-  if (SKIP_TAGS.has(el.tagName)) return true;
+  if (isDirectlySkippedElement(el)) return true;
   if (
     el.closest(
       ".monaco-editor, .xterm, pre, code, [data-no-translate='true']",
     )
   ) {
-    return true;
-  }
-  if (el.classList.contains("q-icon") || el.classList.contains("material-icons")) {
     return true;
   }
   return false;
@@ -519,7 +542,9 @@ for (const [enText, ptText, esText] of EXACT_PHRASES) {
 
 function translateDynamicPatterns(raw: string, locale: SupportedLocale): string | null {
   const trimmed = raw.trim();
-  if (!trimmed) return null;
+  if (!trimmed || trimmed.length > 260) return null;
+  // Fast skip pure numeric / IP / punctuation values (saves regex work on tables & telemetry)
+  if (/^[\d\s.:,\-/%+()[\]|]+$/.test(trimmed)) return null;
 
   // 1. Exact phrase match
   const exact = lookupMaps[locale].get(trimmed);
@@ -660,38 +685,53 @@ let isApplying = false;
 
 export function translateDomSubtree(root: Node, locale: SupportedLocale) {
   if (typeof document === "undefined" || !root || isApplying) return;
+  if (root instanceof Element && shouldSkipElement(root)) return;
   isApplying = true;
   try {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    // Reject skipped subtrees directly inside the TreeWalker so C++ skips entire rows/icons/SVGs
+    const walker = document.createTreeWalker(
+      root,
+      NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+      {
+        acceptNode(n: Node): number {
+          if (n.nodeType === Node.ELEMENT_NODE) {
+            return isDirectlySkippedElement(n as Element)
+              ? NodeFilter.FILTER_REJECT
+              : NodeFilter.FILTER_SKIP;
+          }
+          const val = n.nodeValue;
+          if (!val || !val.trim()) return NodeFilter.FILTER_SKIP;
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      },
+    );
+
     let node = walker.nextNode() as Text | null;
     while (node) {
-      const parent = node.parentElement;
-      if (parent && !shouldSkipElement(parent)) {
-        const currentVal = node.nodeValue || "";
-        const lastWritten = lastWrittenTextMap.get(node);
-        // If this node was never seen, or Vue/Quasar reactively updated its text since we last touched it:
-        if (
-          !originalTextMap.has(node) ||
-          (lastWritten !== undefined && currentVal !== lastWritten) ||
-          (lastWritten === undefined && currentVal !== originalTextMap.get(node))
-        ) {
-          originalTextMap.set(node, currentVal);
-          lastWrittenTextMap.delete(node);
-        }
+      const currentVal = node.nodeValue || "";
+      const lastWritten = lastWrittenTextMap.get(node);
+      // If this node was never seen, or Vue/Quasar reactively updated its text since we last touched it:
+      if (
+        !originalTextMap.has(node) ||
+        (lastWritten !== undefined && currentVal !== lastWritten) ||
+        (lastWritten === undefined && currentVal !== originalTextMap.get(node))
+      ) {
+        originalTextMap.set(node, currentVal);
+        lastWrittenTextMap.delete(node);
+      }
 
-        const orig = originalTextMap.get(node) || "";
-        const translated = translateDynamicPatterns(orig, locale);
-        if (translated !== null) {
-          if (node.nodeValue !== translated) {
-            node.nodeValue = translated;
-          }
-          lastWrittenTextMap.set(node, translated);
-        } else if (lastWrittenTextMap.has(node)) {
-          if (node.nodeValue !== orig) {
-            node.nodeValue = orig;
-          }
-          lastWrittenTextMap.delete(node);
+      const orig = originalTextMap.get(node) || "";
+      const translated = translateDynamicPatterns(orig, locale);
+      if (translated !== null) {
+        if (node.nodeValue !== translated) {
+          node.nodeValue = translated;
         }
+        lastWrittenTextMap.set(node, translated);
+      } else if (lastWrittenTextMap.has(node)) {
+        if (node.nodeValue !== orig) {
+          node.nodeValue = orig;
+        }
+        lastWrittenTextMap.delete(node);
       }
       node = walker.nextNode() as Text | null;
     }
@@ -700,8 +740,9 @@ export function translateDomSubtree(root: Node, locale: SupportedLocale) {
       const elems = (root as Element).querySelectorAll
         ? (root as Element).querySelectorAll("[placeholder], [title], [aria-label]")
         : [];
-      elems.forEach((el) => {
-        if (shouldSkipElement(el)) return;
+      for (let i = 0; i < elems.length; i += 1) {
+        const el = elems[i];
+        if (shouldSkipElement(el)) continue;
         let saved = originalAttrMap.get(el);
         if (!saved) {
           saved = {};
@@ -718,11 +759,24 @@ export function translateDomSubtree(root: Node, locale: SupportedLocale) {
             el.setAttribute(attr, targetVal);
           }
         }
-      });
+      }
     }
   } finally {
     isApplying = false;
   }
+}
+
+function deduplicateRoots(roots: Set<Element>): Element[] {
+  if (roots.size <= 1) return Array.from(roots);
+  const arr = Array.from(roots);
+  return arr.filter((el) => {
+    let p = el.parentElement;
+    while (p) {
+      if (roots.has(p)) return false;
+      p = p.parentElement;
+    }
+    return true;
+  });
 }
 
 let observerInstalled = false;
@@ -747,28 +801,41 @@ export function installSiteWideTranslator(currentLocale: Ref<SupportedLocale>) {
     { immediate: true },
   );
 
-  let rafId: number | null = null;
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingRoots = new Set<Element>();
   const observer = new MutationObserver((mutations) => {
     if (isApplying) return;
-    for (const m of mutations) {
-      m.addedNodes.forEach((n) => {
-        if (n instanceof Element) pendingRoots.add(n);
-        else if (n.parentElement) pendingRoots.add(n.parentElement);
-      });
-    }
-    if (pendingRoots.size === 0) return;
-    if (rafId !== null) cancelAnimationFrame(rafId);
-    rafId = requestAnimationFrame(() => {
-      rafId = null;
-      const batch = Array.from(pendingRoots);
-      pendingRoots.clear();
-      for (const el of batch) {
-        if (el.isConnected && !shouldSkipElement(el)) {
-          translateDomSubtree(el, currentLocale.value);
+    for (let i = 0; i < mutations.length; i += 1) {
+      const added = mutations[i].addedNodes;
+      for (let j = 0; j < added.length; j += 1) {
+        const n = added[j];
+        if (n.nodeType === Node.ELEMENT_NODE) {
+          const el = n as Element;
+          if (!isDirectlySkippedElement(el)) {
+            pendingRoots.add(el);
+          }
+        } else if (n.nodeType === Node.TEXT_NODE && n.parentElement) {
+          const parent = n.parentElement;
+          if (!isDirectlySkippedElement(parent)) {
+            pendingRoots.add(parent);
+          }
         }
       }
-    });
+    }
+    if (pendingRoots.size === 0) return;
+    if (flushTimer !== null) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      const batch = deduplicateRoots(pendingRoots);
+      pendingRoots.clear();
+      const loc = currentLocale.value;
+      for (let i = 0; i < batch.length; i += 1) {
+        const el = batch[i];
+        if (el.isConnected && !shouldSkipElement(el)) {
+          translateDomSubtree(el, loc);
+        }
+      }
+    }, 32);
   });
 
   if (document.body) {

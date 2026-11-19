@@ -471,6 +471,15 @@ import DialogWrapper from "@/components/ui/DialogWrapper.vue";
 import IntegrationsContextMenu from "@/components/ui/IntegrationsContextMenu.vue";
 import ConfirmYesDialog from "@/components/agents/ConfirmYesDialog.vue";
 
+const ACTION_MENU_CACHE_TTL_MS = 60_000;
+let _urlActionsCache = null;
+let _urlActionsCacheAt = 0;
+let _urlActionsInflight = null;
+let _favScriptsCache = null;
+let _favScriptsCacheKey = null;
+let _favScriptsCacheAt = 0;
+let _favScriptsInflight = null;
+
 export default {
   name: "AgentActionMenu",
   components: {
@@ -510,10 +519,27 @@ export default {
     }
 
     async function getURLActions() {
+      const now = Date.now();
+      if (_urlActionsCache && now - _urlActionsCacheAt < ACTION_MENU_CACHE_TTL_MS) {
+        urlActions.value = _urlActionsCache;
+        return;
+      }
       try {
-        urlActions.value = (await fetchURLActions())
-          .filter((action) => action.action_type === "web")
-          .sort((a, b) => a.name.localeCompare(b.name));
+        if (!_urlActionsInflight) {
+          _urlActionsInflight = fetchURLActions()
+            .then((list) => {
+              const filtered = list
+                .filter((action) => action.action_type === "web")
+                .sort((a, b) => a.name.localeCompare(b.name));
+              _urlActionsCache = filtered;
+              _urlActionsCacheAt = Date.now();
+              return filtered;
+            })
+            .finally(() => {
+              _urlActionsInflight = null;
+            });
+        }
+        urlActions.value = await _urlActionsInflight;
       } catch (e) {
         console.error(e);
       }
@@ -558,23 +584,42 @@ export default {
     }
 
     async function getFavoriteScripts() {
-      favoriteScripts.value = [];
+      const showComm = !!store.state.showCommunityScripts;
+      const now = Date.now();
+      if (
+        _favScriptsCache &&
+        _favScriptsCacheKey === showComm &&
+        now - _favScriptsCacheAt < ACTION_MENU_CACHE_TTL_MS
+      ) {
+        favoriteScripts.value = _favScriptsCache;
+        return;
+      }
 
       try {
-        const data = await fetchScripts({
-          showCommunityScripts: store.state.showCommunityScripts,
-        });
-
-        const scripts = data.filter((script) => !!script.favorite);
-
-        favoriteScripts.value = scripts
-          .map((script) => ({
-            label: script.name,
-            value: script.id,
-            timeout: script.default_timeout,
-            args: script.args,
-          }))
-          .sort((a, b) => a.label.localeCompare(b.label));
+        if (!_favScriptsInflight || _favScriptsCacheKey !== showComm) {
+          _favScriptsCacheKey = showComm;
+          _favScriptsInflight = fetchScripts({
+            showCommunityScripts: showComm,
+          })
+            .then((data) => {
+              const mapped = data
+                .filter((script) => !!script.favorite)
+                .map((script) => ({
+                  label: script.name,
+                  value: script.id,
+                  timeout: script.default_timeout,
+                  args: script.args,
+                }))
+                .sort((a, b) => a.label.localeCompare(b.label));
+              _favScriptsCache = mapped;
+              _favScriptsCacheAt = Date.now();
+              return mapped;
+            })
+            .finally(() => {
+              _favScriptsInflight = null;
+            });
+        }
+        favoriteScripts.value = await _favScriptsInflight;
       } catch (e) {
         console.error(e);
       }
@@ -775,9 +820,8 @@ export default {
       });
     }
 
-    onMounted(async () => {
-      await getURLActions();
-      await getFavoriteScripts();
+    onMounted(() => {
+      Promise.all([getURLActions(), getFavoriteScripts()]);
     });
 
     async function quickSelfHeal(agent, action, mode) {

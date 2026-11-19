@@ -1482,57 +1482,116 @@ export default {
     allClientsActive() {
       return this.selectedTree === "";
     },
+    tabTypeCounts() {
+      let servers = 0;
+      let workstations = 0;
+      const list = this.agents || [];
+      for (let i = 0; i < list.length; i += 1) {
+        const mt = list[i].monitoring_type;
+        if (mt === "server") servers += 1;
+        else if (mt === "workstation") workstations += 1;
+      }
+      return { servers, workstations };
+    },
     serverTabCount() {
-      return this.agents.filter((a) => a.monitoring_type === "server").length;
+      return this.tabTypeCounts.servers;
     },
     workstationTabCount() {
-      return this.agents.filter((a) => a.monitoring_type === "workstation").length;
+      return this.tabTypeCounts.workstations;
     },
     filteredAgents() {
       if (this.tab === "mixed") return this.agents;
       else return this.agents.filter((k) => k.monitoring_type === this.tab);
     },
+    filteredStats() {
+      const list = this.filteredAgents || [];
+      const map = fleetDomainMap.value || {};
+      let windows = 0;
+      let linux = 0;
+      let darwin = 0;
+      let online = 0;
+      let offline = 0;
+      let overdue = 0;
+      let disconnected = 0;
+      let failing = 0;
+      let patches = 0;
+      let reboot = 0;
+      let outsideAd = 0;
+      let insideAd = 0;
+      for (let i = 0; i < list.length; i += 1) {
+        const a = list[i];
+        if (a.plat === "windows") windows += 1;
+        else if (a.plat === "linux") linux += 1;
+        else if (a.plat === "darwin") darwin += 1;
+
+        if (a.status === "online") {
+          online += 1;
+        } else {
+          disconnected += 1;
+          if (a.status === "offline") offline += 1;
+          else if (a.status === "overdue") overdue += 1;
+        }
+
+        if (a.checks && a.checks.has_failing_checks) failing += 1;
+        if (a.has_patches_pending) patches += 1;
+        if (a.needs_reboot) reboot += 1;
+
+        const dm = map[a.agent_id];
+        if (dm) {
+          if (dm.part_of_domain === false) outsideAd += 1;
+          else if (dm.part_of_domain === true) insideAd += 1;
+        }
+      }
+      return {
+        windows,
+        linux,
+        darwin,
+        online,
+        offline,
+        overdue,
+        disconnected,
+        failing,
+        patches,
+        reboot,
+        outsideAd,
+        insideAd,
+      };
+    },
     windowsCount() {
-      return this.filteredAgents.filter((a) => a.plat === "windows").length;
+      return this.filteredStats.windows;
     },
     linuxCount() {
-      return this.filteredAgents.filter((a) => a.plat === "linux").length;
+      return this.filteredStats.linux;
     },
     darwinCount() {
-      return this.filteredAgents.filter((a) => a.plat === "darwin").length;
+      return this.filteredStats.darwin;
     },
     onlineCount() {
-      return this.filteredAgents.filter((a) => a.status === "online").length;
+      return this.filteredStats.online;
     },
     offlineOnlyCount() {
-      return this.filteredAgents.filter((a) => a.status === "offline").length;
+      return this.filteredStats.offline;
     },
     overdueOnlyCount() {
-      return this.filteredAgents.filter((a) => a.status === "overdue").length;
+      return this.filteredStats.overdue;
     },
     offlineOrOverdueCount() {
-      return this.filteredAgents.filter((a) => a.status !== "online").length;
+      return this.filteredStats.disconnected;
     },
     failingChecksCount() {
-      return this.filteredAgents.filter((a) => a.checks && a.checks.has_failing_checks).length;
+      return this.filteredStats.failing;
     },
     patchesPendingCount() {
-      return this.filteredAgents.filter((a) => a.has_patches_pending).length;
+      return this.filteredStats.patches;
     },
     rebootNeededCount() {
-      return this.filteredAgents.filter((a) => a.needs_reboot).length;
+      return this.filteredStats.reboot;
     },
     outsideAdCount() {
-      const map = fleetDomainMap.value || {};
-      return this.filteredAgents.filter(
-        (a) => map[a.agent_id] && map[a.agent_id].part_of_domain === false,
-      ).length;
+      return this.filteredStats.outsideAd;
     },
     insideAdCount() {
-      const map = fleetDomainMap.value || {};
-      return this.filteredAgents.filter(
-        (a) => map[a.agent_id] && map[a.agent_id].part_of_domain === true,
-      ).length;
+      return this.filteredStats.insideAd;
     },
     hasAnyTokenFilter() {
       return String(this.search || "").trim().length > 0;
@@ -1580,17 +1639,32 @@ export default {
     // set initial value for agent table and agent tabs
     this.$store.commit("SET_SPLITTER", this.innerModel);
 
-    // Auto-refresh agent list & counters every 30s
-    this._dashSyncTimer = setInterval(() => {
+    // Silent background auto-refresh every 60s (paused when browser tab is hidden)
+    this._lastBgSyncAt = Date.now();
+    const runSilentBackgroundSync = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      this._lastBgSyncAt = Date.now();
       this.$store.dispatch("getDashInfo", false);
-      this.$store.dispatch("loadAgents");
+      this.$store.dispatch("loadAgents", { silent: true });
       this.$store.dispatch("loadTree");
       useDashboardStore().triggerSummaryRefresh();
-    }, 30000);
+    };
+    this._dashSyncTimer = setInterval(runSilentBackgroundSync, 60000);
+    this._onVisibilityChange = () => {
+      if (!document.hidden && Date.now() - (this._lastBgSyncAt || 0) >= 60000) {
+        runSilentBackgroundSync();
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", this._onVisibilityChange);
+    }
   },
   beforeUnmount() {
     if (this._dashSyncTimer) {
       clearInterval(this._dashSyncTimer);
+    }
+    if (this._onVisibilityChange && typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this._onVisibilityChange);
     }
   },
 };
