@@ -3747,8 +3747,17 @@ class FleetBulkCLIView(APIView):
             "shell": "powershell",
             "command": (
                 "Set-Service -Name 'Mesh Agent' -StartupType Automatic -ErrorAction SilentlyContinue; "
-                "Start-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue; "
-                "Write-Output 'Mesh Agent restaurado para execucao continua Automatica.'"
+                "$s = Get-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue; "
+                "if ($s -and $s.Status -ne 'Running') { "
+                "  if ($s.Status -eq 'StopPending' -or $s.Status -eq 'PausePending' -or $s.Status -eq 'StartPending') { "
+                "    Stop-Process -Name 'MeshAgent*' -Force -ErrorAction SilentlyContinue; "
+                "    Start-Sleep -Milliseconds 1200 "
+                "  }; "
+                "  Start-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue; "
+                "  Start-Sleep -Milliseconds 600 "
+                "}; "
+                "$st = (Get-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue).Status; "
+                "Write-Output ('Mesh Agent restaurado para execucao continua Automatica. Status: ' + $st)"
             ),
         },
         "gpupdate_ad_sync": {

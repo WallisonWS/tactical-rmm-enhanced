@@ -147,7 +147,7 @@
 
 <script>
 // composition imports
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useStore } from "vuex";
 import { useRoute } from "vue-router";
 import { useMeta, useQuasar } from "quasar";
@@ -166,9 +166,36 @@ import { notifySuccess, notifyError, notifyWarning } from "@/utils/notify";
 export default {
   name: "TakeControl",
   setup() {
+    // vue router
+    const { params } = useRoute();
+    const autoPauseStorageKey = `trmm_autopause_mesh_${String(params.agent_id || "")}`;
+    const readSavedAutoPause = () => {
+      try {
+        return typeof window !== "undefined" && window.localStorage.getItem(autoPauseStorageKey) === "1";
+      } catch {
+        return false;
+      }
+    };
+
     const isWorkstation = ref(false);
-    const autoPauseOnExit = ref(true);
+    // Default OFF so regular workstations keep Mesh continuously connected (avoids StopPending / cold-wake latency);
+    // users can still opt-in per banking workstation or click "Modo Banco (Pausar Mesh)" on demand.
+    const autoPauseOnExit = ref(readSavedAutoPause());
     let didPauseOnExit = false;
+
+    watch(autoPauseOnExit, (val) => {
+      try {
+        if (typeof window !== "undefined") {
+          if (val) {
+            window.localStorage.setItem(autoPauseStorageKey, "1");
+          } else {
+            window.localStorage.removeItem(autoPauseStorageKey);
+          }
+        }
+      } catch {
+        // ignore storage errors
+      }
+    });
 
     function handlePageHide() {
       if (didPauseOnExit) return;
@@ -201,9 +228,6 @@ export default {
     const dash_positive_color = computed(() => store.state.dash_positive_color);
     const dash_negative_color = computed(() => store.state.dash_negative_color);
     const dash_warning_color = computed(() => store.state.dash_warning_color);
-
-    // vue router
-    const { params } = useRoute();
 
     // take control setup
     const control = ref("");
@@ -321,12 +345,17 @@ export default {
       $q.loading.show({ message: "Reiniciando serviço Mesh Agent..." });
       try {
         if (agentPlat.value === "windows") {
-          await sendAgentServiceAction(params.agent_id, "mesh agent", { sv_action: "restart" });
+          try {
+            await sendAgentServiceAction(params.agent_id, "mesh agent", { sv_action: "restart" });
+          } catch (restartErr) {
+            // If service was stuck in StopPending, let getMeshURLs() force-unstick & wake it cleanly
+            console.warn("Windows SCM restart returned error; falling back to force-wake:", restartErr);
+          }
         } else {
           await sendAgentRecoverMesh(params.agent_id);
         }
         control.value = "";
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 1200));
         await getMeshURLs();
         if (meshConnected.value !== false) {
           notifySuccess("Serviço Mesh Agent reiniciado e conectado!");

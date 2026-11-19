@@ -684,7 +684,8 @@ WINDOWS_MESH_BANKING_PAUSE_CMD = (
     "Set-Service -Name 'tacticalrmm' -StartupType Automatic -ErrorAction SilentlyContinue; "
     "Start-Service -Name 'tacticalrmm' -ErrorAction SilentlyContinue; "
     "Set-Service -Name 'Mesh Agent' -StartupType Manual -ErrorAction SilentlyContinue; "
-    "Stop-Service -Name 'Mesh Agent' -Force -ErrorAction SilentlyContinue; "
+    "sc.exe stop 'Mesh Agent' 2>&1 | Out-Null; "
+    "Start-Sleep -Milliseconds 1000; "
     "Stop-Process -Name 'MeshAgent*' -Force -ErrorAction SilentlyContinue"
 )
 
@@ -697,8 +698,30 @@ _WINDOWS_MESH_WAKE_CMD = (
     "    $stype = if ($ptype -eq 1) { 'Manual' } else { 'Automatic' }; "
     "    Set-Service -Name 'Mesh Agent' -StartupType $stype -ErrorAction SilentlyContinue "
     "  }; "
-    "  if ($svc.Status -ne 'Running') { Start-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue }; "
-    "  $svc = Get-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue "
+    "  if ($svc.Status -ne 'Running') { "
+    "    if ($svc.Status -eq 'StopPending' -or $svc.Status -eq 'PausePending' -or $svc.Status -eq 'StartPending') { "
+    "      if ($wmiSvc -and $wmiSvc.ProcessId -gt 0) { Stop-Process -Id $wmiSvc.ProcessId -Force -ErrorAction SilentlyContinue }; "
+    "      Stop-Process -Name 'MeshAgent*' -Force -ErrorAction SilentlyContinue; "
+    "      for ($i = 0; $i -lt 8; $i++) { "
+    "        Start-Sleep -Milliseconds 400; "
+    "        $svc = Get-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue; "
+    "        if (-not $svc -or $svc.Status -eq 'Stopped') { break } "
+    "      } "
+    "    }; "
+    "    Start-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue; "
+    "    for ($i = 0; $i -lt 6; $i++) { "
+    "      $svc = Get-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue; "
+    "      if (-not $svc -or $svc.Status -eq 'Running') { break }; "
+    "      Start-Sleep -Milliseconds 400 "
+    "    }; "
+    "    if ($svc -and $svc.Status -ne 'Running') { "
+    "      Stop-Process -Name 'MeshAgent*' -Force -ErrorAction SilentlyContinue; "
+    "      Start-Sleep -Milliseconds 900; "
+    "      Start-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue; "
+    "      Start-Sleep -Milliseconds 700; "
+    "      $svc = Get-Service -Name 'Mesh Agent' -ErrorAction SilentlyContinue "
+    "    } "
+    "  } "
     "}; "
     "$exe = $null; "
     "$regDir = (Get-ItemProperty 'HKLM:\\SOFTWARE\\TacticalRMM' -ErrorAction SilentlyContinue).MeshDir; "
@@ -761,6 +784,20 @@ def _parse_mesh_wake_output(raw_out: object) -> dict:
                         info["node_id"] = nid
             break
     return info
+
+
+def _nats_ping_with_retry(agent, timeouts: tuple[float, ...] = (3.0, 4.5)) -> str:
+    """Ping agent over NATS with retry to tolerate transient Windows/network jitter."""
+    last_res = "timeout"
+    for timeout_s in timeouts:
+        try:
+            res = asyncio.run(agent.nats_cmd({"func": "ping"}, timeout=timeout_s))
+        except Exception:
+            res = "timeout"
+        if res in ("pong", "natsdown"):
+            return str(res)
+        last_res = str(res or "timeout")
+    return last_res
 
 
 def ensure_agent_mesh_connection(
@@ -850,17 +887,17 @@ def ensure_agent_mesh_connection(
 
     # If MeshCentral already confirms active connection, perform a single quick NATS ping for accurate status
     if result["mesh_connected"] and result["mesh_node_found"]:
-        with suppress(Exception):
-            ping_res = asyncio.run(agent.nats_cmd({"func": "ping"}, timeout=2))
-            if ping_res == "pong":
-                result["nats_online"] = True
-                result["live_status"] = AGENT_STATUS_ONLINE
+        ping_res = _nats_ping_with_retry(agent, timeouts=(2.5,))
+        if ping_res == "pong":
+            result["nats_online"] = True
+            result["live_status"] = AGENT_STATUS_ONLINE
+            with suppress(Exception):
                 agent.last_seen = djangotime.now()
                 agent.save(update_fields=["last_seen"])
-            elif ping_res == "natsdown":
-                result["nats_broker_down"] = True
-            else:
-                result["nats_online"] = False
+        elif ping_res == "natsdown":
+            result["nats_broker_down"] = True
+        else:
+            result["nats_online"] = False
         if result["nats_online"]:
             result["mesh_service_status"] = "Running"
         else:
@@ -870,10 +907,8 @@ def ensure_agent_mesh_connection(
             )
         return result
 
-    # 2. Mesh is not connected yet (or unknown/node missing). Verify real-time NATS reachability first.
-    ping_res = "timeout"
-    with suppress(Exception):
-        ping_res = asyncio.run(agent.nats_cmd({"func": "ping"}, timeout=2.5))
+    # 2. Mesh is not connected yet (or unknown/node missing). Verify real-time NATS reachability with retry.
+    ping_res = _nats_ping_with_retry(agent, timeouts=(3.0, 4.5))
 
     if ping_res == "natsdown":
         result["nats_broker_down"] = True
@@ -913,10 +948,10 @@ def ensure_agent_mesh_connection(
                 agent.nats_cmd(
                     {
                         "func": "rawcmd",
-                        "timeout": 10,
+                        "timeout": 14,
                         "payload": {"command": cmd_text, "shell": shell_name},
                     },
-                    timeout=11,
+                    timeout=15,
                 )
             )
 
@@ -930,31 +965,35 @@ def ensure_agent_mesh_connection(
             agent.save(update_fields=["mesh_node_id"])
             result["mesh_node_synced"] = True
 
-        # Wait briefly for MeshAgent -> MeshCentral WebSocket handshake and sync user rights
-        if wait_for_mesh and uri and agent.hex_mesh_node_id != "error":
-            with suppress(Exception):
-                polled = poll_mesh_node_connected(
-                    uri,
-                    agent.hex_mesh_node_id,
-                    mesh_user_id=mesh_user_id,
-                    mesh_username=mesh_username,
-                    mesh_display_name=mesh_display_name,
-                    mesh_email=mesh_email,
-                    sync_user=sync_user,
-                    max_wait_s=6.5,
-                    poll_interval_s=0.85,
-                )
-                result["mesh_reachable"] = bool(polled.get("mesh_reachable"))
-                result["mesh_node_found"] = bool(polled.get("node_found"))
-                result["mesh_connected"] = bool(polled.get("mesh_connected"))
-                if polled.get("rights_synced"):
-                    result["rights_synced"] = True
+    # Wait briefly for MeshAgent -> MeshCentral WebSocket handshake and sync user rights
+    if wait_for_mesh and uri and agent.hex_mesh_node_id != "error":
+        with suppress(Exception):
+            polled = poll_mesh_node_connected(
+                uri,
+                agent.hex_mesh_node_id,
+                mesh_user_id=mesh_user_id,
+                mesh_username=mesh_username,
+                mesh_display_name=mesh_display_name,
+                mesh_email=mesh_email,
+                sync_user=sync_user,
+                max_wait_s=8.5,
+                poll_interval_s=0.75,
+            )
+            result["mesh_reachable"] = bool(polled.get("mesh_reachable"))
+            result["mesh_node_found"] = bool(polled.get("node_found"))
+            result["mesh_connected"] = bool(polled.get("mesh_connected"))
+            if polled.get("rights_synced"):
+                result["rights_synced"] = True
 
     if result["mesh_reachable"] and not result["mesh_connected"]:
         svc_low = str(result["mesh_service_status"] or "").lower()
         bin_missing = result["mesh_binary_exists"] is False
         node_missing = not result["mesh_node_found"] or agent.hex_mesh_node_id == "error"
-        result["needs_recovery"] = bool(bin_missing or node_missing or svc_low in ("missing", "stopped", "inactive", "failed"))
+        result["needs_recovery"] = bool(
+            bin_missing
+            or node_missing
+            or svc_low in ("missing", "stopped", "stoppending", "startpending", "paused", "inactive", "failed")
+        )
 
         if bin_missing:
             result["diagnostic_reason"] = (

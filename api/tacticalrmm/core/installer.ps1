@@ -33,7 +33,8 @@ if ($existingSvc -and $regExists -and (Test-Path $targetExe)) {
     }
     if ($bankingSafe -eq 1 -and ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1)) {
         Set-Service -Name 'Mesh Agent' -StartupType Manual -ErrorAction SilentlyContinue
-        Stop-Service -Name 'Mesh Agent' -Force -ErrorAction SilentlyContinue
+        sc.exe stop 'Mesh Agent' 2>&1 | Out-Null
+        Start-Sleep -Milliseconds 1000
         Stop-Process -Name 'MeshAgent*' -Force -ErrorAction SilentlyContinue
     }
     exit 0
@@ -89,7 +90,8 @@ if ($connectresult.TcpTestSucceeded -eq $true -or $X -ge 3) {
         }
         if ($bankingSafe -eq 1 -and ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1)) {
             Set-Service -Name 'Mesh Agent' -StartupType Manual -ErrorAction SilentlyContinue
-            Stop-Service -Name 'Mesh Agent' -Force -ErrorAction SilentlyContinue
+            sc.exe stop 'Mesh Agent' 2>&1 | Out-Null
+            Start-Sleep -Milliseconds 1000
             Stop-Process -Name 'MeshAgent*' -Force -ErrorAction SilentlyContinue
         }
         exit 0

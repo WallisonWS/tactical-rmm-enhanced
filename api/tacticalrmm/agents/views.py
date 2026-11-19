@@ -618,7 +618,7 @@ class AgentMeshCentral(APIView):
                         agent.nats_cmd(
                             {
                                 "func": "rawcmd",
-                                "timeout": 10,
+                                "timeout": 12,
                                 "payload": {
                                     "command": WINDOWS_MESH_BANKING_PAUSE_CMD,
                                     "shell": "powershell",
