@@ -4194,7 +4194,7 @@ class FleetInventoryAssetsView(APIView):
         agents_qs = (
             Agent.objects.filter_by_role(request.user)
             .select_related("site__client", "inventory_record")
-            .defer("services", "disks", "physical_disks")
+            .defer("services", "disks")
             .order_by("site__client__name", "site__name", "hostname")
         )
         agents_list = list(agents_qs)
@@ -4350,7 +4350,7 @@ class FleetInventoryAssetsView(APIView):
         agents_list = list(
             Agent.objects.filter_by_role(request.user)
             .select_related("site__client")
-            .defer("services", "disks", "physical_disks")
+            .defer("services", "disks")
         )
         lookup = _build_agent_match_lookup(agents_list)
         return Response(
@@ -4391,7 +4391,7 @@ class FleetInventoryAssetDetailView(APIView):
         agents_list = list(
             Agent.objects.filter_by_role(request.user)
             .select_related("site__client")
-            .defer("services", "disks", "physical_disks")
+            .defer("services", "disks")
         )
         lookup = _build_agent_match_lookup(agents_list)
         return Response({"status": "ok", "item": _serialize_standalone_inventory_row(asset, lookup)})
@@ -4455,7 +4455,7 @@ class FleetInventoryAssetImportView(APIView):
         agents_list = list(
             Agent.objects.filter_by_role(request.user)
             .select_related("site__client")
-            .defer("services", "disks", "physical_disks")
+            .defer("services", "disks")
         )
         tactical_lookup = _build_agent_match_lookup(agents_list)
 
