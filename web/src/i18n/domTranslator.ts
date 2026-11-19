@@ -497,6 +497,22 @@ const EXACT_PHRASES: Array<[string, string, string]> = [
   ["No properties matched the filter", "Nenhuma propriedade encontrada para o filtro informado", "No se encontraron propiedades para el filtro"],
   ["Yes (true)", "Sim (true)", "Sí (true)"],
   ["No (false)", "Não (false)", "No (false)"],
+
+  // Reports Menu & Executive Reports Center
+  ["Reports & Audit Center", "Central de Relatórios & Auditoria", "Centro de Informes y Auditoría"],
+  ["Corporate Reports & IT Audit Center", "Central de Relatórios Corporativos & Auditoria de TI", "Centro de Informes Corporativos y Auditoría de TI"],
+  ["Inventory & Executive Management", "Inventário & Gestão Executiva", "Inventario y Gestión Ejecutiva"],
+  ["Compliance, Health & Operations", "Conformidade, Saúde & Operação", "Cumplimiento, Salud y Operación"],
+  ["Executive Summary by Company & Unit", "Resumo Executivo por Empresa & Unidade", "Resumen Ejecutivo por Empresa y Unidad"],
+  ["Health & Failing Checks Report", "Relatório Saúde & Verificações com Falha", "Informe de Salud y Verificaciones con Fallo"],
+  ["Total in Scope", "Total no Escopo", "Total en el Alcance"],
+  ["Monitored Agents", "Agentes Monitorados", "Agentes Monitoreados"],
+  ["Agentless / Network & Clinical", "Sem Agente / Rede & Clín.", "Sin Agente / Red y Clín."],
+  ["With Asset Tag", "Com Nº Patrimônio", "Con N.º de Patrimonio"],
+  ["LAN Inventory", "Inventário LAN", "Inventario LAN"],
+  ["Workgroup (Agentless)", "Workgroup (Sem Agente)", "Workgroup (Sin Agente)"],
+  ["Unverified", "Não Verificado", "No Verificado"],
+  ["Include Agentless LAN Workstations (Workgroup)", "Incluir Estações LAN sem Agente (Workgroup)", "Incluir Estaciones LAN sin Agente (Workgroup)"],
 ];
 
 // Build fast lookup maps for each target locale
