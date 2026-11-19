@@ -523,217 +523,334 @@
                     round
                     dense
                     flat
-                    icon="filter_alt"
-                    :color="isFilteringTable ? 'positive' : ''"
+                    icon="tune"
+                    :color="isFilteringTable ? 'positive' : 'grey-4'"
+                    class="trmm-filter-trigger"
+                    :class="{ 'trmm-filter-trigger--active': isFilteringTable }"
                   >
-                    <q-badge v-if="activeFilterCount > 0" color="positive" floating>
+                    <q-badge v-if="activeFilterCount > 0" color="positive" floating rounded>
                       {{ activeFilterCount }}
                     </q-badge>
                     <q-tooltip>Filtros Avançados ({{ activeFilterCount }} ativos)</q-tooltip>
-                    <q-menu style="min-width: 295px; max-height: 70vh; overflow-y: auto">
-                      <q-list dense class="trmm-scroll-pane">
-                        <q-item-label header class="text-weight-bold text-primary">
-                          Saúde &amp; Manutenção
-                        </q-item-label>
+                    <q-menu
+                      anchor="bottom end"
+                      self="top end"
+                      :offset="[0, 8]"
+                      class="trmm-popover-menu"
+                    >
+                      <div class="trmm-filter-panel column no-wrap">
+                        <!-- Sticky Filter Header -->
+                        <div
+                          class="trmm-filter-header row items-center justify-between no-wrap q-px-md q-py-sm"
+                          :class="$q.dark.isActive ? 'trmm-filter-header--dark' : 'trmm-filter-header--light'"
+                        >
+                          <div class="row items-center no-wrap" style="gap: 8px">
+                            <div class="trmm-filter-hdr-icon">
+                              <q-icon name="tune" size="16px" />
+                            </div>
+                            <span class="text-subtitle2 text-weight-bold">Filtros Avançados</span>
+                            <q-badge
+                              v-if="activeFilterCount > 0"
+                              rounded
+                              color="positive"
+                              text-color="white"
+                              class="text-weight-bold"
+                              style="font-size: 10.5px; padding: 2px 7px"
+                            >
+                              {{ activeFilterCount }} {{ activeFilterCount === 1 ? "ativo" : "ativos" }}
+                            </q-badge>
+                          </div>
+                          <q-btn dense flat round size="xs" icon="close" color="grey-5" v-close-popup />
+                        </div>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-checkbox v-model="filterChecksFailing" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>{{ t("dash.checksFailing") }}</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                        <!-- Single-Layer Scrollable Filter Sections -->
+                        <div class="trmm-filter-body trmm-menu-scroll q-pa-sm q-gutter-y-sm">
+                          <!-- Group 1: Health & Maintenance -->
+                          <div
+                            class="trmm-filter-group q-pa-xs"
+                            :class="$q.dark.isActive ? 'trmm-filter-group--dark' : 'trmm-filter-group--light'"
+                          >
+                            <div class="trmm-filter-group-title row items-center q-px-xs q-pt-xs q-pb-xs">
+                              <q-icon name="health_and_safety" size="15px" color="teal-4" class="q-mr-xs" />
+                              <span>Saúde &amp; Manutenção</span>
+                            </div>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-checkbox v-model="filterPatchesPending" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>{{ t("dash.patchesPending") }}</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                            <q-list dense>
+                              <q-item tag="label" clickable v-ripple class="trmm-filter-row">
+                                <q-item-section side class="q-pr-xs">
+                                  <q-checkbox dense size="sm" color="red-5" v-model="filterChecksFailing" @update:model-value="applyFilter" />
+                                </q-item-section>
+                                <q-item-section side class="q-pr-xs">
+                                  <q-icon name="error_outline" size="16px" color="red-4" />
+                                </q-item-section>
+                                <q-item-section>
+                                  <q-item-label class="text-body2">{{ t("dash.checksFailing") }}</q-item-label>
+                                </q-item-section>
+                              </q-item>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-checkbox v-model="filterActionsPending" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>{{ t("dash.actionsPending") }}</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                              <q-item tag="label" clickable v-ripple class="trmm-filter-row">
+                                <q-item-section side class="q-pr-xs">
+                                  <q-checkbox dense size="sm" color="primary" v-model="filterPatchesPending" @update:model-value="applyFilter" />
+                                </q-item-section>
+                                <q-item-section side class="q-pr-xs">
+                                  <q-icon name="system_update_alt" size="16px" color="blue-4" />
+                                </q-item-section>
+                                <q-item-section>
+                                  <q-item-label class="text-body2">{{ t("dash.patchesPending") }}</q-item-label>
+                                </q-item-section>
+                              </q-item>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-checkbox v-model="filterRebootNeeded" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>{{ t("dash.rebootNeeded") }}</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                              <q-item tag="label" clickable v-ripple class="trmm-filter-row">
+                                <q-item-section side class="q-pr-xs">
+                                  <q-checkbox dense size="sm" color="amber-6" v-model="filterActionsPending" @update:model-value="applyFilter" />
+                                </q-item-section>
+                                <q-item-section side class="q-pr-xs">
+                                  <q-icon name="pending_actions" size="16px" color="amber-5" />
+                                </q-item-section>
+                                <q-item-section>
+                                  <q-item-label class="text-body2">{{ t("dash.actionsPending") }}</q-item-label>
+                                </q-item-section>
+                              </q-item>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-checkbox v-model="filterMaintenance" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>Em Modo de Manutenção</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                              <q-item tag="label" clickable v-ripple class="trmm-filter-row">
+                                <q-item-section side class="q-pr-xs">
+                                  <q-checkbox dense size="sm" color="orange-6" v-model="filterRebootNeeded" @update:model-value="applyFilter" />
+                                </q-item-section>
+                                <q-item-section side class="q-pr-xs">
+                                  <q-icon name="restart_alt" size="16px" color="orange-4" />
+                                </q-item-section>
+                                <q-item-section>
+                                  <q-item-label class="text-body2">{{ t("dash.rebootNeeded") }}</q-item-label>
+                                </q-item-section>
+                              </q-item>
 
-                        <q-separator class="q-my-xs" />
+                              <q-item tag="label" clickable v-ripple class="trmm-filter-row">
+                                <q-item-section side class="q-pr-xs">
+                                  <q-checkbox dense size="sm" color="positive" v-model="filterMaintenance" @update:model-value="applyFilter" />
+                                </q-item-section>
+                                <q-item-section side class="q-pr-xs">
+                                  <q-icon name="engineering" size="16px" color="green-4" />
+                                </q-item-section>
+                                <q-item-section>
+                                  <q-item-label class="text-body2">Em Modo de Manutenção</q-item-label>
+                                </q-item-section>
+                              </q-item>
+                            </q-list>
+                          </div>
 
-                        <q-item-label header class="text-weight-bold text-primary">
-                          {{ t("kpi.availability") }}
-                        </q-item-label>
+                          <!-- Group 2: Availability -->
+                          <div
+                            class="trmm-filter-group q-pa-xs"
+                            :class="$q.dark.isActive ? 'trmm-filter-group--dark' : 'trmm-filter-group--light'"
+                          >
+                            <div class="trmm-filter-group-title row items-center q-px-xs q-pt-xs q-pb-xs">
+                              <q-icon name="sensors" size="15px" color="green-4" class="q-mr-xs" />
+                              <span>{{ t("kpi.availability") }}</span>
+                            </div>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="all" v-model="filterAvailability" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>{{ t("dash.showAllAgents") }}</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                            <q-list dense>
+                              <q-item tag="label" clickable v-ripple class="trmm-filter-row">
+                                <q-item-section side class="q-pr-xs">
+                                  <q-radio dense size="sm" val="all" v-model="filterAvailability" @update:model-value="applyFilter" />
+                                </q-item-section>
+                                <q-item-section side class="q-pr-xs">
+                                  <q-icon name="grid_view" size="15px" color="blue-4" />
+                                </q-item-section>
+                                <q-item-section>
+                                  <q-item-label class="text-body2">{{ t("dash.showAllAgents") }}</q-item-label>
+                                </q-item-section>
+                              </q-item>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="online" v-model="filterAvailability" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>{{ t("dash.showOnlineOnly") }}</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                              <q-item tag="label" clickable v-ripple class="trmm-filter-row">
+                                <q-item-section side class="q-pr-xs">
+                                  <q-radio dense size="sm" color="positive" val="online" v-model="filterAvailability" @update:model-value="applyFilter" />
+                                </q-item-section>
+                                <q-item-section side class="q-pr-xs">
+                                  <span class="trmm-status-dot trmm-status-dot--online" />
+                                </q-item-section>
+                                <q-item-section>
+                                  <q-item-label class="text-body2">{{ t("dash.showOnlineOnly") }}</q-item-label>
+                                </q-item-section>
+                              </q-item>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="disconnected" v-model="filterAvailability" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>Desconectados (Offline + Vencidos)</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                              <q-item tag="label" clickable v-ripple class="trmm-filter-row">
+                                <q-item-section side class="q-pr-xs">
+                                  <q-radio dense size="sm" color="orange-6" val="disconnected" v-model="filterAvailability" @update:model-value="applyFilter" />
+                                </q-item-section>
+                                <q-item-section side class="q-pr-xs">
+                                  <q-icon name="wifi_off" size="15px" color="orange-4" />
+                                </q-item-section>
+                                <q-item-section>
+                                  <q-item-label class="text-body2">Desconectados (Offline + Vencidos)</q-item-label>
+                                </q-item-section>
+                              </q-item>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="offline" v-model="filterAvailability" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>{{ t("dash.showOfflineOnly") }}</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                              <q-item tag="label" clickable v-ripple class="trmm-filter-row">
+                                <q-item-section side class="q-pr-xs">
+                                  <q-radio dense size="sm" color="amber-6" val="offline" v-model="filterAvailability" @update:model-value="applyFilter" />
+                                </q-item-section>
+                                <q-item-section side class="q-pr-xs">
+                                  <q-icon name="cloud_off" size="15px" color="amber-5" />
+                                </q-item-section>
+                                <q-item-section>
+                                  <q-item-label class="text-body2">{{ t("dash.showOfflineOnly") }}</q-item-label>
+                                </q-item-section>
+                              </q-item>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="overdue" v-model="filterAvailability" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>Apenas Vencidos / Overdue</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                              <q-item tag="label" clickable v-ripple class="trmm-filter-row">
+                                <q-item-section side class="q-pr-xs">
+                                  <q-radio dense size="sm" color="red-5" val="overdue" v-model="filterAvailability" @update:model-value="applyFilter" />
+                                </q-item-section>
+                                <q-item-section side class="q-pr-xs">
+                                  <q-icon name="schedule" size="15px" color="red-4" />
+                                </q-item-section>
+                                <q-item-section>
+                                  <q-item-label class="text-body2">Apenas Vencidos / Overdue</q-item-label>
+                                </q-item-section>
+                              </q-item>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="offline_30days" v-model="filterAvailability" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>{{ t("dash.showOffline30Days") }}</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                              <q-item tag="label" clickable v-ripple class="trmm-filter-row">
+                                <q-item-section side class="q-pr-xs">
+                                  <q-radio dense size="sm" color="grey-5" val="offline_30days" v-model="filterAvailability" @update:model-value="applyFilter" />
+                                </q-item-section>
+                                <q-item-section side class="q-pr-xs">
+                                  <q-icon name="history_toggle_off" size="15px" color="grey-5" />
+                                </q-item-section>
+                                <q-item-section>
+                                  <q-item-label class="text-body2">{{ t("dash.showOffline30Days") }}</q-item-label>
+                                </q-item-section>
+                              </q-item>
+                            </q-list>
+                          </div>
 
-                        <q-separator class="q-my-xs" />
+                          <!-- Group 3: Operating System (Compact 2x2 Segmented Grid) -->
+                          <div
+                            class="trmm-filter-group q-pa-xs"
+                            :class="$q.dark.isActive ? 'trmm-filter-group--dark' : 'trmm-filter-group--light'"
+                          >
+                            <div class="trmm-filter-group-title row items-center q-px-xs q-pt-xs q-pb-xs">
+                              <q-icon name="devices" size="15px" color="indigo-4" class="q-mr-xs" />
+                              <span>Sistema Operacional</span>
+                            </div>
 
-                        <q-item-label header class="text-weight-bold text-primary">
-                          Sistema Operacional
-                        </q-item-label>
+                            <div class="trmm-filter-seg-grid q-pa-xs">
+                              <q-btn
+                                dense
+                                no-caps
+                                unelevated
+                                class="trmm-filter-seg-btn"
+                                :class="{ 'trmm-filter-seg-btn--active': filterPlatform === 'all' }"
+                                icon="apps"
+                                label="Todos"
+                                @click="filterPlatform = 'all'; applyFilter()"
+                              />
+                              <q-btn
+                                dense
+                                no-caps
+                                unelevated
+                                class="trmm-filter-seg-btn"
+                                :class="{ 'trmm-filter-seg-btn--active': filterPlatform === 'windows' }"
+                                icon="mdi-microsoft-windows"
+                                label="Windows"
+                                @click="filterPlatform = 'windows'; applyFilter()"
+                              />
+                              <q-btn
+                                dense
+                                no-caps
+                                unelevated
+                                class="trmm-filter-seg-btn"
+                                :class="{ 'trmm-filter-seg-btn--active': filterPlatform === 'linux' }"
+                                icon="mdi-linux"
+                                label="Linux"
+                                @click="filterPlatform = 'linux'; applyFilter()"
+                              />
+                              <q-btn
+                                dense
+                                no-caps
+                                unelevated
+                                class="trmm-filter-seg-btn"
+                                :class="{ 'trmm-filter-seg-btn--active': filterPlatform === 'darwin' }"
+                                icon="mdi-apple"
+                                label="macOS"
+                                @click="filterPlatform = 'darwin'; applyFilter()"
+                              />
+                            </div>
+                          </div>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="all" v-model="filterPlatform" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>Todos os Sistemas</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                          <!-- Group 4: Active Directory (Compact 3-way Segmented Row) -->
+                          <div
+                            class="trmm-filter-group q-pa-xs"
+                            :class="$q.dark.isActive ? 'trmm-filter-group--dark' : 'trmm-filter-group--light'"
+                          >
+                            <div class="trmm-filter-group-title row items-center q-px-xs q-pt-xs q-pb-xs">
+                              <q-icon name="hub" size="15px" color="purple-4" class="q-mr-xs" />
+                              <span>Active Directory (AD)</span>
+                            </div>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="windows" v-model="filterPlatform" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>Windows</q-item-label>
-                          </q-item-section>
-                        </q-item>
+                            <div class="trmm-filter-seg-row q-pa-xs">
+                              <q-btn
+                                dense
+                                no-caps
+                                unelevated
+                                class="trmm-filter-seg-btn"
+                                :class="{ 'trmm-filter-seg-btn--active': filterAdStatus === 'all' }"
+                                icon="apps"
+                                label="Todos"
+                                @click="filterAdStatus = 'all'; applyFilter()"
+                              />
+                              <q-btn
+                                dense
+                                no-caps
+                                unelevated
+                                class="trmm-filter-seg-btn"
+                                :class="{ 'trmm-filter-seg-btn--active': filterAdStatus === 'inad' }"
+                                icon="verified_user"
+                                label="No AD"
+                                @click="filterAdStatus = 'inad'; applyFilter()"
+                              />
+                              <q-btn
+                                dense
+                                no-caps
+                                unelevated
+                                class="trmm-filter-seg-btn"
+                                :class="{ 'trmm-filter-seg-btn--active-amber': filterAdStatus === 'outsidead' }"
+                                icon="domain_disabled"
+                                label="Fora do AD"
+                                @click="filterAdStatus = 'outsidead'; applyFilter()"
+                              />
+                            </div>
+                          </div>
+                        </div>
 
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="linux" v-model="filterPlatform" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>Linux</q-item-label>
-                          </q-item-section>
-                        </q-item>
-
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="darwin" v-model="filterPlatform" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>macOS</q-item-label>
-                          </q-item-section>
-                        </q-item>
-
-                        <q-separator class="q-my-xs" />
-
-                        <q-item-label header class="text-weight-bold text-primary">
-                          Active Directory (AD)
-                        </q-item-label>
-
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="all" v-model="filterAdStatus" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>Todos</q-item-label>
-                          </q-item-section>
-                        </q-item>
-
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="inad" v-model="filterAdStatus" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>Ingressados no AD</q-item-label>
-                          </q-item-section>
-                        </q-item>
-
-                        <q-item tag="label" clickable v-ripple>
-                          <q-item-section side>
-                            <q-radio val="outsidead" v-model="filterAdStatus" @update:model-value="applyFilter" />
-                          </q-item-section>
-                          <q-item-section>
-                            <q-item-label>Fora do AD / Workgroup</q-item-label>
-                          </q-item-section>
-                        </q-item>
-                      </q-list>
-
-                      <div class="row no-wrap q-pa-sm q-gutter-sm justify-between">
-                        <q-btn
-                          outline
-                          no-caps
-                          dense
-                          color="grey"
-                          :label="t('dash.clear')"
-                          @click="clearFilter"
-                        />
-                        <q-btn
-                          v-close-popup
-                          unelevated
-                          no-caps
-                          dense
-                          color="primary"
-                          label="Fechar"
-                        />
+                        <!-- Sticky Filter Footer -->
+                        <div
+                          class="trmm-filter-footer row no-wrap q-px-md q-py-xs justify-between items-center"
+                          :class="$q.dark.isActive ? 'trmm-filter-header--dark' : 'trmm-filter-header--light'"
+                        >
+                          <q-btn
+                            flat
+                            no-caps
+                            dense
+                            size="sm"
+                            icon="filter_alt_off"
+                            color="grey-5"
+                            :disable="activeFilterCount === 0"
+                            :label="t('dash.clear')"
+                            @click="clearFilter"
+                          />
+                          <q-btn
+                            v-close-popup
+                            unelevated
+                            no-caps
+                            dense
+                            size="sm"
+                            icon="check"
+                            color="primary"
+                            label="Aplicar"
+                            class="q-px-md"
+                            style="border-radius: 7px"
+                          />
+                        </div>
                       </div>
                     </q-menu>
                   </q-btn>
@@ -750,12 +867,7 @@
             </div>
           </template>
           <template v-slot:separator>
-            <q-avatar
-              color="primary"
-              text-color="white"
-              size="20px"
-              icon="drag_indicator"
-            />
+            <div class="trmm-splitter-grip" title="Arraste para redimensionar" />
           </template>
           <template v-slot:after>
             <SubTableTabs />
@@ -1631,5 +1743,147 @@ body.body--light .trmm-action-btn--ad {
 body.body--light .trmm-action-btn--reports {
   color: #0369a1 !important;
   border-color: rgba(3, 105, 161, 0.4);
+}
+
+/* Advanced Filter Popover Menu */
+.trmm-filter-trigger {
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(148, 163, 184, 0.08);
+  transition: all 0.15s ease;
+}
+
+.trmm-filter-trigger:hover {
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.trmm-filter-trigger--active {
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.trmm-filter-panel {
+  width: 348px;
+  max-width: 92vw;
+  max-height: min(76vh, 630px);
+  overflow: hidden;
+}
+
+.trmm-filter-header {
+  flex: 0 0 auto;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.trmm-filter-footer {
+  flex: 0 0 auto;
+  min-height: 44px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.trmm-filter-header--dark {
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.trmm-filter-header--light {
+  background: #f1f5f9;
+}
+
+.trmm-filter-hdr-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(25, 118, 210, 0.2);
+  color: #60a5fa;
+}
+
+body.body--light .trmm-filter-hdr-icon {
+  color: #1d4ed8;
+  background: rgba(25, 118, 210, 0.12);
+}
+
+.trmm-filter-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.trmm-filter-group {
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.trmm-filter-group--dark {
+  background: rgba(148, 163, 184, 0.05);
+}
+
+.trmm-filter-group--light {
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+.trmm-filter-group-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+  color: #94a3b8;
+}
+
+body.body--light .trmm-filter-group-title {
+  color: #64748b;
+}
+
+.trmm-filter-row {
+  min-height: 32px !important;
+  border-radius: 7px;
+  padding: 2px 6px !important;
+  transition: background-color 0.13s ease;
+}
+
+.trmm-filter-row:hover {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.trmm-filter-seg-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.trmm-filter-seg-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.trmm-filter-seg-btn {
+  border-radius: 7px !important;
+  min-height: 30px !important;
+  font-size: 11.5px !important;
+  font-weight: 500;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(148, 163, 184, 0.08);
+  transition: all 0.14s ease;
+}
+
+.trmm-filter-seg-btn:hover {
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.trmm-filter-seg-btn--active {
+  background: var(--q-primary, #1976d2) !important;
+  border-color: var(--q-primary, #1976d2) !important;
+  color: #ffffff !important;
+  font-weight: 600;
+}
+
+.trmm-filter-seg-btn--active-amber {
+  background: #d97706 !important;
+  border-color: #d97706 !important;
+  color: #ffffff !important;
+  font-weight: 600;
 }
 </style>

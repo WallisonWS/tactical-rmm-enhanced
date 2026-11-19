@@ -98,7 +98,7 @@
           @click="agentRowSelected(props.row.agent_id, props.row.plat)"
           @dblclick="rowDoubleClicked(props.row.agent_id, props.row.plat)"
         >
-          <q-menu context-menu>
+          <q-menu context-menu class="trmm-popover-menu">
             <AgentActionMenu :agent="props.row" />
           </q-menu>
           <q-td>

@@ -1,323 +1,427 @@
 <template>
-  <q-list dense style="min-width: 200px">
-    <!-- edit agent -->
-    <q-item clickable v-close-popup @click="showEditAgent(agent.agent_id)">
-      <q-item-section side>
-        <q-icon size="xs" name="fas fa-edit" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.edit") }} {{ agent.hostname }}</q-item-section>
-    </q-item>
-    <!-- agent pending actions -->
-    <q-item clickable v-close-popup @click="showPendingActionsModal(agent)">
-      <q-item-section side>
-        <q-icon size="xs" name="far fa-clock" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.pendingActions") }}</q-item-section>
-    </q-item>
-    <!-- take control -->
-    <q-item
-      clickable
-      v-ripple
-      v-close-popup
-      @click="runTakeControl(agent.agent_id)"
+  <div class="trmm-agent-menu column no-wrap">
+    <!-- Sticky Hostname Header -->
+    <div
+      class="trmm-am-header row items-center justify-between no-wrap q-px-md q-py-xs"
+      :class="$q.dark.isActive ? 'trmm-am-header--dark' : 'trmm-am-header--light'"
     >
-      <q-item-section side>
-        <q-icon size="xs" name="fas fa-desktop" />
-      </q-item-section>
+      <div class="row items-center no-wrap" style="gap: 7px; min-width: 0">
+        <span
+          class="trmm-am-dot"
+          :class="
+            agent.status === 'overdue'
+              ? 'trmm-am-dot--negative'
+              : agent.status === 'offline'
+                ? 'trmm-am-dot--warning'
+                : 'trmm-am-dot--positive'
+          "
+        />
+        <span class="text-caption text-weight-bold ellipsis">{{ agent.hostname }}</span>
+      </div>
+      <q-btn dense flat round size="xs" icon="close" color="grey-5" v-close-popup />
+    </div>
 
-      <q-item-section>{{ t("menu.takeControl") }}</q-item-section>
-    </q-item>
+    <!-- Single-Layer Scrollable Action List -->
+    <div class="trmm-am-body trmm-menu-scroll">
+      <q-list dense class="q-py-xs">
+        <!-- Section: Remote Access -->
+        <div class="trmm-am-section-label">Acesso Remoto</div>
 
-    <!-- vnc -->
-    <q-item
-      clickable
-      v-ripple
-      v-close-popup
-      @click="launchWebVNC(agent.agent_id)"
-    >
-      <q-item-section side>
-        <q-icon size="xs" name="screen_share" />
-      </q-item-section>
+        <q-item
+          clickable
+          v-ripple
+          v-close-popup
+          class="trmm-am-item"
+          @click="runTakeControl(agent.agent_id)"
+        >
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--blue">
+              <q-icon size="15px" name="connected_tv" />
+            </div>
+          </q-item-section>
+          <q-item-section class="text-weight-medium">{{ t("menu.takeControl") }}</q-item-section>
+        </q-item>
 
-      <q-item-section>VNC</q-item-section>
-    </q-item>
+        <q-item
+          clickable
+          v-ripple
+          v-close-popup
+          class="trmm-am-item"
+          @click="launchWebVNC(agent.agent_id)"
+        >
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--sky">
+              <q-icon size="15px" name="cast_connected" />
+            </div>
+          </q-item-section>
+          <q-item-section>VNC</q-item-section>
+        </q-item>
 
-    <q-item clickable v-ripple>
-      <q-item-section side>
-        <q-icon size="xs" name="open_in_new" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.runUrlAction") }}</q-item-section>
-      <q-item-section side>
-        <q-icon name="keyboard_arrow_right" />
-      </q-item-section>
-      <q-menu auto-close anchor="top end" self="top start">
-        <q-list dense style="min-width: 220px">
-          <q-item
-            v-for="action in urlActions"
-            :key="action.id"
-            dense
-            clickable
-            v-close-popup
-            @click="
-              runURLAction({ agent_id: agent.agent_id, action: action.id })
-            "
-          >
-            <q-item-section>{{ action.name }}</q-item-section>
-          </q-item>
-          <q-item
-            v-if="urlActions.length === 0"
-            dense
-            clickable
-            v-close-popup
-            @click="openGlobalSettingsModal"
-          >
-            <q-item-section side>
-              <q-icon size="xs" name="settings" color="primary" />
-            </q-item-section>
-            <q-item-section>Cadastrar Ações de URL (Configurações Globais)</q-item-section>
-          </q-item>
-        </q-list>
-      </q-menu>
-    </q-item>
+        <q-item
+          clickable
+          v-ripple
+          v-close-popup
+          class="trmm-am-item"
+          @click="runRemoteBackground(agent.agent_id, agent.plat)"
+        >
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--teal">
+              <q-icon size="15px" name="terminal" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.remoteBg") }}</q-item-section>
+        </q-item>
 
-    <q-item clickable v-ripple v-close-popup @click="showSendCommand(agent)">
-      <q-item-section side>
-        <q-icon size="xs" name="fas fa-terminal" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.sendCommand") }}</q-item-section>
-    </q-item>
+        <q-item clickable v-ripple class="trmm-am-item">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--sky">
+              <q-icon size="15px" name="open_in_new" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.runUrlAction") }}</q-item-section>
+          <q-item-section side>
+            <q-icon size="16px" name="chevron_right" color="grey-5" />
+          </q-item-section>
+          <q-menu auto-close anchor="top end" self="top start" class="trmm-popover-menu">
+            <q-list dense style="min-width: 230px" class="q-py-xs">
+              <q-item
+                v-for="action in urlActions"
+                :key="action.id"
+                dense
+                clickable
+                v-close-popup
+                class="trmm-am-item"
+                @click="
+                  runURLAction({ agent_id: agent.agent_id, action: action.id })
+                "
+              >
+                <q-item-section side>
+                  <q-icon size="15px" name="link" color="primary" />
+                </q-item-section>
+                <q-item-section>{{ action.name }}</q-item-section>
+              </q-item>
+              <q-item
+                v-if="urlActions.length === 0"
+                dense
+                clickable
+                v-close-popup
+                class="trmm-am-item"
+                @click="openGlobalSettingsModal"
+              >
+                <q-item-section side>
+                  <q-icon size="15px" name="settings" color="primary" />
+                </q-item-section>
+                <q-item-section>Cadastrar Ações de URL (Configurações Globais)</q-item-section>
+              </q-item>
+            </q-list>
+          </q-menu>
+        </q-item>
 
-    <q-item clickable v-ripple v-close-popup @click="showRunScript(agent)">
-      <q-item-section side>
-        <q-icon size="xs" name="fas fa-terminal" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.runScript") }}</q-item-section>
-    </q-item>
+        <q-separator class="q-my-xs trmm-am-sep" />
 
-    <q-item clickable v-ripple>
-      <q-item-section side>
-        <q-icon size="xs" name="star" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.runFavScript") }}</q-item-section>
-      <q-item-section side>
-        <q-icon name="keyboard_arrow_right" />
-      </q-item-section>
-      <q-menu auto-close anchor="top end" self="top start">
-        <q-list dense style="min-width: 220px">
-          <q-item
-            v-for="script in favoriteScripts"
-            :key="script.value"
-            dense
-            clickable
-            v-close-popup
-            @click="showRunScript(agent, script.value)"
-          >
-            <q-item-section>{{ script.label }}</q-item-section>
-          </q-item>
-          <q-item
-            v-if="favoriteScripts.length === 0"
-            dense
-            clickable
-            v-close-popup
-            @click="openScriptManagerModal"
-          >
-            <q-item-section side>
-              <q-icon size="xs" name="star" color="amber" />
-            </q-item-section>
-            <q-item-section>Marcar Scripts Favoritos (Gerenciador de Scripts)</q-item-section>
-          </q-item>
-        </q-list>
-      </q-menu>
-    </q-item>
+        <!-- Section: Commands & Automation -->
+        <div class="trmm-am-section-label">Comandos &amp; Automação</div>
 
-    <q-item
-      clickable
-      v-close-popup
-      @click="runRemoteBackground(agent.agent_id, agent.plat)"
-    >
-      <q-item-section side>
-        <q-icon size="xs" name="terminal" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.remoteBg") }}</q-item-section>
-    </q-item>
+        <q-item clickable v-ripple v-close-popup class="trmm-am-item" @click="showSendCommand(agent)">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--indigo">
+              <q-icon size="15px" name="code" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.sendCommand") }}</q-item-section>
+        </q-item>
 
-    <!-- maintenance mode -->
-    <q-item clickable v-close-popup @click="toggleMaintenance(agent)">
-      <q-item-section side>
-        <q-icon size="xs" name="construction" />
-      </q-item-section>
-      <q-item-section>
-        {{
-          agent.maintenance_mode
-            ? t("menu.disableMaint")
-            : t("menu.enableMaint")
-        }}
-      </q-item-section>
-    </q-item>
+        <q-item clickable v-ripple v-close-popup class="trmm-am-item" @click="showRunScript(agent)">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--purple">
+              <q-icon size="15px" name="play_circle_outline" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.runScript") }}</q-item-section>
+        </q-item>
 
-    <!-- patch management -->
-    <q-item clickable>
-      <q-item-section side>
-        <q-icon size="xs" name="system_update" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.patchMgmt") }}</q-item-section>
-      <q-item-section side>
-        <q-icon name="keyboard_arrow_right" />
-      </q-item-section>
+        <q-item clickable v-ripple class="trmm-am-item">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--amber">
+              <q-icon size="15px" name="star_outline" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.runFavScript") }}</q-item-section>
+          <q-item-section side>
+            <q-icon size="16px" name="chevron_right" color="grey-5" />
+          </q-item-section>
+          <q-menu auto-close anchor="top end" self="top start" class="trmm-popover-menu">
+            <q-list dense style="min-width: 230px" class="q-py-xs">
+              <q-item
+                v-for="script in favoriteScripts"
+                :key="script.value"
+                dense
+                clickable
+                v-close-popup
+                class="trmm-am-item"
+                @click="showRunScript(agent, script.value)"
+              >
+                <q-item-section side>
+                  <q-icon size="15px" name="star" color="amber-5" />
+                </q-item-section>
+                <q-item-section>{{ script.label }}</q-item-section>
+              </q-item>
+              <q-item
+                v-if="favoriteScripts.length === 0"
+                dense
+                clickable
+                v-close-popup
+                class="trmm-am-item"
+                @click="openScriptManagerModal"
+              >
+                <q-item-section side>
+                  <q-icon size="15px" name="star" color="amber" />
+                </q-item-section>
+                <q-item-section>Marcar Scripts Favoritos (Gerenciador de Scripts)</q-item-section>
+              </q-item>
+            </q-list>
+          </q-menu>
+        </q-item>
 
-      <q-menu auto-close anchor="top right" self="top left">
-        <q-list dense style="min-width: 100px">
-          <q-item clickable v-ripple @click="runPatchStatusScan(agent)">
-            <q-item-section>{{ t("menu.scanPatches") }}</q-item-section>
-          </q-item>
-          <q-item clickable v-ripple @click="installPatches(agent)">
-            <q-item-section>{{ t("menu.installPatches") }}</q-item-section>
-          </q-item>
-        </q-list>
-      </q-menu>
-    </q-item>
+        <q-item clickable v-ripple v-close-popup class="trmm-am-item" @click="runChecks(agent)">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--emerald">
+              <q-icon size="15px" name="task_alt" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.runChecks") }}</q-item-section>
+        </q-item>
 
-    <q-item clickable v-close-popup @click="runChecks(agent)">
-      <q-item-section side>
-        <q-icon size="xs" name="fas fa-check-double" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.runChecks") }}</q-item-section>
-    </q-item>
+        <!-- Ferramentas Equipe de TI -->
+        <q-item clickable v-ripple class="trmm-am-item">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--teal">
+              <q-icon size="15px" name="handyman" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.enhancedTools") }}</q-item-section>
+          <q-item-section side>
+            <q-icon size="16px" name="chevron_right" color="grey-5" />
+          </q-item-section>
+          <q-menu auto-close anchor="top right" self="top left" class="trmm-popover-menu">
+            <q-list dense style="min-width: 245px" class="q-py-xs">
+              <q-item clickable v-ripple class="trmm-am-item" @click="quickDownloadRDP(agent)">
+                <q-item-section side>
+                  <q-icon size="16px" name="cast_connected" color="primary" />
+                </q-item-section>
+                <q-item-section>Conectar / Baixar .RDP (1-Clique)</q-item-section>
+              </q-item>
+              <q-item clickable v-ripple class="trmm-am-item" @click="quickEnableRDP(agent)">
+                <q-item-section side>
+                  <q-icon size="16px" name="lock_open" color="positive" />
+                </q-item-section>
+                <q-item-section>Habilitar RDP Seguro (NLA)</q-item-section>
+              </q-item>
+              <q-separator class="q-my-xs" />
+              <q-item clickable v-ripple class="trmm-am-item" @click="quickAdminAction(agent, 'gpupdate_force')">
+                <q-item-section side>
+                  <q-icon size="16px" name="policy" color="info" />
+                </q-item-section>
+                <q-item-section>Forçar GPO (gpupdate /force)</q-item-section>
+              </q-item>
+              <q-item clickable v-ripple class="trmm-am-item" @click="quickAdminAction(agent, 'clear_print_spooler')">
+                <q-item-section side>
+                  <q-icon size="16px" name="print" color="teal" />
+                </q-item-section>
+                <q-item-section>Resetar Spooler de Impressão</q-item-section>
+              </q-item>
+              <q-item clickable v-ripple class="trmm-am-item" @click="quickSelfHeal(agent, 'disk_cleanup', 'disk')">
+                <q-item-section side>
+                  <q-icon size="16px" name="cleaning_services" color="amber-8" />
+                </q-item-section>
+                <q-item-section>Limpar Arquivos Temporários</q-item-section>
+              </q-item>
+              <q-separator class="q-my-xs" />
+              <q-item clickable v-ripple class="trmm-am-item" @click="quickSendUserNotice(agent)">
+                <q-item-section side>
+                  <q-icon size="16px" name="campaign" color="orange" />
+                </q-item-section>
+                <q-item-section>Enviar Aviso TI na Tela</q-item-section>
+              </q-item>
+            </q-list>
+          </q-menu>
+        </q-item>
 
-    <!-- Ferramentas Equipe de TI -->
-    <q-item clickable>
-      <q-item-section side>
-        <q-icon size="xs" name="build" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.enhancedTools") }}</q-item-section>
-      <q-item-section side>
-        <q-icon name="keyboard_arrow_right" />
-      </q-item-section>
-      <q-menu auto-close anchor="top right" self="top left">
-        <q-list dense style="min-width: 220px">
-          <q-item clickable v-ripple @click="quickDownloadRDP(agent)">
-            <q-item-section side>
-              <q-icon size="xs" name="computer" color="primary" />
-            </q-item-section>
-            <q-item-section>Conectar / Baixar .RDP (1-Clique)</q-item-section>
-          </q-item>
-          <q-item clickable v-ripple @click="quickEnableRDP(agent)">
-            <q-item-section side>
-              <q-icon size="xs" name="lock_open" color="positive" />
-            </q-item-section>
-            <q-item-section>Habilitar RDP Seguro (NLA)</q-item-section>
-          </q-item>
-          <q-separator />
-          <q-item clickable v-ripple @click="quickAdminAction(agent, 'gpupdate_force')">
-            <q-item-section side>
-              <q-icon size="xs" name="policy" color="info" />
-            </q-item-section>
-            <q-item-section>Forçar GPO (gpupdate /force)</q-item-section>
-          </q-item>
-          <q-item clickable v-ripple @click="quickAdminAction(agent, 'clear_print_spooler')">
-            <q-item-section side>
-              <q-icon size="xs" name="print" color="teal" />
-            </q-item-section>
-            <q-item-section>Resetar Spooler de Impressão</q-item-section>
-          </q-item>
-          <q-item clickable v-ripple @click="quickSelfHeal(agent, 'disk_cleanup', 'disk')">
-            <q-item-section side>
-              <q-icon size="xs" name="cleaning_services" color="amber-8" />
-            </q-item-section>
-            <q-item-section>Limpar Arquivos Temporários</q-item-section>
-          </q-item>
-          <q-separator />
-          <q-item clickable v-ripple @click="quickSendUserNotice(agent)">
-            <q-item-section side>
-              <q-icon size="xs" name="campaign" color="orange" />
-            </q-item-section>
-            <q-item-section>Enviar Aviso TI na Tela</q-item-section>
-          </q-item>
-        </q-list>
-      </q-menu>
-    </q-item>
+        <q-separator class="q-my-xs trmm-am-sep" />
 
-    <q-item clickable v-close-popup @click="wakeUp(agent)">
-      <q-item-section side>
-        <q-icon size="xs" name="offline_bolt" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.wakeUp") }}</q-item-section>
-    </q-item>
+        <!-- Section: Maintenance & Patches -->
+        <div class="trmm-am-section-label">Manutenção &amp; Patches</div>
 
-    <q-item clickable>
-      <q-item-section side>
-        <q-icon size="xs" name="power_settings_new" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.reboot") }}</q-item-section>
-      <q-item-section side>
-        <q-icon name="keyboard_arrow_right" />
-      </q-item-section>
+        <q-item clickable v-ripple class="trmm-am-item">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--blue">
+              <q-icon size="15px" name="system_update_alt" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.patchMgmt") }}</q-item-section>
+          <q-item-section side>
+            <q-icon size="16px" name="chevron_right" color="grey-5" />
+          </q-item-section>
 
-      <q-menu auto-close anchor="top right" self="top left">
-        <q-list dense style="min-width: 100px">
-          <!-- reboot now -->
-          <q-item clickable v-ripple @click="rebootNow(agent)">
-            <q-item-section>{{ t("menu.rebootNow") }}</q-item-section>
-          </q-item>
-          <!-- reboot later -->
-          <q-item clickable v-ripple @click="showRebootLaterModal(agent)">
-            <q-item-section>{{ t("menu.rebootLater") }}</q-item-section>
-          </q-item>
-        </q-list>
-      </q-menu>
-    </q-item>
+          <q-menu auto-close anchor="top right" self="top left" class="trmm-popover-menu">
+            <q-list dense style="min-width: 195px" class="q-py-xs">
+              <q-item clickable v-ripple class="trmm-am-item" @click="runPatchStatusScan(agent)">
+                <q-item-section side>
+                  <q-icon size="16px" name="manage_search" color="primary" />
+                </q-item-section>
+                <q-item-section>{{ t("menu.scanPatches") }}</q-item-section>
+              </q-item>
+              <q-item clickable v-ripple class="trmm-am-item" @click="installPatches(agent)">
+                <q-item-section side>
+                  <q-icon size="16px" name="download_for_offline" color="positive" />
+                </q-item-section>
+                <q-item-section>{{ t("menu.installPatches") }}</q-item-section>
+              </q-item>
+            </q-list>
+          </q-menu>
+        </q-item>
 
-    <q-item clickable v-close-popup @click="shutdown(agent)">
-      <q-item-section side>
-        <q-icon size="xs" name="power" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.shutdown") }}</q-item-section>
-    </q-item>
+        <q-item clickable v-ripple v-close-popup class="trmm-am-item" @click="toggleMaintenance(agent)">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--amber">
+              <q-icon size="15px" name="engineering" />
+            </div>
+          </q-item-section>
+          <q-item-section>
+            {{
+              agent.maintenance_mode
+                ? t("menu.disableMaint")
+                : t("menu.enableMaint")
+            }}
+          </q-item-section>
+        </q-item>
 
-    <q-item clickable v-close-popup @click="showPolicyAdd(agent)">
-      <q-item-section side>
-        <q-icon size="xs" name="policy" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.assignPolicy") }}</q-item-section>
-    </q-item>
+        <q-item clickable v-ripple v-close-popup class="trmm-am-item" @click="showPendingActionsModal(agent)">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--orange">
+              <q-icon size="15px" name="pending_actions" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.pendingActions") }}</q-item-section>
+        </q-item>
 
-    <q-item
-      clickable
-      v-if="
-        $integrations &&
-        $integrations.agentMenuIntegrations &&
-        $integrations.agentMenuIntegrations.length > 0
-      "
-    >
-      <q-item-section side>
-        <q-icon size="xs" name="analytics" />
-      </q-item-section>
-      <q-item-section>{{ t("filebar.reporting") }}</q-item-section>
-      <q-item-section side>
-        <q-icon name="keyboard_arrow_right" />
-      </q-item-section>
-      <integrations-context-menu type="agent" :id="agent.agent_id" />
-    </q-item>
+        <q-separator class="q-my-xs trmm-am-sep" />
 
-    <q-item clickable v-close-popup @click="showAgentRecovery(agent)">
-      <q-item-section side>
-        <q-icon size="xs" name="fas fa-first-aid" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.agentRecovery") }}</q-item-section>
-    </q-item>
+        <!-- Section: Power -->
+        <div class="trmm-am-section-label">Energia</div>
 
-    <q-item clickable v-close-popup @click="pingAgent(agent)">
-      <q-item-section side>
-        <q-icon size="xs" name="delete" />
-      </q-item-section>
-      <q-item-section>{{ t("menu.removeAgent") }}</q-item-section>
-    </q-item>
+        <q-item clickable v-ripple v-close-popup class="trmm-am-item" @click="wakeUp(agent)">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--emerald">
+              <q-icon size="15px" name="bolt" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.wakeUp") }}</q-item-section>
+        </q-item>
 
-    <q-separator />
-    <q-item clickable v-close-popup>
-      <q-item-section>Close</q-item-section>
-    </q-item>
-  </q-list>
+        <q-item clickable v-ripple class="trmm-am-item">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--orange">
+              <q-icon size="15px" name="restart_alt" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.reboot") }}</q-item-section>
+          <q-item-section side>
+            <q-icon size="16px" name="chevron_right" color="grey-5" />
+          </q-item-section>
+
+          <q-menu auto-close anchor="top right" self="top left" class="trmm-popover-menu">
+            <q-list dense style="min-width: 185px" class="q-py-xs">
+              <q-item clickable v-ripple class="trmm-am-item" @click="rebootNow(agent)">
+                <q-item-section side>
+                  <q-icon size="16px" name="flash_on" color="orange" />
+                </q-item-section>
+                <q-item-section>{{ t("menu.rebootNow") }}</q-item-section>
+              </q-item>
+              <q-item clickable v-ripple class="trmm-am-item" @click="showRebootLaterModal(agent)">
+                <q-item-section side>
+                  <q-icon size="16px" name="schedule" color="primary" />
+                </q-item-section>
+                <q-item-section>{{ t("menu.rebootLater") }}</q-item-section>
+              </q-item>
+            </q-list>
+          </q-menu>
+        </q-item>
+
+        <q-item clickable v-ripple v-close-popup class="trmm-am-item trmm-am-item--danger" @click="shutdown(agent)">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--red">
+              <q-icon size="15px" name="power_settings_new" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.shutdown") }}</q-item-section>
+        </q-item>
+
+        <q-separator class="q-my-xs trmm-am-sep" />
+
+        <!-- Section: Administration -->
+        <div class="trmm-am-section-label">Administração</div>
+
+        <q-item clickable v-ripple v-close-popup class="trmm-am-item" @click="showEditAgent(agent.agent_id)">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--slate">
+              <q-icon size="15px" name="tune" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.edit") }} {{ agent.hostname }}</q-item-section>
+        </q-item>
+
+        <q-item clickable v-ripple v-close-popup class="trmm-am-item" @click="showPolicyAdd(agent)">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--purple">
+              <q-icon size="15px" name="policy" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.assignPolicy") }}</q-item-section>
+        </q-item>
+
+        <q-item
+          clickable
+          v-ripple
+          class="trmm-am-item"
+          v-if="
+            $integrations &&
+            $integrations.agentMenuIntegrations &&
+            $integrations.agentMenuIntegrations.length > 0
+          "
+        >
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--sky">
+              <q-icon size="15px" name="analytics" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("filebar.reporting") }}</q-item-section>
+          <q-item-section side>
+            <q-icon size="16px" name="chevron_right" color="grey-5" />
+          </q-item-section>
+          <integrations-context-menu type="agent" :id="agent.agent_id" />
+        </q-item>
+
+        <q-item clickable v-ripple v-close-popup class="trmm-am-item" @click="showAgentRecovery(agent)">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--teal">
+              <q-icon size="15px" name="medical_services" />
+            </div>
+          </q-item-section>
+          <q-item-section>{{ t("menu.agentRecovery") }}</q-item-section>
+        </q-item>
+
+        <q-item clickable v-ripple v-close-popup class="trmm-am-item trmm-am-item--danger" @click="pingAgent(agent)">
+          <q-item-section side>
+            <div class="trmm-am-icon trmm-am-icon--red">
+              <q-icon size="15px" name="delete_outline" />
+            </div>
+          </q-item-section>
+          <q-item-section class="text-red-4 text-weight-medium">{{ t("menu.removeAgent") }}</q-item-section>
+        </q-item>
+      </q-list>
+    </div>
+  </div>
 </template>
 
 <script>
@@ -788,3 +892,160 @@ export default {
   },
 };
 </script>
+
+<style scoped>
+.trmm-agent-menu {
+  min-width: 278px;
+  max-width: 340px;
+  max-height: min(76vh, 610px);
+  overflow: hidden;
+}
+
+.trmm-am-header {
+  flex: 0 0 auto;
+  min-height: 36px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.trmm-am-header--dark {
+  background: rgba(15, 23, 42, 0.65);
+}
+
+.trmm-am-header--light {
+  background: #f1f5f9;
+}
+
+.trmm-am-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.trmm-am-dot--positive {
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.28);
+}
+
+.trmm-am-dot--warning {
+  background: #f59e0b;
+}
+
+.trmm-am-dot--negative {
+  background: #ef4444;
+}
+
+.trmm-am-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.trmm-am-section-label {
+  padding: 5px 12px 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+}
+
+body.body--light .trmm-am-section-label {
+  color: #64748b;
+}
+
+.trmm-am-item {
+  min-height: 33px !important;
+  margin: 1px 6px;
+  padding: 3px 8px !important;
+  border-radius: 7px;
+  font-size: 12.5px;
+  transition: background-color 0.13s ease;
+}
+
+.trmm-am-item:hover {
+  background: rgba(148, 163, 184, 0.14);
+}
+
+.trmm-am-item--danger:hover {
+  background: rgba(239, 68, 68, 0.16) !important;
+}
+
+.trmm-am-sep {
+  opacity: 0.5;
+  margin-left: 10px;
+  margin-right: 10px;
+}
+
+.trmm-am-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.trmm-am-icon--blue {
+  background: rgba(59, 130, 246, 0.16);
+  color: #60a5fa;
+}
+
+.trmm-am-icon--sky {
+  background: rgba(14, 165, 233, 0.16);
+  color: #38bdf8;
+}
+
+.trmm-am-icon--teal {
+  background: rgba(20, 184, 166, 0.16);
+  color: #2dd4bf;
+}
+
+.trmm-am-icon--indigo {
+  background: rgba(99, 102, 241, 0.16);
+  color: #818cf8;
+}
+
+.trmm-am-icon--purple {
+  background: rgba(168, 85, 247, 0.16);
+  color: #c084fc;
+}
+
+.trmm-am-icon--amber {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fbbf24;
+}
+
+.trmm-am-icon--orange {
+  background: rgba(249, 115, 22, 0.16);
+  color: #fb923c;
+}
+
+.trmm-am-icon--emerald {
+  background: rgba(34, 197, 94, 0.16);
+  color: #4ade80;
+}
+
+.trmm-am-icon--red {
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+}
+
+.trmm-am-icon--slate {
+  background: rgba(148, 163, 184, 0.16);
+  color: #cbd5e1;
+}
+
+body.body--light .trmm-am-icon--blue { color: #2563eb; }
+body.body--light .trmm-am-icon--sky { color: #0284c7; }
+body.body--light .trmm-am-icon--teal { color: #0f766e; }
+body.body--light .trmm-am-icon--indigo { color: #4f46e5; }
+body.body--light .trmm-am-icon--purple { color: #7e22ce; }
+body.body--light .trmm-am-icon--amber { color: #b45309; }
+body.body--light .trmm-am-icon--orange { color: #c2410c; }
+body.body--light .trmm-am-icon--emerald { color: #15803d; }
+body.body--light .trmm-am-icon--red { color: #dc2626; }
+body.body--light .trmm-am-icon--slate { color: #475569; }
+</style>

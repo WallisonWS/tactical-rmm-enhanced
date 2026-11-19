@@ -1,21 +1,25 @@
 <template>
-  <div v-if="!selectedAgent" class="q-pa-sm">No agent selected</div>
+  <div v-if="!selectedAgent" class="q-pa-md text-grey-6 row items-center q-gutter-x-sm">
+    <q-icon name="space_dashboard" size="20px" />
+    <span>Nenhum agente selecionado</span>
+  </div>
   <div v-else-if="!summary && loading" class="q-pa-md flex flex-center">
     <q-circular-progress
       indeterminate
-      size="50px"
+      size="44px"
       color="primary"
       class="q-ma-md"
     />
   </div>
-  <div v-else-if="summary" class="q-pa-sm">
+  <div v-else-if="summary" class="trmm-summary-root q-pa-sm q-pb-md">
+    <!-- Executive Agent Action Header -->
     <div
-      class="row items-center justify-between wrap q-px-xs q-py-xs"
-      style="min-height: 38px; gap: 6px 12px"
+      class="trmm-summary-header row items-center justify-between wrap q-px-md q-py-xs q-mb-sm"
+      :class="$q.dark.isActive ? 'trmm-summary-card--dark' : 'trmm-summary-card--light'"
     >
       <div
         class="row items-center wrap col-grow"
-        style="min-width: 240px; gap: 4px 8px"
+        style="min-width: 240px; gap: 6px 8px"
       >
         <q-btn
           dense
@@ -23,38 +27,43 @@
           round
           size="sm"
           icon="refresh"
+          color="primary"
           @click="refreshSummary"
-        />
-        <q-icon
-          v-if="summary.status === 'overdue'"
-          name="fas fa-signal"
-          size="1.1em"
-          :color="dash_negative_color"
         >
-          <q-tooltip>Agent overdue</q-tooltip>
-        </q-icon>
-        <q-icon
-          v-else-if="summary.status === 'offline'"
-          name="fas fa-signal"
-          size="1.1em"
-          :color="dash_warning_color"
+          <q-tooltip>Atualizar dados e WMI do equipamento</q-tooltip>
+        </q-btn>
+
+        <div
+          class="trmm-status-pill row items-center no-wrap"
+          :class="
+            summary.status === 'overdue'
+              ? 'trmm-status-pill--negative'
+              : summary.status === 'offline'
+                ? 'trmm-status-pill--warning'
+                : 'trmm-status-pill--positive'
+          "
         >
-          <q-tooltip>{{ store.getters.formatDate(summary.last_seen) }}</q-tooltip>
-        </q-icon>
-        <q-icon
-          v-else
-          name="fas fa-signal"
-          size="1.1em"
-          :color="dash_positive_color"
-        >
-          <q-tooltip>{{ store.getters.formatDate(summary.last_seen) }}</q-tooltip>
-        </q-icon>
-        <b class="text-subtitle2">{{ summary.hostname }}</b>
+          <span class="trmm-status-dot-sm q-mr-xs" />
+          <q-icon name="signal_cellular_alt" size="14px" />
+          <q-tooltip>
+            {{
+              summary.status === "overdue"
+                ? "Agente vencido (Overdue)"
+                : store.getters.formatDate(summary.last_seen)
+            }}
+          </q-tooltip>
+        </div>
+
+        <span class="text-subtitle2 text-weight-bold" style="letter-spacing: 0.01em">
+          {{ summary.hostname }}
+        </span>
+
         <q-badge
           v-if="summary.client_name"
           :color="getEntityBadgeColor(summary.client_name)"
           text-color="white"
-          class="text-weight-bold"
+          class="text-weight-bold q-px-sm"
+          style="border-radius: 6px; padding-top: 3px; padding-bottom: 3px"
         >
           Empresa: {{ summary.client_name }}
         </q-badge>
@@ -62,7 +71,8 @@
           v-if="summary.site_name"
           outline
           :color="getEntityBadgeColor(summary.site_name)"
-          class="text-weight-bold"
+          class="text-weight-bold q-px-sm"
+          style="border-radius: 6px; padding-top: 2px; padding-bottom: 2px"
         >
           Unidade: {{ summary.site_name }}
         </q-badge>
@@ -70,14 +80,22 @@
           v-if="isAgentlessAsset"
           color="blue-grey-7"
           text-color="white"
-          class="text-weight-medium"
+          class="text-weight-medium q-px-sm"
+          style="border-radius: 6px"
         >
           Inventário LAN (Sem Agente)
         </q-badge>
-        <span v-if="summary.maintenance_mode">
-          &bull; <q-badge color="green"> Maintenance Mode </q-badge>
-        </span>
-        <span class="text-caption text-grey-4">
+        <q-badge
+          v-if="summary.maintenance_mode"
+          color="positive"
+          text-color="white"
+          class="text-weight-medium q-px-sm"
+          style="border-radius: 6px"
+        >
+          Modo de Manutenção
+        </q-badge>
+
+        <span class="text-caption" :class="$q.dark.isActive ? 'text-grey-4' : 'text-grey-7'">
           &bull; {{ summary.operating_system }}
           <template v-if="summary.version && !isAgentlessAsset">
             &bull; Agent v{{ summary.version }}
@@ -93,11 +111,10 @@
           no-wrap
           color="primary"
           label="Take Control"
-          icon="computer"
+          icon="connected_tv"
           size="sm"
           no-caps
-          class="q-px-sm"
-          style="white-space: nowrap"
+          class="trmm-sum-btn trmm-sum-btn--primary"
           @click="runTakeControl(selectedAgent)"
         />
         <q-btn
@@ -105,13 +122,12 @@
           dense
           unelevated
           no-wrap
-          color="teal-8"
+          color="teal-7"
           label="Editar Patrimônio / Setor"
           icon="qr_code_2"
           size="sm"
           no-caps
-          class="q-px-sm"
-          style="white-space: nowrap"
+          class="trmm-sum-btn trmm-sum-btn--primary"
           @click="openPatrimonioDialog"
         />
         <q-btn
@@ -123,8 +139,7 @@
           icon="terminal"
           size="sm"
           no-caps
-          class="q-px-sm"
-          style="white-space: nowrap"
+          class="trmm-sum-btn trmm-sum-btn--ghost"
           @click="runRemoteBackground(selectedAgent, summary.plat)"
         />
         <q-btn
@@ -133,11 +148,10 @@
           flat
           no-wrap
           label="Conectar RDP (.rdp)"
-          icon="desktop_windows"
+          icon="cast_connected"
           size="sm"
           no-caps
-          class="q-px-sm"
-          style="white-space: nowrap"
+          class="trmm-sum-btn trmm-sum-btn--ghost"
           :loading="rdpConnecting"
           @click="connectNativeRDP"
         />
@@ -151,8 +165,7 @@
           icon="domain_add"
           size="sm"
           no-caps
-          class="q-px-sm"
-          style="white-space: nowrap"
+          class="trmm-sum-btn"
           @click="showJoinAdDialog = true"
         />
         <q-btn
@@ -163,8 +176,7 @@
           icon="open_in_new"
           size="sm"
           no-caps
-          class="q-px-sm"
-          style="white-space: nowrap"
+          class="trmm-sum-btn trmm-sum-btn--ghost"
           @click="openAgentWindow(selectedAgent)"
         />
         <q-btn-dropdown
@@ -173,83 +185,144 @@
           no-wrap
           size="sm"
           no-caps
+          icon="bolt"
           label="Actions"
-          class="q-px-xs"
-          style="white-space: nowrap"
+          content-class="trmm-popover-menu"
+          class="trmm-sum-btn trmm-sum-btn--ghost"
         >
           <AgentActionMenu :agent="summary" />
         </q-btn-dropdown>
       </div>
     </div>
-    <q-separator class="q-my-xs" />
-    <div class="row q-col-gutter-md">
-      <div class="col-12 col-md-5">
-        <!-- left -->
-        <span class="text-subtitle2 text-bold">Hardware Details</span>
-        <q-list dense>
-          <q-item>
-            <q-item-section avatar>
-              <q-icon name="fas fa-desktop" />
-            </q-item-section>
-            <q-item-section>{{ displayMakeModel }}</q-item-section>
-          </q-item>
-          <q-item>
-            <q-item-section avatar>
-              <q-icon name="fas fa-microchip" />
-            </q-item-section>
-            <q-item-section>{{ displayCpuOrFunction }}</q-item-section>
-          </q-item>
-          <q-item v-if="summary.total_ram">
-            <q-item-section avatar>
-              <q-icon name="fas fa-memory" />
-            </q-item-section>
-            <q-item-section>{{ summary.total_ram }} GB RAM</q-item-section>
-          </q-item>
-          <q-item v-else-if="inventoryTag && inventoryTag.asset_subtype">
-            <q-item-section avatar>
-              <q-icon name="category" />
-            </q-item-section>
-            <q-item-section>Tipo: {{ inventoryTag.asset_subtype }}</q-item-section>
-          </q-item>
 
-          <!-- physical disks -->
-          <q-item v-for="(disk, i) in summary.physical_disks" :key="disk + i">
-            <q-item-section avatar>
-              <q-icon name="far fa-hdd" />
-            </q-item-section>
-            <q-item-section>{{ disk }}</q-item-section>
-          </q-item>
-          <!-- graphics -->
-          <q-item v-if="showGraphicsRow">
-            <q-item-section avatar>
-              <q-icon name="fas fa-tv" />
-            </q-item-section>
-            <q-item-section>{{ summary.graphics }}</q-item-section>
-          </q-item>
-          <!-- serial -->
-          <q-item v-if="serial_number">
-            <q-item-section avatar>
-              <q-icon name="fa-solid fa-barcode" />
-            </q-item-section>
-            <q-item-section>{{ serial_number }}</q-item-section>
-          </q-item>
-          <!-- patrimonio & localizacao -->
-          <q-item>
-            <q-item-section avatar>
-              <q-icon name="qr_code_2" color="teal-5" />
-            </q-item-section>
-            <q-item-section>
-              <div class="row items-center q-gutter-x-xs">
-                <span>
-                  Patrimônio:
-                  <q-badge v-if="inventoryTag && inventoryTag.patrimonio" color="teal-7">
+    <!-- 3 Structured Executive Info Cards -->
+    <div class="row q-col-gutter-sm items-stretch">
+      <!-- Card 1: Hardware & Network Details -->
+      <div class="col-12 col-md-5 flex">
+        <div
+          class="trmm-summary-card full-width q-pa-sm"
+          :class="$q.dark.isActive ? 'trmm-summary-card--dark' : 'trmm-summary-card--light'"
+        >
+          <div class="trmm-card-title row items-center q-mb-xs">
+            <div class="trmm-section-icon trmm-section-icon--blue q-mr-xs">
+              <q-icon name="computer" size="15px" />
+            </div>
+            <span>Hardware Details</span>
+          </div>
+
+          <div class="trmm-spec-list">
+            <div class="trmm-spec-row">
+              <div class="trmm-spec-icon trmm-spec-icon--blue">
+                <q-icon name="devices" size="15px" />
+              </div>
+              <div class="trmm-spec-body">
+                <div class="trmm-spec-label">Modelo / Fabricante</div>
+                <div class="trmm-spec-value">{{ displayMakeModel || "—" }}</div>
+              </div>
+            </div>
+
+            <div class="trmm-spec-row">
+              <div class="trmm-spec-icon trmm-spec-icon--indigo">
+                <q-icon name="memory" size="15px" />
+              </div>
+              <div class="trmm-spec-body">
+                <div class="trmm-spec-label">
+                  {{ isAgentlessAsset ? "Função / Descrição" : "Processador (CPU)" }}
+                </div>
+                <div class="trmm-spec-value">{{ displayCpuOrFunction }}</div>
+              </div>
+            </div>
+
+            <div v-if="summary.total_ram" class="trmm-spec-row">
+              <div class="trmm-spec-icon trmm-spec-icon--teal">
+                <q-icon name="developer_board" size="15px" />
+              </div>
+              <div class="trmm-spec-body">
+                <div class="trmm-spec-label">Memória RAM</div>
+                <div class="trmm-spec-value">{{ summary.total_ram }} GB RAM</div>
+              </div>
+            </div>
+            <div v-else-if="inventoryTag && inventoryTag.asset_subtype" class="trmm-spec-row">
+              <div class="trmm-spec-icon trmm-spec-icon--teal">
+                <q-icon name="category" size="15px" />
+              </div>
+              <div class="trmm-spec-body">
+                <div class="trmm-spec-label">Subtipo do Ativo</div>
+                <div class="trmm-spec-value">{{ inventoryTag.asset_subtype }}</div>
+              </div>
+            </div>
+
+            <div
+              v-for="(disk, i) in summary.physical_disks"
+              :key="disk + i"
+              class="trmm-spec-row"
+            >
+              <div class="trmm-spec-icon trmm-spec-icon--slate">
+                <q-icon name="storage" size="15px" />
+              </div>
+              <div class="trmm-spec-body">
+                <div class="trmm-spec-label">Disco Físico</div>
+                <div class="trmm-spec-value">{{ disk }}</div>
+              </div>
+            </div>
+
+            <div v-if="showGraphicsRow" class="trmm-spec-row">
+              <div class="trmm-spec-icon trmm-spec-icon--purple">
+                <q-icon name="monitor" size="15px" />
+              </div>
+              <div class="trmm-spec-body">
+                <div class="trmm-spec-label">Placa Gráfica (GPU)</div>
+                <div class="trmm-spec-value">{{ summary.graphics }}</div>
+              </div>
+            </div>
+
+            <div v-if="serial_number" class="trmm-spec-row">
+              <div class="trmm-spec-icon trmm-spec-icon--slate">
+                <q-icon name="qr_code" size="15px" />
+              </div>
+              <div class="trmm-spec-body row items-center justify-between no-wrap">
+                <div style="min-width: 0">
+                  <div class="trmm-spec-label">Nº de Série / Service Tag</div>
+                  <div class="trmm-spec-value trmm-mono">{{ serial_number }}</div>
+                </div>
+                <q-btn
+                  dense
+                  flat
+                  round
+                  size="xs"
+                  icon="content_copy"
+                  color="grey-5"
+                  @click="copySpecValue(serial_number)"
+                >
+                  <q-tooltip>Copiar Serial</q-tooltip>
+                </q-btn>
+              </div>
+            </div>
+
+            <!-- Patrimônio & Setor -->
+            <div class="trmm-spec-row">
+              <div class="trmm-spec-icon trmm-spec-icon--teal">
+                <q-icon name="qr_code_2" size="15px" />
+              </div>
+              <div class="trmm-spec-body row items-center justify-between no-wrap">
+                <div class="row items-center wrap" style="gap: 4px 8px; min-width: 0">
+                  <div class="col-12 trmm-spec-label">Patrimônio &amp; Localização</div>
+                  <q-badge
+                    v-if="inventoryTag && inventoryTag.patrimonio"
+                    color="teal-7"
+                    class="text-weight-bold q-px-sm"
+                    style="border-radius: 5px"
+                  >
                     {{ inventoryTag.patrimonio }}
                   </q-badge>
-                  <span v-else class="text-grey-5">Não definido</span>
-                </span>
-                <span v-if="inventoryTag && inventoryTag.sector_location" class="text-caption text-grey-5">
-                  &bull; Setor: {{ inventoryTag.sector_location }}
-                </span>
+                  <span v-else class="text-caption text-grey-5">Não definido</span>
+                  <span
+                    v-if="inventoryTag && inventoryTag.sector_location"
+                    class="text-caption text-grey-5"
+                  >
+                    &bull; Setor: {{ inventoryTag.sector_location }}
+                  </span>
+                </div>
                 <q-btn
                   dense
                   flat
@@ -258,137 +331,258 @@
                   icon="edit"
                   label="Editar"
                   no-caps
+                  class="q-px-xs"
                   @click="openPatrimonioDialog"
                 />
               </div>
-            </q-item-section>
-          </q-item>
-          <q-item>
-            <q-item-section avatar>
-              <q-icon name="fas fa-globe-americas" />
-            </q-item-section>
-            <q-item-section>Public IP: {{ summary.public_ip }}</q-item-section>
-          </q-item>
-          <q-item>
-            <q-item-section avatar>
-              <q-icon name="fas fa-network-wired" />
-            </q-item-section>
-            <q-item-section>LAN IP: {{ summary.local_ips }}</q-item-section>
-          </q-item>
-          <q-item v-if="summary.plat === 'windows'">
-            <q-item-section avatar>
-              <q-icon :name="adDomainInfo.inDomain ? 'domain' : 'domain_disabled'" />
-            </q-item-section>
-            <q-item-section>
-              <div class="row items-center q-gutter-x-xs">
-                <span v-if="adDomainInfo.inDomain">
-                  Domínio AD: <b>{{ adDomainInfo.domainName }}</b>
-                </span>
-                <span v-else class="text-warning">
-                  Fora do AD ({{ adDomainInfo.domainName }})
-                </span>
+            </div>
+
+            <div class="trmm-spec-row">
+              <div class="trmm-spec-icon trmm-spec-icon--sky">
+                <q-icon name="public" size="15px" />
+              </div>
+              <div class="trmm-spec-body row items-center justify-between no-wrap">
+                <div style="min-width: 0">
+                  <div class="trmm-spec-label">Public IP</div>
+                  <div class="trmm-spec-value trmm-mono">{{ summary.public_ip || "—" }}</div>
+                </div>
                 <q-btn
-                  v-if="!adDomainInfo.inDomain"
+                  v-if="summary.public_ip"
+                  dense
+                  flat
+                  round
+                  size="xs"
+                  icon="content_copy"
+                  color="grey-5"
+                  @click="copySpecValue(summary.public_ip)"
+                >
+                  <q-tooltip>Copiar IP Público</q-tooltip>
+                </q-btn>
+              </div>
+            </div>
+
+            <div class="trmm-spec-row">
+              <div class="trmm-spec-icon trmm-spec-icon--emerald">
+                <q-icon name="lan" size="15px" />
+              </div>
+              <div class="trmm-spec-body row items-center justify-between no-wrap">
+                <div style="min-width: 0">
+                  <div class="trmm-spec-label">LAN IP</div>
+                  <div class="trmm-spec-value trmm-mono">{{ summary.local_ips || "—" }}</div>
+                </div>
+                <q-btn
+                  v-if="summary.local_ips"
+                  dense
+                  flat
+                  round
+                  size="xs"
+                  icon="content_copy"
+                  color="grey-5"
+                  @click="copySpecValue(summary.local_ips)"
+                >
+                  <q-tooltip>Copiar IP Local</q-tooltip>
+                </q-btn>
+              </div>
+            </div>
+
+            <div v-if="summary.plat === 'windows'" class="trmm-spec-row">
+              <div
+                class="trmm-spec-icon"
+                :class="adDomainInfo.inDomain ? 'trmm-spec-icon--emerald' : 'trmm-spec-icon--amber'"
+              >
+                <q-icon :name="adDomainInfo.inDomain ? 'domain' : 'domain_disabled'" size="15px" />
+              </div>
+              <div class="trmm-spec-body row items-center justify-between no-wrap">
+                <div style="min-width: 0">
+                  <div class="trmm-spec-label">Active Directory</div>
+                  <div v-if="adDomainInfo.inDomain" class="trmm-spec-value">
+                    Domínio AD: <b>{{ adDomainInfo.domainName }}</b>
+                  </div>
+                  <div v-else class="trmm-spec-value text-amber-5">
+                    Fora do AD ({{ adDomainInfo.domainName }})
+                  </div>
+                </div>
+                <q-btn
+                  v-if="!adDomainInfo.inDomain && !isAgentlessAsset"
                   dense
                   flat
                   size="xs"
-                  color="amber-8"
+                  color="amber-6"
                   icon="domain_add"
                   label="Ingressar no AD"
                   no-caps
+                  class="q-px-xs"
                   @click="showJoinAdDialog = true"
                 />
               </div>
-            </q-item-section>
-          </q-item>
-        </q-list>
-      </div>
-      <div class="col-12 col-md-3">
-        <span class="text-subtitle2 text-bold">Checks Status</span>
-        <br />
-        <div v-if="summary.checks.total !== 0">
-          <q-chip v-if="summary.checks.passing" square size="lg">
-            <q-avatar
-              size="lg"
-              square
-              icon="done"
-              :color="dash_positive_color"
-              text-color="white"
-            />
-            <small>{{ summary.checks.passing }} checks passing</small>
-          </q-chip>
-          <q-chip v-if="summary.checks.failing" square size="lg">
-            <q-avatar
-              size="lg"
-              square
-              icon="cancel"
-              :color="dash_negative_color"
-              text-color="white"
-            />
-            <small>{{ summary.checks.failing }} checks failing</small>
-          </q-chip>
-          <q-chip v-if="summary.checks.warning" square size="lg">
-            <q-avatar
-              size="lg"
-              square
-              icon="warning"
-              :color="dash_warning_color"
-              text-color="white"
-            />
-            <small>{{ summary.checks.warning }} checks warning</small>
-          </q-chip>
-          <q-chip v-if="summary.checks.info" square size="lg">
-            <q-avatar
-              size="lg"
-              square
-              icon="info"
-              :color="dash_info_color"
-              text-color="white"
-            />
-            <small>{{ summary.checks.info }} checks info</small>
-          </q-chip>
-          <span
-            v-if="
-              summary.checks.total !== 0 &&
-              summary.checks.passing === 0 &&
-              summary.checks.failing === 0 &&
-              summary.checks.warning === 0 &&
-              summary.checks.info === 0
-            "
-            >{{ summary.checks.total }} checks awaiting first
-            synchronization</span
-          >
+            </div>
+          </div>
         </div>
-        <div v-else>No checks</div>
-
-        <span
-          v-if="customFields.length > 0"
-          class="text-subtitle2 text-bold block q-mt-xl"
-          >Custom Fields</span
-        >
-        <q-list dense>
-          <q-item v-for="(field, i) in customFields" :key="field + i">
-            <q-item-section thumbnail>
-              <q-icon name="fas fa-user" size="xs" />
-            </q-item-section>
-            <q-item-section>{{ field.name }}: {{ field.value }}</q-item-section>
-          </q-item>
-        </q-list>
       </div>
-      <!-- right -->
-      <div class="col-12 col-md-4">
-        <span class="text-subtitle2 text-bold">Disks</span>
-        <div v-for="disk in disks" :key="disk.device">
-          <span>{{ disk.device }} ({{ disk.fstype }})</span>
-          <q-linear-progress
-            rounded
-            size="15px"
-            :value="disk.percent / 100"
-            :color="diskBarColor(disk.percent)"
-            class="q-mt-sm"
-          />
-          <span>{{ disk.free }} free of {{ disk.total }}</span>
-          <q-separator />
+
+      <!-- Card 2: Checks Status & Custom Fields -->
+      <div class="col-12 col-md-3 flex">
+        <div
+          class="trmm-summary-card full-width q-pa-sm"
+          :class="$q.dark.isActive ? 'trmm-summary-card--dark' : 'trmm-summary-card--light'"
+        >
+          <div class="trmm-card-title row items-center q-mb-sm">
+            <div class="trmm-section-icon trmm-section-icon--emerald q-mr-xs">
+              <q-icon name="health_and_safety" size="15px" />
+            </div>
+            <span>Checks Status</span>
+          </div>
+
+          <div v-if="summary.checks.total !== 0" class="column q-gutter-y-xs">
+            <div
+              v-if="summary.checks.passing"
+              class="trmm-check-pill trmm-check-pill--positive row items-center no-wrap"
+            >
+              <q-icon name="check_circle" size="17px" class="q-mr-xs" />
+              <span class="text-weight-bold q-mr-xs">{{ summary.checks.passing }}</span>
+              <span>checks passing</span>
+            </div>
+            <div
+              v-if="summary.checks.failing"
+              class="trmm-check-pill trmm-check-pill--negative row items-center no-wrap"
+            >
+              <q-icon name="error" size="17px" class="q-mr-xs" />
+              <span class="text-weight-bold q-mr-xs">{{ summary.checks.failing }}</span>
+              <span>checks failing</span>
+            </div>
+            <div
+              v-if="summary.checks.warning"
+              class="trmm-check-pill trmm-check-pill--warning row items-center no-wrap"
+            >
+              <q-icon name="warning" size="17px" class="q-mr-xs" />
+              <span class="text-weight-bold q-mr-xs">{{ summary.checks.warning }}</span>
+              <span>checks warning</span>
+            </div>
+            <div
+              v-if="summary.checks.info"
+              class="trmm-check-pill trmm-check-pill--info row items-center no-wrap"
+            >
+              <q-icon name="info" size="17px" class="q-mr-xs" />
+              <span class="text-weight-bold q-mr-xs">{{ summary.checks.info }}</span>
+              <span>checks info</span>
+            </div>
+            <div
+              v-if="
+                summary.checks.total !== 0 &&
+                summary.checks.passing === 0 &&
+                summary.checks.failing === 0 &&
+                summary.checks.warning === 0 &&
+                summary.checks.info === 0
+              "
+              class="text-caption text-grey-5 q-pa-xs"
+            >
+              {{ summary.checks.total }} checks awaiting first synchronization
+            </div>
+          </div>
+          <div
+            v-else
+            class="trmm-empty-mini row items-center no-wrap q-pa-sm"
+            :class="$q.dark.isActive ? 'trmm-empty-mini--dark' : 'trmm-empty-mini--light'"
+          >
+            <q-icon name="task_alt" size="18px" color="grey-5" class="q-mr-sm" />
+            <span class="text-caption text-grey-5">No checks</span>
+          </div>
+
+          <template v-if="customFields.length > 0">
+            <q-separator class="q-my-sm" />
+            <div class="trmm-card-title row items-center q-mb-xs">
+              <div class="trmm-section-icon trmm-section-icon--purple q-mr-xs">
+                <q-icon name="tune" size="15px" />
+              </div>
+              <span>Custom Fields</span>
+            </div>
+            <div class="column q-gutter-y-xs">
+              <div
+                v-for="(field, i) in customFields"
+                :key="field + i"
+                class="trmm-custom-field-row row items-center justify-between q-px-sm q-py-xs"
+              >
+                <span class="text-caption text-grey-5">{{ field.name }}</span>
+                <span class="text-caption text-weight-bold">{{ field.value }}</span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Card 3: Storage / Disks -->
+      <div class="col-12 col-md-4 flex">
+        <div
+          class="trmm-summary-card full-width q-pa-sm"
+          :class="$q.dark.isActive ? 'trmm-summary-card--dark' : 'trmm-summary-card--light'"
+        >
+          <div class="trmm-card-title row items-center q-mb-sm">
+            <div class="trmm-section-icon trmm-section-icon--sky q-mr-xs">
+              <q-icon name="sd_storage" size="15px" />
+            </div>
+            <span>Disks</span>
+          </div>
+
+          <div v-if="disks.length > 0" class="column q-gutter-y-sm">
+            <div
+              v-for="disk in disks"
+              :key="disk.device"
+              class="trmm-disk-card q-pa-sm"
+              :class="$q.dark.isActive ? 'trmm-disk-card--dark' : 'trmm-disk-card--light'"
+            >
+              <div class="row items-center justify-between q-mb-xs">
+                <div class="row items-center no-wrap" style="gap: 6px">
+                  <q-icon name="storage" size="16px" color="primary" />
+                  <span class="text-subtitle2 text-weight-bold">{{ disk.device }}</span>
+                  <q-badge
+                    :color="$q.dark.isActive ? 'blue-grey-9' : 'blue-grey-1'"
+                    :text-color="$q.dark.isActive ? 'grey-4' : 'blue-grey-8'"
+                    style="font-size: 10px; border-radius: 5px"
+                  >
+                    {{ disk.fstype }}
+                  </q-badge>
+                </div>
+                <q-badge
+                  rounded
+                  :color="diskBarColor(disk.percent)"
+                  text-color="white"
+                  class="text-weight-bold"
+                  style="font-size: 11px; padding: 2px 7px"
+                >
+                  {{ Math.round(disk.percent) }}%
+                </q-badge>
+              </div>
+
+              <q-linear-progress
+                rounded
+                size="10px"
+                :value="disk.percent / 100"
+                :color="diskBarColor(disk.percent)"
+                track-color="grey-8"
+                class="q-my-xs"
+              />
+
+              <div class="row items-center justify-between text-caption q-mt-xs">
+                <span :class="$q.dark.isActive ? 'text-grey-3' : 'text-grey-8'">
+                  {{ disk.free }} free of {{ disk.total }}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div
+            v-else
+            class="trmm-empty-mini row items-center no-wrap q-pa-sm"
+            :class="$q.dark.isActive ? 'trmm-empty-mini--dark' : 'trmm-empty-mini--light'"
+          >
+            <q-icon name="storage" size="18px" color="grey-5" class="q-mr-sm" />
+            <span class="text-caption text-grey-5">
+              {{
+                isAgentlessAsset
+                  ? "Telemetria de disco disponível com Agente Tactical"
+                  : "Nenhum volume reportado"
+              }}
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -514,6 +708,7 @@
 // composition imports
 import { ref, computed, watch, onMounted } from "vue";
 import { useStore } from "vuex";
+import { copyToClipboard } from "quasar";
 import {
   fetchAgent,
   refreshAgentWMI,
@@ -857,6 +1052,13 @@ export default {
       if (selectedAgent.value) getSummary();
     });
 
+    function copySpecValue(val) {
+      if (!val) return;
+      copyToClipboard(String(val)).then(() => {
+        notifySuccess("Copiado para a área de transferência");
+      });
+    }
+
     return {
       // reactive data
       summary,
@@ -897,7 +1099,278 @@ export default {
       openPatrimonioDialog,
       submitPatrimonio,
       getEntityBadgeColor,
+      copySpecValue,
     };
   },
 };
 </script>
+
+<style scoped>
+.trmm-summary-header {
+  border-radius: 10px;
+  min-height: 44px;
+  gap: 8px 12px;
+}
+
+.trmm-summary-card {
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.trmm-summary-card--dark {
+  background: rgba(20, 26, 36, 0.7);
+}
+
+.trmm-summary-card--light {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+.trmm-status-pill {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.trmm-status-pill--positive {
+  background: rgba(34, 197, 94, 0.16);
+  color: #4ade80;
+}
+
+.trmm-status-pill--warning {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+}
+
+.trmm-status-pill--negative {
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+}
+
+.trmm-status-dot-sm {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.trmm-sum-btn {
+  border-radius: 7px !important;
+  padding: 2px 10px !important;
+  min-height: 28px !important;
+  font-size: 12px !important;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.trmm-sum-btn--primary {
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(25, 118, 210, 0.28);
+}
+
+.trmm-sum-btn--ghost {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.trmm-sum-btn--ghost:hover {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: rgba(148, 163, 184, 0.42);
+}
+
+.trmm-card-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.015em;
+}
+
+.trmm-section-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.trmm-section-icon--blue {
+  background: rgba(59, 130, 246, 0.18);
+  color: #60a5fa;
+}
+
+.trmm-section-icon--emerald {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+}
+
+.trmm-section-icon--sky {
+  background: rgba(14, 165, 233, 0.18);
+  color: #38bdf8;
+}
+
+.trmm-section-icon--purple {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+}
+
+.trmm-spec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.trmm-spec-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  transition: background-color 0.14s ease;
+}
+
+.trmm-spec-row:hover {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.trmm-spec-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.trmm-spec-icon--blue {
+  background: rgba(59, 130, 246, 0.14);
+  color: #60a5fa;
+}
+
+.trmm-spec-icon--indigo {
+  background: rgba(99, 102, 241, 0.16);
+  color: #818cf8;
+}
+
+.trmm-spec-icon--teal {
+  background: rgba(20, 184, 166, 0.16);
+  color: #2dd4bf;
+}
+
+.trmm-spec-icon--slate {
+  background: rgba(148, 163, 184, 0.14);
+  color: #94a3b8;
+}
+
+.trmm-spec-icon--purple {
+  background: rgba(168, 85, 247, 0.16);
+  color: #c084fc;
+}
+
+.trmm-spec-icon--sky {
+  background: rgba(14, 165, 233, 0.16);
+  color: #38bdf8;
+}
+
+.trmm-spec-icon--emerald {
+  background: rgba(34, 197, 94, 0.16);
+  color: #4ade80;
+}
+
+.trmm-spec-icon--amber {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+}
+
+.trmm-spec-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.trmm-spec-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  line-height: 1.2;
+}
+
+body.body--light .trmm-spec-label {
+  color: #64748b;
+}
+
+.trmm-spec-value {
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.trmm-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.trmm-check-pill {
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.trmm-check-pill--positive {
+  background: rgba(34, 197, 94, 0.14);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.trmm-check-pill--negative {
+  background: rgba(239, 68, 68, 0.14);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+}
+
+.trmm-check-pill--warning {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+.trmm-check-pill--info {
+  background: rgba(14, 165, 233, 0.14);
+  color: #38bdf8;
+  border: 1px solid rgba(14, 165, 233, 0.28);
+}
+
+.trmm-empty-mini {
+  border-radius: 8px;
+  border: 1px dashed rgba(148, 163, 184, 0.24);
+}
+
+.trmm-empty-mini--dark {
+  background: rgba(148, 163, 184, 0.04);
+}
+
+.trmm-empty-mini--light {
+  background: #f8fafc;
+}
+
+.trmm-custom-field-row {
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.trmm-disk-card {
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.trmm-disk-card--dark {
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.trmm-disk-card--light {
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.08);
+}
+</style>
